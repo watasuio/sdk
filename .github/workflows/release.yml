@@ -108,7 +108,7 @@ jobs:
 
       - name: Publish TypeScript package
         working-directory: ts
-        run: npm publish
+        run: npm publish --access public
 
       - name: Authenticate crates.io trusted publisher
         id: crates_auth
