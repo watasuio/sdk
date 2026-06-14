@@ -93,28 +93,32 @@ export class CommandHandle implements Partial<CommandResult> {
   }
 
   private async handleEvents(): Promise<void> {
-    for await (const frame of this.events) {
-      const type = frame.type
-      if (type === 'started' || type === 'ready' || type === 'pong') continue
-      if (type === 'stdout') {
-        const out = base64DecodeText(frame.data)
-        this._stdout += out
-        await this.onStdout?.(out)
-      } else if (type === 'stderr') {
-        const out = base64DecodeText(frame.data)
-        this._stderr += out
-        await this.onStderr?.(out)
-      } else if (type === 'exit') {
-        this.result = {
-          exitCode: Number(frame.exit_code ?? frame.exitCode ?? 0),
-          error: typeof frame.error === 'string' ? frame.error : undefined,
-          stdout: this._stdout,
-          stderr: this._stderr,
+    try {
+      for await (const frame of this.events) {
+        const type = frame.type
+        if (type === 'started' || type === 'ready' || type === 'pong') continue
+        if (type === 'stdout') {
+          const out = base64DecodeText(frame.data)
+          this._stdout += out
+          await this.onStdout?.(out)
+        } else if (type === 'stderr') {
+          const out = base64DecodeText(frame.data)
+          this._stderr += out
+          await this.onStderr?.(out)
+        } else if (type === 'exit') {
+          this.result = {
+            exitCode: Number(frame.exit_code ?? frame.exitCode ?? 0),
+            error: typeof frame.error === 'string' ? frame.error : undefined,
+            stdout: this._stdout,
+            stderr: this._stderr,
+          }
+          return
+        } else if (type === 'error') {
+          throw new SandboxError(String(frame.message ?? frame.code ?? 'process error'))
         }
-        return
-      } else if (type === 'error') {
-        throw new SandboxError(String(frame.message ?? frame.code ?? 'process error'))
       }
+    } finally {
+      this.socket.close()
     }
   }
 }

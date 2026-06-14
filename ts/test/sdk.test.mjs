@@ -42,6 +42,22 @@ test('command handle raises on non-zero exit and preserves output', async () => 
   })
 })
 
+test('command handle closes stream after terminal exit frame', async () => {
+  async function* frames() {
+    yield { type: 'stdout', data: 'b2sK' }
+    yield { type: 'exit', exit_code: 0 }
+  }
+  let closeCount = 0
+  const socket = { close() { closeCount += 1 } }
+  const handle = new CommandHandle(123, socket, async () => true, frames())
+
+  const result = await handle.wait()
+
+  assert.equal(result.stdout, 'ok\n')
+  assert.equal(result.exitCode, 0)
+  assert.equal(closeCount, 1)
+})
+
 test('sandbox construction requires a session', () => {
   assert.throws(
     () =>
