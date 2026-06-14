@@ -35,15 +35,21 @@ await sbx.kill()
 ```rust
 use watasu::{CreateOptions, Sandbox};
 
-# fn main() -> watasu::Result<()> {
-let sbx = Sandbox::create(CreateOptions::default())?;
-sbx.files.write("/home/user/a.py", "print(2 + 2)")?;
-let result = sbx.commands.run("python /home/user/a.py")?;
-println!("{}", result.stdout);
-sbx.kill()?;
-# Ok(())
-# }
+#[tokio::main]
+async fn main() -> watasu::Result<()> {
+    let sbx = Sandbox::create(CreateOptions::default()).await?;
+    sbx.files.write("/home/user/a.py", "print(2 + 2)").await?;
+    let result = sbx.commands.run("python /home/user/a.py").await?;
+    println!("{}", result.stdout);
+    sbx.kill().await?;
+    Ok(())
+}
 ```
+
+The Rust crate is async and uses Tokio. It defaults to `rustls-tls`; use
+`default-features = false` with `features = ["native-tls"]` or
+`features = ["native-tls-vendored"]` if your deployment needs native OpenSSL
+TLS instead.
 
 Set `WATASU_API_KEY` before use. The `Sandbox`, `commands`, and `files` surfaces
 are implemented over Watasu's control-plane REST API and data-plane

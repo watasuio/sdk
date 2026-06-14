@@ -1,6 +1,6 @@
 //! Watasu Rust SDK.
 //!
-//! The crate exposes a small synchronous API for creating sandboxes, running
+//! The crate exposes a small async API for creating sandboxes, running
 //! commands, and reading/writing files. `Sandbox::create` and
 //! `Sandbox::connect` return only after the Watasu API has supplied a usable
 //! data-plane session, so callers do not need to poll sandbox readiness.
@@ -8,17 +8,23 @@
 //! ```no_run
 //! use watasu::{CreateOptions, Sandbox};
 //!
-//! # fn main() -> watasu::Result<()> {
-//! let sandbox = Sandbox::create(CreateOptions::default())?;
-//! sandbox.files.write("/home/user/a.py", "print(2 + 2)")?;
-//! let result = sandbox.commands.run("python /home/user/a.py")?;
+//! # async fn run() -> watasu::Result<()> {
+//! let sandbox = Sandbox::create(CreateOptions::default()).await?;
+//! sandbox.files.write("/home/user/a.py", "print(2 + 2)").await?;
+//! let result = sandbox.commands.run("python /home/user/a.py").await?;
 //! assert_eq!(result.stdout.trim(), "4");
-//! sandbox.kill()?;
+//! sandbox.kill().await?;
 //! # Ok(())
 //! # }
 //! ```
 
 #![warn(missing_docs)]
+
+#[cfg(all(
+    any(feature = "rustls-tls", feature = "rustls-tls-native-roots"),
+    any(feature = "native-tls", feature = "native-tls-vendored")
+))]
+compile_error!("enable either a rustls TLS feature or a native-tls feature, not both");
 
 mod commands;
 mod config;

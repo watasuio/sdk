@@ -70,8 +70,8 @@ impl Commands {
     }
 
     /// List processes currently known by the sandbox runtime.
-    pub fn list(&self) -> Result<Vec<ProcessInfo>> {
-        let payload = self.data_plane.get_json("/runtime/v1/process")?;
+    pub async fn list(&self) -> Result<Vec<ProcessInfo>> {
+        let payload = self.data_plane.get_json("/runtime/v1/process").await?;
         Ok(payload
             .get("processes")
             .and_then(Value::as_array)
@@ -83,68 +83,75 @@ impl Commands {
     }
 
     /// Send `SIGKILL` to a process by pid.
-    pub fn kill(&self, pid: impl ToString) -> Result<bool> {
-        self.data_plane.post_json(
-            &format!("/runtime/v1/process/{}/signal", pid.to_string()),
-            serde_json::json!({"signal": "SIGKILL"}),
-        )?;
+    pub async fn kill(&self, pid: impl ToString) -> Result<bool> {
+        self.data_plane
+            .post_json(
+                &format!("/runtime/v1/process/{}/signal", pid.to_string()),
+                serde_json::json!({"signal": "SIGKILL"}),
+            )
+            .await?;
         Ok(true)
     }
 
     /// Run a shell command and wait for it to exit.
-    pub fn run(&self, cmd: &str) -> Result<CommandResult> {
-        self.run_with_options(cmd, CommandOptions::default())
+    pub async fn run(&self, cmd: &str) -> Result<CommandResult> {
+        self.run_with_options(cmd, CommandOptions::default()).await
     }
 
     /// Run a shell command with explicit command options and wait for it to exit.
-    pub fn run_with_options(&self, cmd: &str, opts: CommandOptions) -> Result<CommandResult> {
-        let mut handle = self.start(cmd, opts)?;
-        handle.wait()
+    pub async fn run_with_options(&self, cmd: &str, opts: CommandOptions) -> Result<CommandResult> {
+        let mut handle = self.start(cmd, opts).await?;
+        handle.wait().await
     }
 
     /// Start a shell command and return a live handle immediately.
-    pub fn run_background(&self, cmd: &str) -> Result<CommandHandle> {
+    pub async fn run_background(&self, cmd: &str) -> Result<CommandHandle> {
         self.run_background_with_options(cmd, CommandOptions::default())
+            .await
     }
 
     /// Start a shell command with explicit options and return a live handle immediately.
-    pub fn run_background_with_options(
+    pub async fn run_background_with_options(
         &self,
         cmd: &str,
         opts: CommandOptions,
     ) -> Result<CommandHandle> {
-        self.start(cmd, opts)
+        self.start(cmd, opts).await
     }
 
     /// Reconnect to a live process stream by pid.
-    pub fn connect(&self, pid: impl ToString) -> Result<CommandHandle> {
+    pub async fn connect(&self, pid: impl ToString) -> Result<CommandHandle> {
         let pid = pid.to_string();
         let mut socket = ProcessSocket::connect(
             &self.data_plane.base_url,
             &self.data_plane.token,
             &format!("/runtime/v1/process/{pid}/connect?since=0"),
-        )?;
-        let first = next_started(&mut socket)?;
+        )
+        .await?;
+        let first = next_started(&mut socket).await?;
         let actual_pid = frame_pid(&first).unwrap_or(pid);
         Ok(CommandHandle::new(actual_pid, socket, self.clone()))
     }
 
-    fn start(&self, cmd: &str, opts: CommandOptions) -> Result<CommandHandle> {
+    async fn start(&self, cmd: &str, opts: CommandOptions) -> Result<CommandHandle> {
         let mut socket = ProcessSocket::connect(
             &self.data_plane.base_url,
             &self.data_plane.token,
             "/runtime/v1/process",
-        )?;
-        socket.send_json(&serde_json::json!({
-            "type": "start",
-            "cmd": "/bin/bash",
-            "args": ["-l", "-c", cmd],
-            "environment": self.sandbox_envs,
-            "envs": self.sandbox_envs,
-            "stdin": opts.stdin,
-            "timeout_ms": opts.timeout_ms.unwrap_or(60_000)
-        }))?;
-        let first = next_started(&mut socket)?;
+        )
+        .await?;
+        socket
+            .send_json(&serde_json::json!({
+                "type": "start",
+                "cmd": "/bin/bash",
+                "args": ["-l", "-c", cmd],
+                "environment": self.sandbox_envs,
+                "envs": self.sandbox_envs,
+                "stdin": opts.stdin,
+                "timeout_ms": opts.timeout_ms.unwrap_or(60_000)
+            }))
+            .await?;
+        let first = next_started(&mut socket).await?;
         let pid = frame_pid(&first)
             .ok_or_else(|| Error::Sandbox("process started frame did not include pid".into()))?;
         Ok(CommandHandle::new(pid, socket, self.clone()))
@@ -173,8 +180,8 @@ impl CommandHandle {
     }
 
     /// Wait until the process exits and return captured output.
-    pub fn wait(&mut self) -> Result<CommandResult> {
-        while let Some(frame) = self.socket.next_frame()? {
+    pub async fn wait(&mut self) -> Result<CommandResult> {
+        while let Some(frame) = self.socket.next_frame().await? {
             match frame.get("type").and_then(Value::as_str) {
                 Some("started" | "ready" | "pong") => continue,
                 Some("stdout") => self.stdout.push_str(&decode_runtime_data(
@@ -198,11 +205,14 @@ impl CommandHandle {
                             .map(ToOwned::to_owned),
                     };
                     if result.exit_code != 0 {
+                        let _ = self.socket.close().await;
                         return Err(Error::CommandExit { result });
                     }
+                    let _ = self.socket.close().await;
                     return Ok(result);
                 }
                 Some("error") => {
+                    let _ = self.socket.close().await;
                     return Err(Error::Sandbox(
                         frame
                             .get("message")
@@ -210,7 +220,7 @@ impl CommandHandle {
                             .and_then(Value::as_str)
                             .unwrap_or("process error")
                             .to_string(),
-                    ))
+                    ));
                 }
                 _ => continue,
             }
@@ -219,18 +229,18 @@ impl CommandHandle {
     }
 
     /// Kill the process.
-    pub fn kill(&self) -> Result<bool> {
-        self.commands.kill(&self.pid)
+    pub async fn kill(&self) -> Result<bool> {
+        self.commands.kill(&self.pid).await
     }
 
     /// Send stdin bytes to the process.
-    pub fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
-        self.socket.send_stdin(data)
+    pub async fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
+        self.socket.send_stdin(data).await
     }
 }
 
-fn next_started(socket: &mut ProcessSocket) -> Result<Value> {
-    while let Some(frame) = socket.next_frame()? {
+async fn next_started(socket: &mut ProcessSocket) -> Result<Value> {
+    while let Some(frame) = socket.next_frame().await? {
         if frame.get("type").and_then(Value::as_str) == Some("started") {
             return Ok(frame);
         }

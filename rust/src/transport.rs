@@ -1,7 +1,6 @@
 use std::time::Duration;
 
-use reqwest::blocking::{Client, Response};
-use reqwest::Method;
+use reqwest::{Client, Method, Response};
 use serde_json::Value;
 
 use crate::config::ConnectionConfig;
@@ -21,23 +20,23 @@ impl ControlClient {
         Ok(Self { config, client })
     }
 
-    pub(crate) fn get(&self, path: &str) -> Result<Value> {
-        self.request(Method::GET, path, None)
+    pub(crate) async fn get(&self, path: &str) -> Result<Value> {
+        self.request(Method::GET, path, None).await
     }
 
-    pub(crate) fn post(&self, path: &str, body: Value) -> Result<Value> {
-        self.request(Method::POST, path, Some(body))
+    pub(crate) async fn post(&self, path: &str, body: Value) -> Result<Value> {
+        self.request(Method::POST, path, Some(body)).await
     }
 
-    pub(crate) fn patch(&self, path: &str, body: Value) -> Result<Value> {
-        self.request(Method::PATCH, path, Some(body))
+    pub(crate) async fn patch(&self, path: &str, body: Value) -> Result<Value> {
+        self.request(Method::PATCH, path, Some(body)).await
     }
 
-    pub(crate) fn delete(&self, path: &str) -> Result<Value> {
-        self.request(Method::DELETE, path, None)
+    pub(crate) async fn delete(&self, path: &str) -> Result<Value> {
+        self.request(Method::DELETE, path, None).await
     }
 
-    fn request(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
+    async fn request(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
         let api_key = self.config.api_key.as_ref().ok_or(Error::MissingApiKey)?;
         let mut request = self
             .client
@@ -46,7 +45,7 @@ impl ControlClient {
         if let Some(body) = body {
             request = request.json(&body);
         }
-        json_response(request.send()?)
+        json_response(request.send().await?).await
     }
 }
 
@@ -69,72 +68,81 @@ impl DataPlaneClient {
         })
     }
 
-    pub(crate) fn get_json(&self, path: &str) -> Result<Value> {
+    pub(crate) async fn get_json(&self, path: &str) -> Result<Value> {
         json_response(
             self.client
                 .get(join_url(&self.base_url, path))
                 .bearer_auth(&self.token)
-                .send()?,
+                .send()
+                .await?,
         )
+        .await
     }
 
-    pub(crate) fn post_json(&self, path: &str, body: Value) -> Result<Value> {
+    pub(crate) async fn post_json(&self, path: &str, body: Value) -> Result<Value> {
         json_response(
             self.client
                 .post(join_url(&self.base_url, path))
                 .bearer_auth(&self.token)
                 .json(&body)
-                .send()?,
+                .send()
+                .await?,
         )
+        .await
     }
 
-    pub(crate) fn delete_json(&self, path: &str) -> Result<Value> {
+    pub(crate) async fn delete_json(&self, path: &str) -> Result<Value> {
         json_response(
             self.client
                 .delete(join_url(&self.base_url, path))
                 .bearer_auth(&self.token)
-                .send()?,
+                .send()
+                .await?,
         )
+        .await
     }
 
-    pub(crate) fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
+    pub(crate) async fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
         let response = self
             .client
             .get(join_url(&self.base_url, path))
             .bearer_auth(&self.token)
-            .send()?;
+            .send()
+            .await?;
         if !response.status().is_success() {
             return Err(Error::from_status(
                 response.status(),
-                &read_json_or_text(response)?,
+                &read_json_or_text(response).await?,
             ));
         }
-        Ok(response.bytes()?.to_vec())
+        Ok(response.bytes().await?.to_vec())
     }
 
-    pub(crate) fn put_bytes(&self, path: &str, data: Vec<u8>) -> Result<Value> {
+    pub(crate) async fn put_bytes(&self, path: &str, data: Vec<u8>) -> Result<Value> {
         json_response(
             self.client
                 .put(join_url(&self.base_url, path))
                 .bearer_auth(&self.token)
                 .header("content-type", "application/octet-stream")
                 .body(data)
-                .send()?,
+                .send()
+                .await?,
         )
+        .await
     }
 }
 
-fn json_response(response: Response) -> Result<Value> {
+async fn json_response(response: Response) -> Result<Value> {
     let status = response.status();
-    let payload = read_json_or_text(response)?;
+    let payload = read_json_or_text(response).await?;
     if !status.is_success() {
         return Err(Error::from_status(status, &payload));
     }
     Ok(payload)
 }
 
-fn read_json_or_text(response: Response) -> Result<Value> {
-    let text = response.text()?;
+async fn read_json_or_text(response: Response) -> Result<Value> {
+    let text = response.text().await?;
     if text.trim().is_empty() {
         return Ok(Value::Object(Default::default()));
     }

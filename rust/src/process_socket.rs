@@ -1,64 +1,74 @@
-use std::io::ErrorKind;
-use std::net::TcpStream;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
-use http::Request;
+use futures_util::{SinkExt, StreamExt};
+use http::header::{HeaderName, HeaderValue};
 use serde_json::Value;
-use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{connect, Error as WebSocketError, Message, WebSocket};
+use tokio::net::TcpStream;
+use tokio::time::timeout;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 use crate::config::KEEPALIVE_PING_INTERVAL_SECS;
 use crate::error::{Error, Result};
 
 /// Streaming WebSocket connection to the sandbox process runtime.
 pub struct ProcessSocket {
-    socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
 
 impl ProcessSocket {
     /// Connect to a process runtime WebSocket path with bearer-token auth.
-    pub fn connect(base_url: &str, token: &str, path: &str) -> Result<Self> {
-        let request = Request::builder()
-            .uri(ws_url(base_url, path)?)
-            .header("Authorization", format!("Bearer {token}"))
-            .body(())?;
-        let (mut socket, _response) = connect(request)?;
-        set_read_timeout(
-            &mut socket,
-            Some(Duration::from_secs(KEEPALIVE_PING_INTERVAL_SECS / 2)),
-        )?;
+    pub async fn connect(base_url: &str, token: &str, path: &str) -> Result<Self> {
+        let mut request = ws_url(base_url, path)?.into_client_request()?;
+        request.headers_mut().insert(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {token}"))?,
+        );
+        let (socket, _response) = connect_async(request).await?;
         Ok(Self { socket })
     }
 
     /// Send a JSON frame to the process runtime.
-    pub fn send_json(&mut self, payload: &Value) -> Result<()> {
+    pub async fn send_json(&mut self, payload: &Value) -> Result<()> {
         self.socket
-            .send(Message::Text(payload.to_string().into()))?;
+            .send(Message::Text(payload.to_string().into()))
+            .await?;
         Ok(())
     }
 
     /// Send stdin bytes encoded in the sandbox runtime protocol.
-    pub fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
+    pub async fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
         self.send_json(&serde_json::json!({
             "type": "stdin",
             "data": encode_runtime_data(data)
         }))
+        .await
     }
 
     /// Send a WebSocket ping frame.
-    pub fn send_ping(&mut self) -> Result<()> {
+    pub async fn send_ping(&mut self) -> Result<()> {
         self.socket
-            .send(Message::Ping(b"watasu-sdk".to_vec().into()))?;
+            .send(Message::Ping(b"watasu-sdk".to_vec().into()))
+            .await?;
+        Ok(())
+    }
+
+    /// Close the local WebSocket stream.
+    pub async fn close(&mut self) -> Result<()> {
+        self.socket.close(None).await?;
         Ok(())
     }
 
     /// Read the next JSON process frame.
-    pub fn next_frame(&mut self) -> Result<Option<Value>> {
+    pub async fn next_frame(&mut self) -> Result<Option<Value>> {
+        let idle = Duration::from_secs((KEEPALIVE_PING_INTERVAL_SECS / 2).max(1));
+
         loop {
-            match self.socket.read() {
-                Ok(message) => match message {
+            match timeout(idle, self.socket.next()).await {
+                Ok(Some(Ok(message))) => match message {
                     Message::Text(text) => {
                         let frame: Value = serde_json::from_str(&text)?;
                         match frame.get("type").and_then(Value::as_str) {
@@ -80,17 +90,16 @@ impl ProcessSocket {
                         ))
                     }
                     Message::Close(_) => return Ok(None),
-                    Message::Ping(payload) => self.socket.send(Message::Pong(payload))?,
+                    Message::Ping(payload) => self.socket.send(Message::Pong(payload)).await?,
                     Message::Pong(_) => continue,
                     Message::Frame(_) => continue,
                 },
-                Err(WebSocketError::Io(error))
-                    if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
-                {
-                    self.send_ping()?;
+                Ok(Some(Err(error))) => return Err(error.into()),
+                Ok(None) => return Ok(None),
+                Err(_elapsed) => {
+                    self.send_ping().await?;
                     continue;
                 }
-                Err(error) => return Err(error.into()),
             }
         }
     }
@@ -112,22 +121,6 @@ pub fn decode_runtime_data(value: &str) -> String {
         .decode(value)
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_else(|_| value.to_string())
-}
-
-fn set_read_timeout(
-    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
-    timeout: Option<Duration>,
-) -> Result<()> {
-    match socket.get_mut() {
-        MaybeTlsStream::Plain(stream) => stream.set_read_timeout(timeout)?,
-        MaybeTlsStream::Rustls(stream) => stream.sock.set_read_timeout(timeout)?,
-        _ => {
-            return Err(Error::Sandbox(
-                "unsupported websocket transport stream".into(),
-            ))
-        }
-    }
-    Ok(())
 }
 
 fn ws_url(base_url: &str, path: &str) -> Result<String> {

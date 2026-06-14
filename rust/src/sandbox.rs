@@ -92,7 +92,7 @@ pub struct Sandbox {
 
 impl Sandbox {
     /// Create a sandbox and return it only after the API supplies a data-plane session.
-    pub fn create(opts: CreateOptions) -> Result<Self> {
+    pub async fn create(opts: CreateOptions) -> Result<Self> {
         let config = ConnectionConfig::new(opts.connection.clone());
         let control = ControlClient::new(config.clone())?;
         let mut sandbox = serde_json::Map::new();
@@ -124,20 +124,24 @@ impl Sandbox {
             sandbox.insert("team".into(), Value::String(team));
         }
 
-        let response = control.post("/sandboxes", serde_json::json!({ "sandbox": sandbox }))?;
+        let response = control
+            .post("/sandboxes", serde_json::json!({ "sandbox": sandbox }))
+            .await?;
         Self::from_response(config, control, response, opts.envs)
     }
 
     /// Connect to an existing sandbox and return it with a fresh data-plane session.
-    pub fn connect(sandbox_id: impl ToString, connection: ConnectionOptions) -> Result<Self> {
+    pub async fn connect(sandbox_id: impl ToString, connection: ConnectionOptions) -> Result<Self> {
         let sandbox_id = sandbox_id.to_string();
         let config = ConnectionConfig::new(connection);
         let control = ControlClient::new(config.clone())?;
-        let info = control.get(&format!("/sandboxes/{sandbox_id}"))?;
-        let response = control.post(
-            &format!("/sandboxes/{sandbox_id}/connect"),
-            serde_json::json!({ "connect": {} }),
-        )?;
+        let info = control.get(&format!("/sandboxes/{sandbox_id}")).await?;
+        let response = control
+            .post(
+                &format!("/sandboxes/{sandbox_id}/connect"),
+                serde_json::json!({ "connect": {} }),
+            )
+            .await?;
         let mut sandbox = Self::from_response(config, control, response, Default::default())?;
         if sandbox.sandbox == Value::Null {
             sandbox.sandbox = info.get("sandbox").cloned().unwrap_or(Value::Null);
@@ -146,34 +150,39 @@ impl Sandbox {
     }
 
     /// Destroy this sandbox.
-    pub fn kill(&self) -> Result<bool> {
+    pub async fn kill(&self) -> Result<bool> {
         self.control
-            .delete(&format!("/sandboxes/{}", self.sandbox_id))?;
+            .delete(&format!("/sandboxes/{}", self.sandbox_id))
+            .await?;
         Ok(true)
     }
 
     /// Set this sandbox's lifetime in seconds.
-    pub fn set_timeout(&self, timeout_seconds: u64) -> Result<()> {
-        self.control.patch(
-            &format!("/sandboxes/{}", self.sandbox_id),
-            serde_json::json!({"sandbox": {"timeout_seconds": timeout_seconds}}),
-        )?;
+    pub async fn set_timeout(&self, timeout_seconds: u64) -> Result<()> {
+        self.control
+            .patch(
+                &format!("/sandboxes/{}", self.sandbox_id),
+                serde_json::json!({"sandbox": {"timeout_seconds": timeout_seconds}}),
+            )
+            .await?;
         Ok(())
     }
 
     /// Fetch latest control-plane metadata for this sandbox.
-    pub fn get_info(&self) -> Result<SandboxInfo> {
+    pub async fn get_info(&self) -> Result<SandboxInfo> {
         let payload = self
             .control
-            .get(&format!("/sandboxes/{}", self.sandbox_id))?;
+            .get(&format!("/sandboxes/{}", self.sandbox_id))
+            .await?;
         Ok(sandbox_info(payload.get("sandbox").unwrap_or(&payload)))
     }
 
     /// Return the public hostname for an exposed sandbox port.
-    pub fn get_host(&self, port: u16) -> Result<String> {
+    pub async fn get_host(&self, port: u16) -> Result<String> {
         let payload = self
             .control
-            .get(&format!("/sandboxes/{}/ports/{port}", self.sandbox_id))?;
+            .get(&format!("/sandboxes/{}/ports/{port}", self.sandbox_id))
+            .await?;
         let item = payload
             .get("sandbox_port")
             .or_else(|| payload.get("port"))

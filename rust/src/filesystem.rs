@@ -46,32 +46,39 @@ impl Filesystem {
     }
 
     /// Read a file as UTF-8 text.
-    pub fn read_text(&self, path: &str) -> Result<String> {
-        let bytes = self.read_bytes(path)?;
+    pub async fn read_text(&self, path: &str) -> Result<String> {
+        let bytes = self.read_bytes(path).await?;
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// Read a file as raw bytes.
-    pub fn read_bytes(&self, path: &str) -> Result<Vec<u8>> {
+    pub async fn read_bytes(&self, path: &str) -> Result<Vec<u8>> {
         self.data_plane
             .get_bytes(&format!("/runtime/v1/files?path={}", urlencoding(path)))
+            .await
     }
 
     /// Write bytes or text to a file.
-    pub fn write(&self, path: &str, data: impl AsRef<[u8]>) -> Result<WriteInfo> {
-        let payload = self.data_plane.put_bytes(
-            &format!("/runtime/v1/files?path={}", urlencoding(path)),
-            data.as_ref().to_vec(),
-        )?;
+    pub async fn write(&self, path: &str, data: impl AsRef<[u8]>) -> Result<WriteInfo> {
+        let payload = self
+            .data_plane
+            .put_bytes(
+                &format!("/runtime/v1/files?path={}", urlencoding(path)),
+                data.as_ref().to_vec(),
+            )
+            .await?;
         Ok(entry_info(payload.get("file").unwrap_or(&payload)))
     }
 
     /// List directory entries below `path`.
-    pub fn list(&self, path: &str) -> Result<Vec<EntryInfo>> {
-        let payload = self.data_plane.get_json(&format!(
-            "/runtime/v1/directories?path={}",
-            urlencoding(path)
-        ))?;
+    pub async fn list(&self, path: &str) -> Result<Vec<EntryInfo>> {
+        let payload = self
+            .data_plane
+            .get_json(&format!(
+                "/runtime/v1/directories?path={}",
+                urlencoding(path)
+            ))
+            .await?;
         Ok(payload
             .get("entries")
             .and_then(Value::as_array)
@@ -83,8 +90,8 @@ impl Filesystem {
     }
 
     /// Return whether a file or directory exists at `path`.
-    pub fn exists(&self, path: &str) -> Result<bool> {
-        match self.get_info(path) {
+    pub async fn exists(&self, path: &str) -> Result<bool> {
+        match self.get_info(path).await {
             Ok(_) => Ok(true),
             Err(Error::FileNotFound(_)) | Err(Error::NotFound(_)) => Ok(false),
             Err(error) => Err(error),
@@ -92,11 +99,14 @@ impl Filesystem {
     }
 
     /// Return stat metadata for `path`.
-    pub fn get_info(&self, path: &str) -> Result<EntryInfo> {
-        let payload = self.data_plane.get_json(&format!(
-            "/runtime/v1/files/stat?path={}",
-            urlencoding(path)
-        ))?;
+    pub async fn get_info(&self, path: &str) -> Result<EntryInfo> {
+        let payload = self
+            .data_plane
+            .get_json(&format!(
+                "/runtime/v1/files/stat?path={}",
+                urlencoding(path)
+            ))
+            .await?;
         Ok(entry_info(
             payload
                 .get("file")
@@ -106,27 +116,33 @@ impl Filesystem {
     }
 
     /// Remove a file at `path`.
-    pub fn remove(&self, path: &str) -> Result<()> {
+    pub async fn remove(&self, path: &str) -> Result<()> {
         self.data_plane
-            .delete_json(&format!("/runtime/v1/files?path={}", urlencoding(path)))?;
+            .delete_json(&format!("/runtime/v1/files?path={}", urlencoding(path)))
+            .await?;
         Ok(())
     }
 
     /// Move or rename a file.
-    pub fn rename(&self, old_path: &str, new_path: &str) -> Result<EntryInfo> {
-        let payload = self.data_plane.post_json(
-            "/runtime/v1/files/move",
-            serde_json::json!({"from_path": old_path, "to_path": new_path}),
-        )?;
+    pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<EntryInfo> {
+        let payload = self
+            .data_plane
+            .post_json(
+                "/runtime/v1/files/move",
+                serde_json::json!({"from_path": old_path, "to_path": new_path}),
+            )
+            .await?;
         Ok(entry_info(payload.get("file").unwrap_or(&payload)))
     }
 
     /// Create a directory.
-    pub fn make_dir(&self, path: &str) -> Result<bool> {
-        self.data_plane.post_json(
-            &format!("/runtime/v1/directories?path={}", urlencoding(path)),
-            serde_json::json!({}),
-        )?;
+    pub async fn make_dir(&self, path: &str) -> Result<bool> {
+        self.data_plane
+            .post_json(
+                &format!("/runtime/v1/directories?path={}", urlencoding(path)),
+                serde_json::json!({}),
+            )
+            .await?;
         Ok(true)
     }
 }

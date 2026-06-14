@@ -50,7 +50,10 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     /// WebSocket transport error.
     #[error(transparent)]
-    WebSocket(#[from] tungstenite::Error),
+    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    /// HTTP header construction error.
+    #[error(transparent)]
+    HttpHeader(#[from] http::header::InvalidHeaderValue),
     /// Local I/O error.
     #[error(transparent)]
     Io(#[from] std::io::Error),

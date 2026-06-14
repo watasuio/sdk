@@ -83,6 +83,9 @@ jobs:
         run: |
           cargo fmt --all --check
           cargo test
+          cargo check --no-default-features
+          cargo check --no-default-features --features native-tls
+          cargo check --no-default-features --features rustls-tls-native-roots
           cargo doc --no-deps
           cargo publish --dry-run
 
