@@ -17,7 +17,6 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   team?: string
   cpu?: number
   memoryMb?: number
-  diskMb?: number
   networkClass?: string
   allowPackageRegistryAccess?: boolean
   exposedPorts?: unknown[]
@@ -97,7 +96,6 @@ export class Sandbox {
     putIfPresent(sandboxPayload, 'team', sandboxOpts.team)
     putIfPresent(sandboxPayload, 'cpu', sandboxOpts.cpu)
     putIfPresent(sandboxPayload, 'memory_mb', sandboxOpts.memoryMb)
-    putIfPresent(sandboxPayload, 'disk_mb', sandboxOpts.diskMb)
     putIfPresent(sandboxPayload, 'network_class', sandboxOpts.networkClass)
     putIfPresent(sandboxPayload, 'allow_package_registry_access', sandboxOpts.allowPackageRegistryAccess)
     putIfPresent(sandboxPayload, 'exposed_ports', sandboxOpts.exposedPorts)

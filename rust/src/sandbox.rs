@@ -29,8 +29,6 @@ pub struct CreateOptions {
     pub cpu: Option<u64>,
     /// Requested memory in MiB.
     pub memory_mb: Option<u64>,
-    /// Requested disk in MiB.
-    pub disk_mb: Option<u64>,
     /// Runtime network class.
     pub network_class: Option<String>,
     /// Whether package registry egress should be allowed.
@@ -52,7 +50,6 @@ impl Default for CreateOptions {
             team: None,
             cpu: None,
             memory_mb: None,
-            disk_mb: None,
             network_class: None,
             allow_package_registry_access: None,
             exposed_ports: None,
@@ -110,7 +107,6 @@ impl Sandbox {
         );
         put_if_some(&mut sandbox, "cpu", opts.cpu);
         put_if_some(&mut sandbox, "memory_mb", opts.memory_mb);
-        put_if_some(&mut sandbox, "disk_mb", opts.disk_mb);
         put_if_some_string(&mut sandbox, "network_class", opts.network_class);
         put_if_some_bool(
             &mut sandbox,

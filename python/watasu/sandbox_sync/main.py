@@ -119,7 +119,6 @@ class Sandbox:
             "team",
             "cpu",
             "memory_mb",
-            "disk_mb",
             "network_class",
             "allow_package_registry_access",
             "exposed_ports",

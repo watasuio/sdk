@@ -39,7 +39,6 @@ class SandboxNetworkInfo:
 class SandboxMetrics:
     cpu_count: Optional[int] = None
     memory_mb: Optional[int] = None
-    disk_mb: Optional[int] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
