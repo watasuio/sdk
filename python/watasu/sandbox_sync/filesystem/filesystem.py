@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+import gzip as gzip_module
+from io import IOBase, TextIOBase
+from typing import IO, Iterator, List, Literal, Optional, Union
+
+from watasu._transport.data_plane import DataPlaneClient
+from watasu.exceptions import FileNotFoundException, InvalidArgumentException
+from watasu.sandbox.filesystem.filesystem import (
+    EntryInfo,
+    WriteInfo,
+    entry_from_api,
+    write_info_from_api,
+)
+
+
+class Filesystem:
+    """Filesystem helper backed by Watasu data-plane file endpoints."""
+
+    def __init__(self, data_plane: DataPlaneClient):
+        self._data_plane = data_plane
+
+    def read(
+        self,
+        path: str,
+        format: Literal["text", "bytes", "stream"] = "text",
+        user=None,
+        request_timeout: Optional[float] = None,
+        gzip: bool = False,
+    ):
+        """Read a file as text, bytes, or a byte stream iterator."""
+        params = {"path": path}
+        if format == "stream":
+            return self._data_plane.iter_bytes(
+                "/runtime/v1/files",
+                params=params,
+                request_timeout=request_timeout,
+                resource="file",
+            )
+        data = self._data_plane.get_bytes(
+            "/runtime/v1/files",
+            params=params,
+            request_timeout=request_timeout,
+            resource="file",
+        )
+        if gzip:
+            data = gzip_module.decompress(data)
+        if format == "bytes":
+            return bytearray(data)
+        if format == "text":
+            return data.decode("utf-8")
+        raise InvalidArgumentException("format must be 'text', 'bytes', or 'stream'")
+
+    def write(
+        self,
+        path: str,
+        data: Union[str, bytes, IO],
+        user=None,
+        request_timeout: Optional[float] = None,
+        gzip: bool = False,
+        use_octet_stream: bool = False,
+        metadata=None,
+    ) -> WriteInfo:
+        """Write bytes, text, or a file-like object to ``path``."""
+        raw = _to_bytes(data)
+        if gzip:
+            raw = gzip_module.compress(raw)
+        payload = self._data_plane.put_json(
+            "/runtime/v1/files",
+            params={"path": path},
+            data=raw,
+            request_timeout=request_timeout,
+            resource="file",
+        )
+        return write_info_from_api(payload["file"])
+
+    def list(
+        self,
+        path: str,
+        depth=None,
+        user=None,
+        request_timeout: Optional[float] = None,
+    ) -> List[EntryInfo]:
+        """List directory entries below ``path``."""
+        payload = self._data_plane.get_json(
+            "/runtime/v1/directories",
+            params={"path": path},
+            request_timeout=request_timeout,
+            resource="directory",
+        )
+        return [entry_from_api(item) for item in payload.get("entries", [])]
+
+    def exists(self, path: str, user=None, request_timeout: Optional[float] = None) -> bool:
+        """Return whether a file or directory exists at ``path``."""
+        try:
+            self.get_info(path, user=user, request_timeout=request_timeout)
+            return True
+        except FileNotFoundException:
+            return False
+
+    def get_info(self, path: str, user=None, request_timeout: Optional[float] = None) -> EntryInfo:
+        """Return stat metadata for ``path``."""
+        payload = self._data_plane.get_json(
+            "/runtime/v1/files/stat",
+            params={"path": path},
+            request_timeout=request_timeout,
+            resource="file",
+        )
+        return entry_from_api(payload["file"])
+
+    def remove(self, path: str, user=None, request_timeout: Optional[float] = None) -> None:
+        """Remove a file at ``path``."""
+        self._data_plane.delete_json(
+            "/runtime/v1/files",
+            params={"path": path},
+            request_timeout=request_timeout,
+            resource="file",
+        )
+
+    def rename(
+        self,
+        old_path: str,
+        new_path: str,
+        user=None,
+        request_timeout: Optional[float] = None,
+    ) -> EntryInfo:
+        """Move or rename a file from ``old_path`` to ``new_path``."""
+        payload = self._data_plane.post_json(
+            "/runtime/v1/files/move",
+            json={"from_path": old_path, "to_path": new_path},
+            request_timeout=request_timeout,
+            resource="file",
+        )
+        return entry_from_api(payload["file"])
+
+    def make_dir(self, path: str, user=None, request_timeout: Optional[float] = None) -> bool:
+        """Create a directory, including parent directories when supported by the runtime."""
+        self._data_plane.post_json(
+            "/runtime/v1/directories",
+            params={"path": path},
+            request_timeout=request_timeout,
+            resource="directory",
+        )
+        return True
+
+    def watch_dir(self, path: str, *args, **kwargs):
+        """Directory watching is not implemented yet."""
+        raise NotImplementedError("sandbox.files.watch_dir is not supported by Watasu yet")
+
+
+def _to_bytes(data: Union[str, bytes, IO]) -> bytes:
+    if isinstance(data, str):
+        return data.encode("utf-8")
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, TextIOBase):
+        return data.read().encode("utf-8")
+    if isinstance(data, IOBase):
+        return data.read()
+    raise InvalidArgumentException(f"Unsupported data type: {type(data)}")
