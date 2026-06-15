@@ -18,6 +18,7 @@ from watasu.exceptions import (
 from watasu.sandbox.sandbox_api import (
     FileUrlInfo,
     SandboxInfo,
+    SnapshotInfo,
     file_url_info_from_api,
     sandbox_info_from_api,
     sandbox_metrics_from_api,
@@ -454,28 +455,69 @@ class Sandbox:
         """Watasu-native alias for ``create_snapshot``."""
         return self.create_snapshot(*args, **kwargs)
 
-    def _list_snapshots_instance(self, **opts: ApiParams):
+    def _list_snapshots_instance(
+        self,
+        limit: Optional[int] = None,
+        next_token: Optional[str] = None,
+        **opts: ApiParams,
+    ):
         """List checkpoints for this sandbox using snapshot naming."""
-        payload = self._control.get(
-            f"/sandboxes/{self.sandbox_id}/checkpoints",
-            resource="sandbox",
-            request_timeout=opts.get("request_timeout"),
-        )
-        checkpoints = payload.get("sandbox_checkpoints") or []
-        return SnapshotPaginator([snapshot_info_from_api(item) for item in checkpoints])
+
+        def load_page(
+            page_token: Optional[str], page_opts: Dict[str, Any]
+        ) -> Tuple[List[SnapshotInfo], Optional[str]]:
+            payload = self._control.get(
+                "/sandbox_snapshots",
+                params=_snapshot_list_params(self.sandbox_id, limit, page_token),
+                resource="sandbox",
+                request_timeout=page_opts.get(
+                    "request_timeout", opts.get("request_timeout")
+                ),
+            )
+            snapshots = payload.get("snapshots") or payload.get("sandbox_checkpoints") or []
+            return (
+                [
+                    snapshot_info_from_api(item)
+                    for item in snapshots
+                    if isinstance(item, dict)
+                ],
+                payload.get("next_token"),
+            )
+
+        return SnapshotPaginator(load_page=load_page, next_token=next_token)
 
     @classmethod
-    def _list_snapshots_class(cls, sandbox_id: str, **opts: ApiParams):
-        """List checkpoints for a sandbox by id."""
-        config = ConnectionConfig(**opts)
-        control = ControlClient(config)
-        payload = control.get(
-            f"/sandboxes/{sandbox_id}/checkpoints",
-            resource="sandbox",
-            request_timeout=opts.get("request_timeout"),
-        )
-        checkpoints = payload.get("sandbox_checkpoints") or []
-        return SnapshotPaginator([snapshot_info_from_api(item) for item in checkpoints])
+    def _list_snapshots_class(
+        cls,
+        sandbox_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        next_token: Optional[str] = None,
+        **opts: ApiParams,
+    ):
+        """List checkpoints visible to the configured API token."""
+
+        def load_page(
+            page_token: Optional[str], page_opts: Dict[str, Any]
+        ) -> Tuple[List[SnapshotInfo], Optional[str]]:
+            config = ConnectionConfig(**{**opts, **page_opts})
+            control = ControlClient(config)
+            payload = control.get(
+                "/sandbox_snapshots",
+                params=_snapshot_list_params(sandbox_id, limit, page_token),
+                resource="sandbox",
+                request_timeout=page_opts.get("request_timeout"),
+            )
+            snapshots = payload.get("snapshots") or payload.get("sandbox_checkpoints") or []
+            return (
+                [
+                    snapshot_info_from_api(item)
+                    for item in snapshots
+                    if isinstance(item, dict)
+                ],
+                payload.get("next_token"),
+            )
+
+        return SnapshotPaginator(load_page=load_page, next_token=next_token)
 
     list_snapshots = _DualMethod(_list_snapshots_instance, _list_snapshots_class)
 
@@ -758,6 +800,21 @@ def _sandbox_list_params(
         for state in _list_query_values(query.get("state")):
             params.append(("query[state][]", state))
 
+    return params
+
+
+def _snapshot_list_params(
+    sandbox_id: Optional[str],
+    limit: Optional[int],
+    next_token: Optional[str],
+):
+    params = []
+    if sandbox_id:
+        params.append(("sandbox_id", str(sandbox_id)))
+    if limit is not None:
+        params.append(("limit", str(limit)))
+    if next_token:
+        params.append(("next_token", str(next_token)))
     return params
 
 

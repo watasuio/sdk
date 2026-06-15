@@ -137,6 +137,7 @@ with Sandbox.create() as sbx:
     metrics = sbx.get_metrics()
     snapshot = sbx.create_snapshot(name="ready")
     snapshots = sbx.list_snapshots().list_items()
+    all_snapshots = Sandbox.list_snapshots(limit=100).next_items()
     restored = sbx.restore(snapshot_id=snapshot.snapshot_id)
     sbx.delete_snapshot(snapshot.snapshot_id)
 ```
@@ -158,6 +159,7 @@ async def main() -> None:
         metrics = await sbx.get_metrics()
         snapshot = await sbx.create_snapshot(name="ready")
         snapshots = await sbx.list_snapshots().list_items()
+        all_snapshots = await AsyncSandbox.list_snapshots(limit=100).list_items()
         await sbx.delete_snapshot(snapshot.snapshot_id)
 ```
 

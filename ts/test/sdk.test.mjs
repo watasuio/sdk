@@ -13,6 +13,7 @@ import {
   Sandbox,
   SandboxError,
   SandboxPaginator,
+  SnapshotPaginator,
   WatchHandle,
   base64DecodeText,
   base64Encode,
@@ -563,9 +564,10 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
           { status: 202, headers: { 'content-type': 'application/json' } }
         )
       }
-      if (String(url).endsWith('/checkpoints')) {
+      const parsedUrl = new URL(String(url))
+      if (parsedUrl.pathname.endsWith('/sandbox_snapshots') && init.method === 'GET') {
         return new Response(
-          JSON.stringify({ sandbox_checkpoints: [{ id: 9, sandbox_id: '1', name: 'ready', status: 'ready' }] }),
+          JSON.stringify({ snapshots: [{ id: 9, sandbox_id: '1', name: 'ready', status: 'ready' }] }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
       }
@@ -616,11 +618,58 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
       ['GET', 'https://api.watasu.io/v1/sandboxes/1/metrics', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/snapshots', { name: 'ready', metadata: { reason: 'test' } }],
-      ['GET', 'https://api.watasu.io/v1/sandboxes/1/checkpoints', undefined],
+      ['GET', 'https://api.watasu.io/v1/sandbox_snapshots?sandbox_id=1', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/restore', { checkpoint_id: '9', timeout_seconds: 120 }],
       ['DELETE', 'https://api.watasu.io/v1/sandbox_snapshots/9', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/upload_url', { path: '/tmp/a.txt', use_signature_expiration: 300 }],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/download_url', { path: '/tmp/a.txt' }],
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('sandbox static listSnapshots returns a paginated global snapshot list', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method })
+      const parsedUrl = new URL(String(url))
+      if (parsedUrl.searchParams.get('next_token') === '2') {
+        return new Response(
+          JSON.stringify({ snapshots: [{ id: 1, sandbox_id: 'sandbox-a', status: 'ready' }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      return new Response(
+        JSON.stringify({
+          snapshots: [{ id: 2, sandbox_id: 'sandbox-b', status: 'ready' }],
+          next_token: '2',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const paginator = Sandbox.listSnapshots({ apiKey: 'key', limit: 1 })
+
+    assert.ok(paginator instanceof SnapshotPaginator)
+    const firstPage = await paginator.nextItems()
+    assert.equal(paginator.hasNext, true)
+    assert.equal(paginator.nextToken, '2')
+    const secondPage = await paginator.nextItems()
+    assert.equal(paginator.hasNext, false)
+
+    assert.deepEqual([...firstPage, ...secondPage].map((item) => item.snapshotId), ['2', '1'])
+    assert.deepEqual(requests, [
+      {
+        url: 'https://api.watasu.io/v1/sandbox_snapshots?limit=1',
+        method: 'GET',
+      },
+      {
+        url: 'https://api.watasu.io/v1/sandbox_snapshots?limit=1&next_token=2',
+        method: 'GET',
+      },
     ])
   } finally {
     globalThis.fetch = originalFetch

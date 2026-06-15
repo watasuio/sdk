@@ -54,5 +54,5 @@ pub use pty::{Pty, PtyCreateOptions, PtySize};
 pub use sandbox::{
     CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, ListOptions,
     NetworkUpdateOptions, RestoreOptions, Sandbox, SandboxInfo, SandboxListPage, SandboxListQuery,
-    SandboxMetrics, SnapshotInfo,
+    SandboxMetrics, SnapshotInfo, SnapshotListOptions, SnapshotListPage,
 };

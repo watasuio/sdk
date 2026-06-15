@@ -1040,9 +1040,9 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
                         "backend": "firecracker",
                     }
                 }
-            if path.endswith("/checkpoints"):
+            if path == "/sandbox_snapshots":
                 return {
-                    "sandbox_checkpoints": [
+                    "snapshots": [
                         {
                             "id": 9,
                             "sandbox_id": "123",
@@ -1137,8 +1137,12 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
         ),
         (
             "get",
-            "/sandboxes/123/checkpoints",
-            {"resource": "sandbox", "request_timeout": None},
+            "/sandbox_snapshots",
+            {
+                "params": [("sandbox_id", "123")],
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
         ),
         (
             "post",
@@ -1168,6 +1172,52 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
             "/sandboxes/123/files/download_url",
             {
                 "json": {"path": "/tmp/a.txt"},
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
+        ),
+    ]
+
+
+def test_sandbox_list_snapshots_returns_global_paginator(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            pass
+
+        def get(self, path, **kwargs):
+            calls.append((path, kwargs))
+            if kwargs["params"] == [("limit", "1")]:
+                return {
+                    "snapshots": [{"id": 2, "sandbox_id": "sandbox-b"}],
+                    "next_token": "2",
+                }
+            return {"snapshots": [{"id": 1, "sandbox_id": "sandbox-a"}]}
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    paginator = Sandbox.list_snapshots(api_key="key", limit=1)
+    first_page = paginator.next_items()
+    assert paginator.has_next is True
+    assert paginator.next_token == "2"
+    second_page = paginator.next_items()
+    assert paginator.has_next is False
+
+    assert [item.snapshot_id for item in first_page + second_page] == ["2", "1"]
+    assert calls == [
+        (
+            "/sandbox_snapshots",
+            {
+                "params": [("limit", "1")],
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/sandbox_snapshots",
+            {
+                "params": [("limit", "1"), ("next_token", "2")],
                 "resource": "sandbox",
                 "request_timeout": None,
             },
@@ -1206,9 +1256,9 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
             calls.append(("get", path, kwargs))
             if path.endswith("/metrics"):
                 return {"metrics": {"sandbox_id": "async-123", "cpu_count": 0}}
-            if path.endswith("/checkpoints"):
+            if path == "/sandbox_snapshots":
                 return {
-                    "sandbox_checkpoints": [
+                    "snapshots": [
                         {"id": 10, "sandbox_id": "async-123", "status": "ready"}
                     ]
                 }
@@ -1275,8 +1325,12 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
         ),
         (
             "get",
-            "/sandboxes/async-123/checkpoints",
-            {"resource": "sandbox", "request_timeout": None},
+            "/sandbox_snapshots",
+            {
+                "params": [("sandbox_id", "async-123")],
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
         ),
         (
             "put",

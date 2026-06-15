@@ -111,6 +111,15 @@ export interface CreateSnapshotOpts extends ConnectionOpts {
   quiesceMode?: string
 }
 
+export interface SnapshotListOpts extends ConnectionOpts {
+  /** Filter snapshots by source sandbox id. */
+  sandboxId?: string
+  /** Maximum number of snapshots to return per page. */
+  limit?: number
+  /** Pagination cursor returned by a previous page. */
+  nextToken?: string
+}
+
 export interface RestoreSnapshotOpts extends ConnectionOpts {
   checkpointId?: string | number
   snapshotId?: string | number
@@ -118,18 +127,37 @@ export interface RestoreSnapshotOpts extends ConnectionOpts {
   timeoutMs?: number
 }
 
+/** Paginator for listing sandbox snapshots. */
 export class SnapshotPaginator {
-  private consumed = false
   hasNext = true
   nextToken: string | undefined
 
-  constructor(private readonly loadItems: () => Promise<SnapshotInfo[]>) {}
+  constructor(private readonly opts: SnapshotListOpts = {}) {
+    this.nextToken = opts.nextToken
+  }
 
-  async nextItems(): Promise<SnapshotInfo[]> {
-    if (this.consumed) throw new SandboxError('No more snapshots to fetch')
-    this.consumed = true
-    this.hasNext = false
-    return this.loadItems()
+  /** Fetch the next page of snapshot metadata. */
+  async nextItems(opts: ConnectionOpts = {}): Promise<SnapshotInfo[]> {
+    if (!this.hasNext) throw new SandboxError('No more snapshots to fetch')
+
+    const config = new ConnectionConfig({ ...this.opts, ...opts })
+    const control = new ControlClient(config)
+    const payload = await control.get(snapshotListPath(this.opts, this.nextToken), {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    this.nextToken = stringValue(payload.next_token ?? payload.nextToken)
+    this.hasNext = this.nextToken !== undefined
+    const snapshots = Array.isArray(payload.snapshots)
+      ? payload.snapshots
+      : Array.isArray(payload.sandbox_checkpoints) ? payload.sandbox_checkpoints : []
+    return snapshots.map((item) => snapshotInfo(record(item)))
+  }
+
+  /** Drain all remaining pages into one list. */
+  async listItems(opts: ConnectionOpts = {}): Promise<SnapshotInfo[]> {
+    const items: SnapshotInfo[] = []
+    while (this.hasNext) items.push(...await this.nextItems(opts))
+    return items
   }
 }
 
@@ -374,16 +402,9 @@ export class Sandbox {
     return snapshotInfo(record(payload.sandbox_checkpoint ?? payload.snapshot ?? payload))
   }
 
-  /** List checkpoints for one sandbox using snapshot naming. */
-  static listSnapshots(sandboxId: string, opts: ConnectionOpts = {}): SnapshotPaginator {
-    return new SnapshotPaginator(async () => {
-      const control = new ControlClient(new ConnectionConfig(opts))
-      const payload = await control.get(`/sandboxes/${sandboxId}/checkpoints`, {
-        requestTimeoutMs: opts.requestTimeoutMs,
-      })
-      const snapshots = Array.isArray(payload.sandbox_checkpoints) ? payload.sandbox_checkpoints : []
-      return snapshots.map((item) => snapshotInfo(record(item)))
-    })
+  /** List snapshots visible to the configured API key. */
+  static listSnapshots(opts: SnapshotListOpts = {}): SnapshotPaginator {
+    return new SnapshotPaginator(opts)
   }
 
   /** Delete a snapshot by id. Returns `false` when the snapshot does not exist. */
@@ -474,8 +495,8 @@ export class Sandbox {
   }
 
   /** List checkpoints for this sandbox using snapshot naming. */
-  listSnapshots(opts: ConnectionOpts = {}): SnapshotPaginator {
-    return Sandbox.listSnapshots(this.sandboxId, { ...this.configOptions(), ...opts })
+  listSnapshots(opts: Omit<SnapshotListOpts, 'sandboxId'> = {}): SnapshotPaginator {
+    return Sandbox.listSnapshots({ ...this.configOptions(), ...opts, sandboxId: this.sandboxId })
   }
 
   /** Restore a checkpoint into a new sandbox and return its control-plane info. */
@@ -622,6 +643,16 @@ function sandboxListPath(opts: SandboxListOpts, nextToken: string | undefined): 
 
   const query = params.toString()
   return query ? `/sandboxes?${query}` : '/sandboxes'
+}
+
+function snapshotListPath(opts: SnapshotListOpts, nextToken: string | undefined): string {
+  const params = new URLSearchParams()
+  if (opts.sandboxId) params.set('sandbox_id', opts.sandboxId)
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
+  if (nextToken) params.set('next_token', nextToken)
+
+  const query = params.toString()
+  return query ? `/sandbox_snapshots?${query}` : '/sandbox_snapshots'
 }
 
 function fileUrlInfo(payload: Record<string, unknown>): FileUrlInfo {

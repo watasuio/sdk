@@ -170,6 +170,28 @@ pub struct SandboxListPage {
     pub next_token: Option<String>,
 }
 
+/// Options for listing snapshots.
+#[derive(Clone, Debug, Default)]
+pub struct SnapshotListOptions {
+    /// Connection options used for the control-plane request.
+    pub connection: ConnectionOptions,
+    /// Optional source sandbox id filter.
+    pub sandbox_id: Option<String>,
+    /// Maximum number of snapshots to return.
+    pub limit: Option<u64>,
+    /// Pagination cursor returned by the previous page.
+    pub next_token: Option<String>,
+}
+
+/// One page of snapshot list results.
+#[derive(Clone, Debug, Default)]
+pub struct SnapshotListPage {
+    /// Snapshots returned on this page.
+    pub snapshots: Vec<SnapshotInfo>,
+    /// Cursor for the next page, when more results exist.
+    pub next_token: Option<String>,
+}
+
 /// Options for atomically replacing a sandbox network policy.
 #[derive(Clone, Debug, Default)]
 pub struct NetworkUpdateOptions {
@@ -315,6 +337,26 @@ impl Sandbox {
                 .unwrap_or_default()
                 .into_iter()
                 .map(|value| sandbox_info(&value))
+                .collect(),
+            next_token: string_value(&payload, &["next_token", "nextToken"]),
+        })
+    }
+
+    /// List snapshots visible to the configured API token.
+    pub async fn list_snapshots_page(opts: SnapshotListOptions) -> Result<SnapshotListPage> {
+        let path = snapshot_list_path(&opts);
+        let config = ConnectionConfig::new(opts.connection);
+        let control = ControlClient::new(config)?;
+        let payload = control.get(&path).await?;
+        Ok(SnapshotListPage {
+            snapshots: payload
+                .get("snapshots")
+                .or_else(|| payload.get("sandbox_checkpoints"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| snapshot_info(&value))
                 .collect(),
             next_token: string_value(&payload, &["next_token", "nextToken"]),
         })
@@ -709,6 +751,25 @@ fn query_value(value: &Value) -> String {
         .unwrap_or_else(|| value.to_string())
 }
 
+fn snapshot_list_path(opts: &SnapshotListOptions) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(sandbox_id) = &opts.sandbox_id {
+        serializer.append_pair("sandbox_id", sandbox_id);
+    }
+    if let Some(limit) = opts.limit {
+        serializer.append_pair("limit", &limit.to_string());
+    }
+    if let Some(next_token) = &opts.next_token {
+        serializer.append_pair("next_token", next_token);
+    }
+    let query = serializer.finish();
+    if query.is_empty() {
+        "/sandbox_snapshots".to_string()
+    } else {
+        format!("/sandbox_snapshots?{query}")
+    }
+}
+
 fn data_plane_from_session(
     session: Option<&Value>,
     config: &ConnectionConfig,
@@ -940,7 +1001,8 @@ mod tests {
 
     use super::{
         metrics_list, network_payload, sandbox_list_path, sandbox_network_path, snapshot_info,
-        ListOptions, NetworkUpdateOptions, SandboxListQuery,
+        snapshot_list_path, ListOptions, NetworkUpdateOptions, SandboxListQuery,
+        SnapshotListOptions,
     };
 
     #[test]
@@ -1022,6 +1084,21 @@ mod tests {
         assert_eq!(
             path,
             "/sandboxes?team=bridgeapp&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running"
+        );
+    }
+
+    #[test]
+    fn builds_snapshot_list_query_path() {
+        let path = snapshot_list_path(&SnapshotListOptions {
+            sandbox_id: Some("sandbox-1".to_string()),
+            limit: Some(1),
+            next_token: Some("2".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            path,
+            "/sandbox_snapshots?sandbox_id=sandbox-1&limit=1&next_token=2"
         );
     }
 }

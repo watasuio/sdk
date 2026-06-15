@@ -217,7 +217,9 @@ sbx.update_network(NetworkUpdateOptions {
 ## Metrics And Snapshots
 
 ```rust
-use watasu::{CreateOptions, CreateSnapshotOptions, RestoreOptions, Sandbox};
+use watasu::{
+    CreateOptions, CreateSnapshotOptions, RestoreOptions, Sandbox, SnapshotListOptions,
+};
 
 # async fn run() -> watasu::Result<()> {
 let sbx = Sandbox::create(CreateOptions::default()).await?;
@@ -229,6 +231,11 @@ let snapshot = sbx
     })
     .await?;
 let snapshots = sbx.list_snapshots().await?;
+let snapshot_page = Sandbox::list_snapshots_page(SnapshotListOptions {
+    limit: Some(100),
+    ..Default::default()
+})
+.await?;
 let snapshot_id = snapshot.snapshot_id.clone();
 let restored = sbx
     .restore(RestoreOptions {

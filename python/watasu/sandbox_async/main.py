@@ -673,9 +673,9 @@ class AsyncSandbox:
 
     @classmethod
     def _list_snapshots_class(
-        cls, sandbox_id: str, **opts: ApiParams
+        cls, sandbox_id: Optional[str] = None, **opts: ApiParams
     ) -> AsyncSnapshotPaginator:
-        """List checkpoints for a sandbox by id."""
+        """List checkpoints visible to the configured API token."""
         return AsyncSnapshotPaginator(lambda: Sandbox.list_snapshots(sandbox_id, **opts))
 
     list_snapshots = _AsyncDualMethod(_list_snapshots_instance, _list_snapshots_class)
