@@ -153,6 +153,9 @@ class QueuedProcessEventStream:
             try:
                 for frame in frames:
                     self._queue.put(frame)
+            except Exception as error:
+                if not self._closed:
+                    self._queue.put(error)
             finally:
                 self._queue.put(None)
 
@@ -166,6 +169,8 @@ class QueuedProcessEventStream:
         item = self._queue.get()
         if item is None:
             raise StopIteration
+        if isinstance(item, Exception):
+            raise item
         return item
 
     def close(self) -> None:

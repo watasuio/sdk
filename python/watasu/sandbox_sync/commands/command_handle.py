@@ -69,6 +69,9 @@ class CommandHandle:
                         exit_code=int(frame.get("exit_code") or 0),
                         error=frame.get("error"),
                     )
+                    close_events = getattr(self._events, "close", None)
+                    if close_events is not None:
+                        close_events()
                     return
                 elif frame_type in {"started", "ready", "pong"}:
                     continue
