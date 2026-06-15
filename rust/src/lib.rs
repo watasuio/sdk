@@ -54,8 +54,9 @@ pub use process_socket::{decode_runtime_data, encode_runtime_data, ProcessSocket
 pub use pty::{Pty, PtyCreateOptions, PtySize};
 pub use sandbox::{
     CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, ListOptions,
-    NetworkUpdateOptions, RestoreOptions, Sandbox, SandboxInfo, SandboxListPage, SandboxListQuery,
-    SandboxMetrics, SnapshotInfo, SnapshotListOptions, SnapshotListPage,
+    NetworkUpdateOptions, RestoreOptions, Sandbox, SandboxInfo, SandboxInfoLifecycle,
+    SandboxLifecycle, SandboxListPage, SandboxListQuery, SandboxMetrics, SnapshotInfo,
+    SnapshotListOptions, SnapshotListPage,
 };
 pub use template::{
     BuildInfo, BuildStatusReason, LogEntry, Template, TemplateBuildOptions, TemplateBuildStatus,

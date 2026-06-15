@@ -31,6 +31,18 @@ sbx.beta_pause()
 sbx.resume(timeout=300)
 ```
 
+Choose what happens when the sandbox timeout expires:
+
+```python
+with Sandbox.beta_create(auto_pause=True) as sbx:
+    result = sbx.commands.run("echo retained")
+    print(result.stdout)
+```
+
+`Sandbox.create(lifecycle={"on_timeout": "pause", "auto_resume": True})` keeps
+the retained disk after timeout and allows a later data-plane request to resume
+that paused sandbox automatically. The default timeout action is `kill`.
+
 ```python
 from watasu import Sandbox
 

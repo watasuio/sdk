@@ -362,6 +362,7 @@ test('sandbox create uses root snake_case API payload', async () => {
       timeoutMs: 120_000,
       envs: { HELLO: 'world' },
       metadata: { purpose: 'compat' },
+      lifecycle: { onTimeout: 'pause', autoResume: true },
       team: 'bridgeapp',
       network: {
         allowOut: ['pypi.org:443'],
@@ -378,6 +379,7 @@ test('sandbox create uses root snake_case API payload', async () => {
       env_vars: { HELLO: 'world' },
       secure: true,
       allow_internet_access: true,
+      lifecycle: { on_timeout: 'pause', auto_resume: true },
       allow_out: ['pypi.org:443'],
       deny_out: ['10.0.0.0/8'],
       allow_package_registry_access: true,
@@ -386,6 +388,16 @@ test('sandbox create uses root snake_case API payload', async () => {
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('sandbox create rejects lifecycle autoResume without pause timeout', async () => {
+  await assert.rejects(
+    Sandbox.create({
+      apiKey: 'key',
+      lifecycle: { onTimeout: 'kill', autoResume: true },
+    }),
+    /autoResume/
+  )
 })
 
 test('code interpreter sandbox create defaults to code-interpreter template', async () => {

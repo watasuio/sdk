@@ -21,7 +21,14 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   team?: string
   /** MCP gateway configuration to launch inside an `mcp-gateway` sandbox. */
   mcp?: McpServer
+  /** Timeout lifecycle policy. Defaults to killing the sandbox at timeout. */
+  lifecycle?: SandboxLifecycle
   volumeMounts?: unknown
+}
+
+export interface SandboxLifecycle {
+  onTimeout: 'kill' | 'pause'
+  autoResume?: boolean
 }
 
 export type SandboxNetworkSelector = string | string[]
@@ -65,9 +72,15 @@ export interface SandboxInfo {
   templateId?: string
   name?: string
   state?: string
+  lifecycle?: SandboxInfoLifecycle
   metadata: Record<string, string>
   startedAt?: string
   endAt?: string
+}
+
+export interface SandboxInfoLifecycle {
+  onTimeout: 'kill' | 'pause' | string
+  autoResume: boolean
 }
 
 export interface SandboxMetrics {
@@ -280,6 +293,7 @@ export class Sandbox {
     }
     putIfPresent(sandboxPayload, 'template_id', template)
     putIfPresent(sandboxPayload, 'mcp', sandboxOpts.mcp)
+    putIfPresent(sandboxPayload, 'lifecycle', lifecyclePayload(sandboxOpts.lifecycle))
     Object.assign(sandboxPayload, networkUpdatePayload(sandboxOpts.network))
     putIfPresent(sandboxPayload, 'team', sandboxOpts.team)
 
@@ -734,6 +748,7 @@ function sandboxInfo(payload: Record<string, unknown>): SandboxInfo {
     templateId: typeof payload.template_id === 'string' ? payload.template_id : templateSlug(payload.template),
     name: typeof payload.name === 'string' ? payload.name : undefined,
     state: typeof payload.state === 'string' ? payload.state : undefined,
+    lifecycle: sandboxLifecycleInfo(payload.lifecycle),
     metadata: recordOfStrings(payload.metadata),
     startedAt: typeof payload.started_at === 'string'
       ? payload.started_at
@@ -741,6 +756,27 @@ function sandboxInfo(payload: Record<string, unknown>): SandboxInfo {
     endAt: typeof payload.end_at === 'string'
       ? payload.end_at
       : typeof payload.deadline_at === 'string' ? payload.deadline_at : undefined,
+  }
+}
+
+function lifecyclePayload(lifecycle?: SandboxLifecycle): Record<string, unknown> | undefined {
+  if (lifecycle === undefined) return undefined
+  const onTimeout = lifecycle.onTimeout ?? 'kill'
+  const autoResume = lifecycle.autoResume ?? false
+  if (autoResume && onTimeout !== 'pause') {
+    throw new SandboxError("lifecycle.autoResume can only be true when lifecycle.onTimeout is 'pause'")
+  }
+  return { on_timeout: onTimeout, auto_resume: autoResume }
+}
+
+function sandboxLifecycleInfo(value: unknown): SandboxInfoLifecycle | undefined {
+  const lifecycle = record(value)
+  const onTimeout = stringValue(lifecycle.on_timeout ?? lifecycle.onTimeout)
+  const autoResume = booleanValue(lifecycle.auto_resume ?? lifecycle.autoResume)
+  if (onTimeout === undefined && autoResume === undefined) return undefined
+  return {
+    onTimeout: onTimeout ?? 'kill',
+    autoResume: autoResume ?? false,
   }
 }
 
@@ -793,6 +829,13 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (value === 'true' || value === '1') return true
+  if (value === 'false' || value === '0') return false
+  return undefined
 }
 
 function templateSlug(value: unknown): string | undefined {

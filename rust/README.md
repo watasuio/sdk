@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.20"
+watasu = "0.1.21"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -37,6 +37,25 @@ sbx.resume().await?;
 # Ok(())
 # }
 ```
+
+Choose what happens when the sandbox timeout expires:
+
+```rust
+use watasu::{CreateOptions, Sandbox, SandboxLifecycle};
+
+# async fn run() -> watasu::Result<()> {
+let sbx = Sandbox::create(CreateOptions {
+    lifecycle: Some(SandboxLifecycle::pause(true)),
+    ..Default::default()
+})
+.await?;
+# Ok(())
+# }
+```
+
+`SandboxLifecycle::kill()` is the default behavior. `SandboxLifecycle::pause`
+keeps the retained disk after timeout; passing `true` allows a later data-plane
+request to resume that paused sandbox automatically.
 
 ## Listing Sandboxes
 

@@ -171,6 +171,7 @@ class Sandbox(SandboxBase):
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
         lifecycle=None,
+        auto_pause: Optional[bool] = None,
         **opts: ApiParams,
     ) -> "Sandbox":
         """Create a sandbox and return it with ``files`` and ``commands`` ready.
@@ -181,8 +182,6 @@ class Sandbox(SandboxBase):
         timeout. The returned object always has an active data-plane session.
         """
         _reject_unsupported_opts(opts, ["volume_mounts"])
-        if lifecycle is not None:
-            unsupported("lifecycle pause/resume")
 
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
@@ -199,6 +198,9 @@ class Sandbox(SandboxBase):
             sandbox_params["template_id"] = cls.default_template
         if mcp is not None:
             sandbox_params["mcp"] = mcp
+        if auto_pause is not None:
+            sandbox_params["auto_pause"] = auto_pause
+        sandbox_params.update(_lifecycle_payload(lifecycle))
         sandbox_params.update(_network_payload(network))
         for key in ("team",):
             if key in opts:
@@ -224,7 +226,33 @@ class Sandbox(SandboxBase):
         )
         return created
 
-    beta_create = create
+    @classmethod
+    def beta_create(
+        cls,
+        template: Optional[str] = None,
+        timeout: Optional[int] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        secure: bool = True,
+        allow_internet_access: bool = True,
+        mcp: Optional[Dict[str, Any]] = None,
+        network=None,
+        auto_pause: bool = False,
+        **opts: ApiParams,
+    ) -> "Sandbox":
+        """Create a sandbox and optionally pause it instead of killing it at timeout."""
+        return cls.create(
+            template=template,
+            timeout=timeout,
+            metadata=metadata,
+            envs=envs,
+            secure=secure,
+            allow_internet_access=allow_internet_access,
+            mcp=mcp,
+            network=network,
+            auto_pause=auto_pause,
+            **opts,
+        )
 
     def _connect_instance(
         self, timeout: Optional[int] = None, **opts: ApiParams
@@ -879,6 +907,30 @@ def _session_operation_request_timeout(config: ConnectionConfig, opts: Dict) -> 
     if opts.get("request_timeout") is not None:
         return float(opts["request_timeout"])
     return max(config.request_timeout, SESSION_OPERATION_REQUEST_TIMEOUT_SEC)
+
+
+def _lifecycle_payload(lifecycle: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if lifecycle is None:
+        return {}
+    if not isinstance(lifecycle, dict):
+        unsupported("lifecycle")
+    on_timeout = lifecycle.get("on_timeout") or lifecycle.get("onTimeout") or "kill"
+    auto_resume = _bool_value(lifecycle.get("auto_resume", lifecycle.get("autoResume", False)))
+    if auto_resume and on_timeout != "pause":
+        raise SandboxException(
+            "lifecycle.auto_resume can only be true when lifecycle.on_timeout is 'pause'"
+        )
+    return {"lifecycle": {"on_timeout": on_timeout, "auto_resume": auto_resume}}
+
+
+def _bool_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in ("true", "1", 1):
+        return True
+    if value in ("false", "0", 0, None):
+        return False
+    raise SandboxException("lifecycle.auto_resume must be a boolean")
 
 
 _NETWORK_KEY_ALIASES = {

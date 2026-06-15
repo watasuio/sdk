@@ -27,7 +27,8 @@ GitResetMode = str
 
 @dataclass
 class SandboxInfoLifecycle:
-    status: Optional[str] = None
+    on_timeout: Optional[str] = None
+    auto_resume: bool = False
 
 
 @dataclass
@@ -74,6 +75,7 @@ class SandboxInfo:
     name: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     state: Optional[str] = None
+    lifecycle: Optional[SandboxInfoLifecycle] = None
     started_at: Optional[str] = None
     end_at: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -97,12 +99,23 @@ def sandbox_info_from_api(payload: Dict[str, Any]) -> SandboxInfo:
         name=payload.get("name"),
         metadata=payload.get("metadata") or {},
         state=payload.get("state"),
+        lifecycle=sandbox_lifecycle_from_api(payload.get("lifecycle")),
         started_at=payload.get("started_at")
         or payload.get("created_at")
         or payload.get("ready_at"),
         end_at=payload.get("end_at") or payload.get("deadline_at"),
         raw=payload,
     )
+
+
+def sandbox_lifecycle_from_api(payload: Any) -> Optional[SandboxInfoLifecycle]:
+    if not isinstance(payload, dict):
+        return None
+    on_timeout = payload.get("on_timeout") or payload.get("onTimeout")
+    auto_resume = payload.get("auto_resume", payload.get("autoResume", False))
+    if on_timeout is None and auto_resume is None:
+        return None
+    return SandboxInfoLifecycle(on_timeout=on_timeout, auto_resume=_bool(auto_resume))
 
 
 def sandbox_metrics_from_api(payload: Dict[str, Any]) -> SandboxMetrics:
@@ -167,6 +180,14 @@ def _int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in ("true", "1", 1):
+        return True
+    return False
 
 
 def get_signature(*_args: Any, **_kwargs: Any) -> str:

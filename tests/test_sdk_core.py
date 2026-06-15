@@ -17,6 +17,7 @@ from watasu import (
     ConflictException,
     Sandbox,
     SandboxBase,
+    SandboxException,
     SandboxOpts,
     McpServer,
     Template,
@@ -27,6 +28,7 @@ from watasu import (
 from watasu._transport.data_plane import DataPlaneClient
 from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.filesystem.filesystem import FileType
+from watasu.sandbox.sandbox_api import sandbox_info_from_api
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
 from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
@@ -658,6 +660,7 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
         team="bridgeapp",
         template="base:82",
         envs={"HELLO": "world"},
+        lifecycle={"on_timeout": "pause", "auto_resume": True},
         network={
             "allowOut": ["pypi.org:443"],
             "denyOut": ["10.0.0.0/8"],
@@ -669,10 +672,22 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["path"] == "/sandboxes"
     assert captured["kwargs"]["json"]["template_id"] == "base:82"
     assert captured["kwargs"]["json"]["env_vars"] == {"HELLO": "world"}
+    assert captured["kwargs"]["json"]["lifecycle"] == {
+        "on_timeout": "pause",
+        "auto_resume": True,
+    }
     assert captured["kwargs"]["json"]["team"] == "bridgeapp"
     assert captured["kwargs"]["json"]["allow_out"] == ["pypi.org:443"]
     assert captured["kwargs"]["json"]["deny_out"] == ["10.0.0.0/8"]
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
+
+
+def test_sandbox_create_rejects_invalid_lifecycle_boolean():
+    with pytest.raises(SandboxException, match="lifecycle.auto_resume must be a boolean"):
+        Sandbox.create(
+            api_key="key",
+            lifecycle={"on_timeout": "pause", "auto_resume": "sometimes"},
+        )
 
 
 def test_code_interpreter_sandbox_uses_code_interpreter_template(monkeypatch):
@@ -1118,7 +1133,7 @@ def test_sandbox_constructor_creates_with_default_template(monkeypatch):
     assert captured["kwargs"]["json"]["metadata"] == {"purpose": "compat"}
 
 
-def test_sandbox_beta_create_alias_uses_create_payload(monkeypatch):
+def test_sandbox_beta_create_uses_auto_pause_payload(monkeypatch):
     captured = {}
 
     class FakeControl:
@@ -1138,12 +1153,28 @@ def test_sandbox_beta_create_alias_uses_create_payload(monkeypatch):
 
     monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
 
-    sbx = Sandbox.beta_create(api_key="key", template="base", timeout=60)
+    sbx = Sandbox.beta_create(
+        api_key="key", template="base", timeout=60, auto_pause=True
+    )
 
     assert sbx.sandbox_id == "beta-created"
     assert captured["path"] == "/sandboxes"
     assert captured["kwargs"]["json"]["template_id"] == "base"
     assert captured["kwargs"]["json"]["timeout"] == 60
+    assert captured["kwargs"]["json"]["auto_pause"] is True
+
+
+def test_sandbox_info_parses_lifecycle():
+    info = sandbox_info_from_api(
+        {
+            "id": "sandbox-1",
+            "lifecycle": {"on_timeout": "pause", "auto_resume": True},
+        }
+    )
+
+    assert info.lifecycle is not None
+    assert info.lifecycle.on_timeout == "pause"
+    assert info.lifecycle.auto_resume is True
 
 
 def test_sandbox_aliases_match_connection_lifecycle_shape(monkeypatch):

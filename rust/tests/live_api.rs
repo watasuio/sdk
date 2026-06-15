@@ -24,18 +24,13 @@ async fn live_template_helpers_expose_platform_template_aliases() {
         return;
     }
 
-    assert!(
-        Template::exists("base", ConnectionOptions::default())
-            .await
-            .expect("live template alias request should succeed")
-    );
-    assert!(
-        !Template::exists(
-            "watasu-live-missing-template",
-            ConnectionOptions::default()
-        )
+    assert!(Template::exists("base", ConnectionOptions::default())
         .await
-        .expect("live missing template alias request should succeed")
+        .expect("live template alias request should succeed"));
+    assert!(
+        !Template::exists("watasu-live-missing-template", ConnectionOptions::default())
+            .await
+            .expect("live missing template alias request should succeed")
     );
     let _tags = Template::get_tags("base", ConnectionOptions::default())
         .await

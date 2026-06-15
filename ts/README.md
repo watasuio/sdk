@@ -31,6 +31,18 @@ await sbx.betaPause()
 await sbx.resume({ timeoutMs: 300_000 })
 ```
 
+Choose what happens when the sandbox timeout expires:
+
+```ts
+const sbx = await Sandbox.create({
+  lifecycle: { onTimeout: 'pause', autoResume: true },
+})
+```
+
+`onTimeout: 'kill'` is the default. `onTimeout: 'pause'` keeps the retained
+disk after timeout; `autoResume` lets a later data-plane request resume that
+paused sandbox automatically.
+
 ## Code Interpreter
 
 ```ts

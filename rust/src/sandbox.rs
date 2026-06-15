@@ -35,6 +35,8 @@ pub struct CreateOptions {
     pub network_class: Option<String>,
     /// Runtime network policy.
     pub network: Option<NetworkUpdateOptions>,
+    /// Timeout lifecycle policy.
+    pub lifecycle: Option<SandboxLifecycle>,
     /// Whether package registry egress should be allowed.
     pub allow_package_registry_access: Option<bool>,
     /// Raw exposed-port declarations for Watasu-specific callers.
@@ -56,8 +58,36 @@ impl Default for CreateOptions {
             memory_mb: None,
             network_class: None,
             network: None,
+            lifecycle: None,
             allow_package_registry_access: None,
             exposed_ports: None,
+        }
+    }
+}
+
+/// Timeout lifecycle policy used when creating a sandbox.
+#[derive(Clone, Debug)]
+pub struct SandboxLifecycle {
+    /// Action to take when the sandbox timeout expires: `kill` or `pause`.
+    pub on_timeout: String,
+    /// Whether data-plane access should resume a paused sandbox automatically.
+    pub auto_resume: bool,
+}
+
+impl SandboxLifecycle {
+    /// Kill the sandbox and release all resources when the timeout expires.
+    pub fn kill() -> Self {
+        Self {
+            on_timeout: "kill".to_string(),
+            auto_resume: false,
+        }
+    }
+
+    /// Pause the sandbox and retain its disk when the timeout expires.
+    pub fn pause(auto_resume: bool) -> Self {
+        Self {
+            on_timeout: "pause".to_string(),
+            auto_resume,
         }
     }
 }
@@ -98,12 +128,23 @@ pub struct SandboxInfo {
     pub template_version_id: Option<u64>,
     /// Current sandbox lifecycle state.
     pub state: Option<String>,
+    /// Timeout lifecycle policy returned by the API.
+    pub lifecycle: Option<SandboxInfoLifecycle>,
     /// User metadata.
     pub metadata: serde_json::Map<String, Value>,
     /// Creation timestamp.
     pub started_at: Option<String>,
     /// Deadline timestamp.
     pub end_at: Option<String>,
+}
+
+/// Timeout lifecycle policy returned by sandbox info.
+#[derive(Clone, Debug, Default)]
+pub struct SandboxInfoLifecycle {
+    /// Action taken when the sandbox timeout expires.
+    pub on_timeout: Option<String>,
+    /// Whether data-plane access resumes a paused sandbox automatically.
+    pub auto_resume: bool,
 }
 
 /// Runtime metrics returned for a sandbox.
@@ -291,6 +332,9 @@ impl Sandbox {
         put_if_some_string(&mut sandbox, "network_class", opts.network_class);
         if let Some(network) = opts.network {
             merge_object(&mut sandbox, network_payload(network));
+        }
+        if let Some(lifecycle) = opts.lifecycle {
+            sandbox.insert("lifecycle".into(), lifecycle_payload(lifecycle)?);
         }
         put_if_some_bool(
             &mut sandbox,
@@ -649,7 +693,10 @@ impl Sandbox {
 
     /// Return the conventional MCP URL for this sandbox.
     pub async fn get_mcp_url(&self) -> Result<String> {
-        Ok(format!("https://{}/mcp", self.get_host(Self::MCP_PORT).await?))
+        Ok(format!(
+            "https://{}/mcp",
+            self.get_host(Self::MCP_PORT).await?
+        ))
     }
 
     /// Return the MCP gateway token when the sandbox contains one.
@@ -850,6 +897,7 @@ fn sandbox_info(value: &Value) -> SandboxInfo {
             .get("state")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
+        lifecycle: sandbox_lifecycle_info(value.get("lifecycle")),
         metadata: value
             .get("metadata")
             .and_then(Value::as_object)
@@ -865,6 +913,42 @@ fn sandbox_info(value: &Value) -> SandboxInfo {
             .or_else(|| value.get("deadline_at"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
+    }
+}
+
+fn lifecycle_payload(lifecycle: SandboxLifecycle) -> Result<Value> {
+    if lifecycle.auto_resume && lifecycle.on_timeout != "pause" {
+        return Err(Error::InvalidArgument(
+            "lifecycle.auto_resume can only be true when lifecycle.on_timeout is 'pause'".into(),
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "on_timeout": lifecycle.on_timeout,
+        "auto_resume": lifecycle.auto_resume,
+    }))
+}
+
+fn sandbox_lifecycle_info(value: Option<&Value>) -> Option<SandboxInfoLifecycle> {
+    let lifecycle = value.and_then(Value::as_object)?;
+    let on_timeout = lifecycle
+        .get("on_timeout")
+        .or_else(|| lifecycle.get("onTimeout"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let auto_resume = lifecycle
+        .get("auto_resume")
+        .or_else(|| lifecycle.get("autoResume"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if on_timeout.is_none() && !auto_resume {
+        None
+    } else {
+        Some(SandboxInfoLifecycle {
+            on_timeout,
+            auto_resume,
+        })
     }
 }
 

@@ -538,7 +538,12 @@ class AsyncSandbox:
         """Create a sandbox and return it with async helpers ready."""
         return cls(sync_sandbox=await asyncio.to_thread(Sandbox.create, *args, **kwargs))
 
-    beta_create = create
+    @classmethod
+    async def beta_create(cls, *args, **kwargs) -> "AsyncSandbox":
+        """Create a sandbox with beta lifecycle options such as auto_pause."""
+        return cls(
+            sync_sandbox=await asyncio.to_thread(Sandbox.beta_create, *args, **kwargs)
+        )
 
     async def _connect_instance(
         self, timeout: Optional[int] = None, **opts: ApiParams

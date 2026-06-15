@@ -20,6 +20,8 @@ export type {
   SandboxCreateOpts,
   SandboxConnectOpts,
   SandboxInfo,
+  SandboxInfoLifecycle,
+  SandboxLifecycle,
   SandboxListOpts,
   SandboxMetrics,
   McpServer,
