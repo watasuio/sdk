@@ -11,10 +11,12 @@ from watasu.connection_config import (
 )
 from watasu.exceptions import (
     ConflictException,
+    FileNotFoundException,
     InvalidArgumentException,
     NotFoundException,
     SandboxException,
 )
+from watasu.sandbox.main import SandboxBase
 from watasu.sandbox.sandbox_api import (
     FileUrlInfo,
     SandboxInfo,
@@ -43,7 +45,7 @@ class _DualMethod:
         return self.instance_func.__get__(obj, cls)
 
 
-class Sandbox:
+class Sandbox(SandboxBase):
     """A running Watasu sandbox.
 
     ``Sandbox.create`` and ``Sandbox.connect`` each perform one control-plane
@@ -132,7 +134,17 @@ class Sandbox:
             )
 
         self._sandbox_id = str(sandbox_id)
-        self.connection_config = connection_config
+        session_info = session if isinstance(session, dict) else {}
+        SandboxBase.__init__(
+            self,
+            sandbox_id=self._sandbox_id,
+            connection_config=connection_config,
+            sandbox_domain=session_info.get("sandbox_domain"),
+            traffic_access_token=session_info.get("traffic_access_token"),
+            sandbox_url=session_info.get("data_plane_url"),
+            envd_access_token=session_info.get("access_token") or session_info.get("token"),
+            envd_version=session_info.get("envd_version"),
+        )
         self._control = control or ControlClient(connection_config)
         self._session = session
         self._sandbox = sandbox or {}
@@ -202,6 +214,8 @@ class Sandbox:
             sandbox=sandbox,
             envs=envs,
         )
+
+    beta_create = create
 
     def _connect_instance(
         self, timeout: Optional[int] = None, **opts: ApiParams
@@ -623,6 +637,25 @@ class Sandbox:
                 raise SandboxException("port response did not include host or url")
             return f"p{port}-{route_token}.sandbox.{self.connection_config.data_plane_domain}"
         return _host_only(host_or_url)
+
+    def get_mcp_url(self) -> str:
+        """Return the conventional MCP URL for this sandbox."""
+        return SandboxBase.get_mcp_url(self)
+
+    def get_mcp_token(self, request_timeout: Optional[float] = None) -> Optional[str]:
+        """Return the MCP gateway token when the sandbox contains one."""
+        if self._mcp_token is not None:
+            return self._mcp_token
+        try:
+            token = self.files.read(
+                "/etc/mcp-gateway/.token",
+                user="root",
+                request_timeout=request_timeout,
+            )
+        except FileNotFoundException:
+            return None
+        self._mcp_token = str(token).strip() or None
+        return self._mcp_token
 
     def upload_url(
         self,

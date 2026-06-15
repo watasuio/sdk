@@ -591,6 +591,12 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
       }
+      if (String(url).startsWith('https://route.sandbox.watasuhost.com/runtime/v1/files?path=%2Fetc%2Fmcp-gateway%2F.token')) {
+        return new Response(' gateway-token\n', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        })
+      }
       throw new Error(`unexpected request ${url}`)
     }
 
@@ -608,6 +614,9 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     const deleted = await sbx.deleteSnapshot(snapshot.snapshotId)
     const uploadUrl = await sbx.uploadUrl('/tmp/a.txt', { useSignatureExpiration: 300 })
     const downloadUrl = await sbx.downloadUrl('/tmp/a.txt')
+    const mcpUrl = sbx.getMcpUrl()
+    const mcpToken = await sbx.getMcpToken()
+    const cachedMcpToken = await sbx.getMcpToken()
 
     assert.equal(metrics[0].backend, 'firecracker')
     assert.equal(snapshot.snapshotId, '9')
@@ -616,6 +625,9 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     assert.equal(deleted, true)
     assert.equal(uploadUrl, 'https://signed.example/tmp/a.txt')
     assert.equal(downloadUrl, 'https://signed.example/tmp/a.txt')
+    assert.equal(mcpUrl, 'https://p50005-route-token.sandbox.watasuhost.com/mcp')
+    assert.equal(mcpToken, 'gateway-token')
+    assert.equal(cachedMcpToken, 'gateway-token')
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
       ['GET', 'https://api.watasu.io/v1/sandboxes/1/metrics', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/snapshots', { name: 'ready', metadata: { reason: 'test' } }],
@@ -624,6 +636,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
       ['DELETE', 'https://api.watasu.io/v1/sandbox_snapshots/9', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/upload_url', { path: '/tmp/a.txt', use_signature_expiration: 300 }],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/download_url', { path: '/tmp/a.txt' }],
+      ['GET', 'https://route.sandbox.watasuhost.com/runtime/v1/files?path=%2Fetc%2Fmcp-gateway%2F.token', undefined],
     ])
   } finally {
     globalThis.fetch = originalFetch

@@ -12,6 +12,8 @@ from watasu import (
     ConnectionConfig,
     ConflictException,
     Sandbox,
+    SandboxBase,
+    SandboxOpts,
     Template,
     TemplateBuildStatus,
 )
@@ -628,6 +630,17 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
 
 
+def test_python_sandbox_main_compatibility_imports():
+    from watasu.sandbox.main import SandboxBase as ImportedSandboxBase
+    from watasu.sandbox.main import SandboxOpts as ImportedSandboxOpts
+
+    assert ImportedSandboxBase is SandboxBase
+    assert ImportedSandboxOpts is SandboxOpts
+    assert Sandbox.default_template == "base"
+    assert Sandbox.default_sandbox_timeout == 300
+    assert Sandbox.default_mcp_template == "mcp-gateway"
+
+
 def test_sandbox_list_returns_paginator_and_uses_nested_query_params(monkeypatch):
     calls = []
 
@@ -821,6 +834,34 @@ def test_sandbox_constructor_creates_with_default_template(monkeypatch):
     assert captured["kwargs"]["json"]["metadata"] == {"purpose": "compat"}
 
 
+def test_sandbox_beta_create_alias_uses_create_payload(monkeypatch):
+    captured = {}
+
+    class FakeControl:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def post(self, path, **kwargs):
+            captured["path"] = path
+            captured["kwargs"] = kwargs
+            return {
+                "sandbox": {"id": "beta-created"},
+                "session": {
+                    "data_plane_url": "https://route.sandbox.watasuhost.com",
+                    "token": "data",
+                },
+            }
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    sbx = Sandbox.beta_create(api_key="key", template="base", timeout=60)
+
+    assert sbx.sandbox_id == "beta-created"
+    assert captured["path"] == "/sandboxes"
+    assert captured["kwargs"]["json"]["template_id"] == "base"
+    assert captured["kwargs"]["json"]["timeout"] == 60
+
+
 def test_sandbox_aliases_match_connection_lifecycle_shape(monkeypatch):
     calls = []
 
@@ -977,6 +1018,50 @@ def test_sandbox_context_manager_kills_on_exit(monkeypatch):
         assert active is sbx
 
     assert killed == [("123", {})]
+
+
+def test_sandbox_mcp_helpers_use_exposed_port_and_gateway_token():
+    calls = []
+
+    class FakeControl:
+        def get(self, path, **kwargs):
+            calls.append(("control", path, kwargs))
+            return {
+                "sandbox_port": {
+                    "url": "https://p50005-token.sandbox.watasuhost.com"
+                }
+            }
+
+    class FakeFiles:
+        def __init__(self):
+            self.calls = []
+
+        def read(self, path, **kwargs):
+            self.calls.append((path, kwargs))
+            return " gateway-token\n"
+
+    files = FakeFiles()
+    sbx = Sandbox(
+        "123",
+        connection_config=ConnectionConfig(api_key="key"),
+        control=FakeControl(),
+        session={
+            "data_plane_url": "https://route.sandbox.watasuhost.com",
+            "token": "data",
+        },
+        sandbox={},
+    )
+    sbx._filesystem = files
+
+    assert sbx.get_mcp_url() == "https://p50005-token.sandbox.watasuhost.com/mcp"
+    assert sbx.get_mcp_token() == "gateway-token"
+    assert sbx.get_mcp_token() == "gateway-token"
+    assert files.calls == [
+        (
+            "/etc/mcp-gateway/.token",
+            {"user": "root", "request_timeout": None},
+        )
+    ]
 
 
 def test_sandbox_is_running_uses_control_state():

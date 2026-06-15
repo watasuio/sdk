@@ -537,6 +537,8 @@ class AsyncSandbox:
         """Create a sandbox and return it with async helpers ready."""
         return cls(sync_sandbox=await asyncio.to_thread(Sandbox.create, *args, **kwargs))
 
+    beta_create = create
+
     async def _connect_instance(
         self, timeout: Optional[int] = None, **opts: ApiParams
     ) -> "AsyncSandbox":
@@ -704,6 +706,17 @@ class AsyncSandbox:
     def get_host(self, port: int) -> str:
         """Return the public hostname for an exposed sandbox port."""
         return self._sync.get_host(port)
+
+    def get_mcp_url(self) -> str:
+        """Return the conventional MCP URL for this sandbox."""
+        return self._sync.get_mcp_url()
+
+    async def get_mcp_token(self, request_timeout: Optional[float] = None) -> Optional[str]:
+        """Return the MCP gateway token when the sandbox contains one."""
+        return await asyncio.to_thread(
+            self._sync.get_mcp_token,
+            request_timeout=request_timeout,
+        )
 
     async def upload_url(self, *args, **kwargs) -> str:
         """Get a signed URL for uploading a file."""

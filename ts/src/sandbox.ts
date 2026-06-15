@@ -1,7 +1,7 @@
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
 import { DataPlaneClient, ControlClient } from './transport.js'
-import { ConflictError, NotFoundError, SandboxError, unsupported } from './errors.js'
+import { ConflictError, FileNotFoundError, NotFoundError, SandboxError, unsupported } from './errors.js'
 import { Filesystem } from './filesystem.js'
 import { Git } from './git.js'
 import { Pty } from './pty.js'
@@ -197,6 +197,10 @@ export class SandboxPaginator {
 export class Sandbox {
   /** Default template slug used when create is called without a template. */
   static readonly defaultTemplate = 'base'
+  /** Default template slug used by MCP creation once Watasu supports it. */
+  static readonly defaultMcpTemplate = 'mcp-gateway'
+  /** Default sandbox lifetime in milliseconds. */
+  static readonly defaultSandboxTimeoutMs = 300_000
 
   files: Filesystem
   filesystem: Filesystem
@@ -209,6 +213,8 @@ export class Sandbox {
   envVars: Record<string, string>
   readonly sandboxId: string
 
+  private readonly mcpPort = 50005
+  private mcpToken: string | undefined
   private readonly config: ConnectionConfig
   private readonly control: ControlClient
   private readonly envs: Record<string, string>
@@ -538,6 +544,24 @@ export class Sandbox {
   getHostname(port?: number): string {
     if (port !== undefined) return this.getHost(port)
     return new URL(this.dataPlane.baseUrl).host
+  }
+
+  /** Return the conventional MCP URL for this sandbox. */
+  getMcpUrl(): string {
+    return `https://${this.getHost(this.mcpPort)}/mcp`
+  }
+
+  /** Return the MCP gateway token when the sandbox contains one. */
+  async getMcpToken(): Promise<string | undefined> {
+    if (this.mcpToken !== undefined) return this.mcpToken
+    try {
+      const token = await this.files.read('/etc/mcp-gateway/.token', { user: 'root' })
+      this.mcpToken = String(token).trim() || undefined
+      return this.mcpToken
+    } catch (error) {
+      if (error instanceof FileNotFoundError || error instanceof NotFoundError) return undefined
+      throw error
+    }
   }
 
   /** Return a protocol string for a secure or insecure sandbox URL. */

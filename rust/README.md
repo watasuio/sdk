@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.14"
+watasu = "0.1.15"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.

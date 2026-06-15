@@ -146,7 +146,7 @@ export class Filesystem {
   /** Read a file as UTF-8 text, bytes, or a one-chunk async byte stream. */
   async read(
     path: string,
-    opts: { format?: 'text' | 'bytes' | 'stream'; requestTimeoutMs?: number; gzip?: boolean } = {}
+    opts: { format?: 'text' | 'bytes' | 'stream'; requestTimeoutMs?: number; gzip?: boolean; user?: string } = {}
   ): Promise<string | Uint8Array | AsyncIterable<Uint8Array>> {
     const bytes = await this.dataPlane.getBytes(withQuery('/runtime/v1/files', { path, gzip: opts.gzip }), opts)
     if (opts.format === 'bytes') return bytes

@@ -65,6 +65,7 @@ from .sandbox.sandbox_api import (
     SnapshotInfo,
     get_signature,
 )
+from .sandbox.main import SandboxBase, SandboxOpts
 from .sandbox_async.main import (
     AsyncGit,
     AsyncPty,
@@ -170,6 +171,7 @@ __all__ = [
     "RateLimitException",
     "ReadyCmd",
     "Sandbox",
+    "SandboxBase",
     "SandboxException",
     "SandboxInfo",
     "SandboxInfoLifecycle",
@@ -185,6 +187,7 @@ __all__ = [
     "SandboxNetworkTransform",
     "SandboxNetworkUpdate",
     "SandboxNotFoundException",
+    "SandboxOpts",
     "SandboxPaginator",
     "SandboxQuery",
     "SandboxState",

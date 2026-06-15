@@ -262,9 +262,13 @@ pub struct Sandbox {
     control: ControlClient,
     sandbox: Value,
     envs: serde_json::Map<String, Value>,
+    mcp_token: Option<String>,
 }
 
 impl Sandbox {
+    /// Conventional MCP gateway port.
+    pub const MCP_PORT: u16 = 50005;
+
     /// Create a sandbox and return it only after the API supplies a data-plane session.
     pub async fn create(opts: CreateOptions) -> Result<Self> {
         let config = ConnectionConfig::new(opts.connection.clone());
@@ -643,6 +647,31 @@ impl Sandbox {
         ))
     }
 
+    /// Return the conventional MCP URL for this sandbox.
+    pub async fn get_mcp_url(&self) -> Result<String> {
+        Ok(format!("https://{}/mcp", self.get_host(Self::MCP_PORT).await?))
+    }
+
+    /// Return the MCP gateway token when the sandbox contains one.
+    pub async fn get_mcp_token(&mut self) -> Result<Option<String>> {
+        if self.mcp_token.is_some() {
+            return Ok(self.mcp_token.clone());
+        }
+        match self.files.read_text("/etc/mcp-gateway/.token").await {
+            Ok(token) => {
+                let token = token.trim().to_string();
+                if token.is_empty() {
+                    Ok(None)
+                } else {
+                    self.mcp_token = Some(token.clone());
+                    Ok(Some(token))
+                }
+            }
+            Err(Error::FileNotFound(_)) | Err(Error::NotFound(_)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     fn from_response(
         config: ConnectionConfig,
         control: ControlClient,
@@ -674,6 +703,7 @@ impl Sandbox {
             control,
             sandbox,
             envs,
+            mcp_token: None,
         })
     }
 
