@@ -7,6 +7,7 @@ import { Git } from './git.js'
 import { Pty } from './pty.js'
 import { ProcessManager } from './process.js'
 import { TerminalManager } from './terminal.js'
+import type { Volume } from './volume.js'
 
 export interface SandboxCreateOpts extends ConnectionOpts {
   /** Template slug to create. Defaults to "base". */
@@ -18,13 +19,13 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   secure?: boolean
   allowInternetAccess?: boolean
   network?: SandboxNetworkUpdate
-  team?: string
+  team?: string | number
   /** MCP gateway configuration to launch inside an `mcp-gateway` sandbox. */
   mcp?: McpServer
   /** Timeout lifecycle policy. Defaults to killing the sandbox at timeout. */
   lifecycle?: SandboxLifecycle
   /** Persistent volumes to mount, keyed by guest path. */
-  volumeMounts?: Record<string, string | { name: string }>
+  volumeMounts?: Record<string, string | Volume | { name: string }>
 }
 
 export interface SandboxLifecycle {
@@ -65,8 +66,10 @@ export interface SandboxListOpts extends ConnectionOpts {
   /** Pagination cursor returned by a previous page. */
   nextToken?: string
   /** Team slug to list within. */
-  team?: string
+  team?: string | number
 }
+
+type SandboxRequestOpts = Pick<ConnectionOpts, 'requestTimeoutMs' | 'signal'>
 
 export interface SandboxInfo {
   sandboxId: string
@@ -173,6 +176,7 @@ export class SnapshotPaginator {
     const control = new ControlClient(config)
     const payload = await control.get(snapshotListPath(this.opts, this.nextToken), {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     this.nextToken = stringValue(payload.next_token ?? payload.nextToken)
     this.hasNext = this.nextToken !== undefined
@@ -207,6 +211,7 @@ export class SandboxPaginator {
     const control = new ControlClient(config)
     const payload = await control.get(sandboxListPath(this.opts, this.nextToken), {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     this.nextToken = stringValue(payload.next_token ?? payload.nextToken)
     this.hasNext = this.nextToken !== undefined
@@ -308,6 +313,7 @@ export class Sandbox {
     const response = await control.post('/sandboxes', {
       json: sandboxPayload,
       requestTimeoutMs: sessionOperationRequestTimeout(config, sandboxOpts),
+      signal: sandboxOpts.signal,
     })
     const sandbox = record(response.sandbox ?? response)
     const sandboxId = sandbox.id ?? sandbox.sandbox_id
@@ -327,10 +333,14 @@ export class Sandbox {
   static async connect(sandboxId: string, opts: SandboxConnectOpts = {}): Promise<Sandbox> {
     const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
-    const info = await control.get(`/sandboxes/${sandboxId}`)
+    const info = await control.get(`/sandboxes/${sandboxId}`, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
+    })
     const response = await control.post(`/sandboxes/${sandboxId}/resume`, {
       json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
       requestTimeoutMs: sessionOperationRequestTimeout(config, opts),
+      signal: opts.signal,
     })
     return new this({
       sandboxId,
@@ -354,6 +364,7 @@ export class Sandbox {
     const response = await this.control.post(`/sandboxes/${this.sandboxId}/resume`, {
       json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
       requestTimeoutMs: sessionOperationRequestTimeout(this.config, opts),
+      signal: opts.signal,
     })
     this.sandbox = record(response.sandbox ?? this.sandbox)
     const dataPlane = dataPlaneFromSession(response.session, this.config)
@@ -380,6 +391,7 @@ export class Sandbox {
     try {
       await control.post(`/sandboxes/${sandboxId}/pause`, {
         requestTimeoutMs: opts.requestTimeoutMs,
+        signal: opts.signal,
       })
       return true
     } catch (error) {
@@ -395,8 +407,12 @@ export class Sandbox {
 
   /** Destroy a sandbox by id. */
   static async kill(sandboxId: string, opts: ConnectionOpts | string = {}): Promise<boolean> {
+    const requestOpts = typeof opts === 'string' ? {} : opts
     const control = new ControlClient(new ConnectionConfig(typeof opts === 'string' ? { apiKey: opts } : opts))
-    await control.delete(`/sandboxes/${sandboxId}`)
+    await control.delete(`/sandboxes/${sandboxId}`, {
+      requestTimeoutMs: requestOpts.requestTimeoutMs,
+      signal: requestOpts.signal,
+    })
     return true
   }
 
@@ -405,6 +421,7 @@ export class Sandbox {
     const control = new ControlClient(new ConnectionConfig(opts))
     const payload = await control.get(metricsPath(sandboxId, opts), {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return metricsList(payload.metrics ?? payload)
   }
@@ -419,6 +436,7 @@ export class Sandbox {
     const response = await control.put(`/sandboxes/${sandboxId}/network`, {
       json: networkUpdatePayload(network),
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return response.sandbox === undefined ? undefined : record(response.sandbox)
   }
@@ -434,6 +452,7 @@ export class Sandbox {
     const payload = await control.post(`/sandboxes/${sandboxId}/snapshots`, {
       json: snapshotPayload(opts),
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return snapshotInfo(record(payload.sandbox_checkpoint ?? payload.snapshot ?? payload))
   }
@@ -449,6 +468,7 @@ export class Sandbox {
     try {
       await control.delete(`/sandbox_snapshots/${snapshotId}`, {
         requestTimeoutMs: opts.requestTimeoutMs,
+        signal: opts.signal,
       })
       return true
     } catch (error) {
@@ -458,16 +478,20 @@ export class Sandbox {
   }
 
   /** Destroy this sandbox. */
-  async kill(): Promise<boolean> {
-    await this.control.delete(`/sandboxes/${this.sandboxId}`)
+  async kill(opts: SandboxRequestOpts = {}): Promise<boolean> {
+    await this.control.delete(`/sandboxes/${this.sandboxId}`, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
+    })
     return true
   }
 
   /** Check if this sandbox is in a runtime-active lifecycle state. */
-  async isRunning(opts: Pick<ConnectionOpts, 'requestTimeoutMs'> = {}): Promise<boolean> {
+  async isRunning(opts: SandboxRequestOpts = {}): Promise<boolean> {
     try {
       const payload = await this.control.get(`/sandboxes/${this.sandboxId}`, {
         requestTimeoutMs: opts.requestTimeoutMs,
+        signal: opts.signal,
       })
       const item = record(payload.sandbox ?? payload)
       return ['creating', 'ready', 'checkpointing', 'restoring', 'stopping'].includes(String(item.state ?? ''))
@@ -482,31 +506,41 @@ export class Sandbox {
     const control = new ControlClient(new ConnectionConfig(opts))
     await control.post(`/sandboxes/${sandboxId}/timeout`, {
       json: { timeout: Math.ceil(timeoutMs / 1000) },
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
   }
 
   /** Set this sandbox's lifetime. */
-  async setTimeout(timeoutMs: number): Promise<void> {
+  async setTimeout(timeoutMs: number, opts: SandboxRequestOpts = {}): Promise<void> {
     await this.control.post(`/sandboxes/${this.sandboxId}/timeout`, {
       json: { timeout: Math.ceil(timeoutMs / 1000) },
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
   }
 
   /** Keep the sandbox alive for `duration` milliseconds. */
-  async keepAlive(duration: number): Promise<void> {
-    await this.setTimeout(duration)
+  async keepAlive(duration: number, opts: SandboxRequestOpts = {}): Promise<void> {
+    await this.setTimeout(duration, opts)
   }
 
   /** Fetch control-plane metadata for a sandbox by id. */
   static async getInfo(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxInfo> {
     const control = new ControlClient(new ConnectionConfig(opts))
-    const payload = await control.get(`/sandboxes/${sandboxId}`)
+    const payload = await control.get(`/sandboxes/${sandboxId}`, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
+    })
     return sandboxInfo(record(payload.sandbox ?? payload))
   }
 
   /** Fetch the latest control-plane metadata for this sandbox. */
-  async getInfo(): Promise<SandboxInfo> {
-    const payload = await this.control.get(`/sandboxes/${this.sandboxId}`)
+  async getInfo(opts: SandboxRequestOpts = {}): Promise<SandboxInfo> {
+    const payload = await this.control.get(`/sandboxes/${this.sandboxId}`, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
+    })
     return sandboxInfo(record(payload.sandbox ?? payload))
   }
 
@@ -550,6 +584,7 @@ export class Sandbox {
     const response = await this.control.post(`/sandboxes/${this.sandboxId}/restore`, {
       json: payload,
       requestTimeoutMs: restoreOpts.requestTimeoutMs,
+      signal: restoreOpts.signal,
     })
     return sandboxInfo(record(response.sandbox ?? response))
   }
@@ -655,6 +690,7 @@ export class Sandbox {
         expires_in_seconds: opts.expiresInSeconds,
       }),
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return fileUrlInfo(record(payload.file_url ?? payload))
   }
@@ -664,6 +700,7 @@ export class Sandbox {
     return this.dataPlane.postJson(path, {
       json,
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
   }
 
@@ -671,6 +708,7 @@ export class Sandbox {
   protected async runtimeGetJson(path: string, opts: ConnectionOpts = {}): Promise<Record<string, unknown>> {
     return this.dataPlane.getJson(path, {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
   }
 
@@ -678,6 +716,7 @@ export class Sandbox {
   protected async runtimeDeleteJson(path: string, opts: ConnectionOpts = {}): Promise<Record<string, unknown>> {
     return this.dataPlane.deleteJson(path, {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
   }
 
@@ -687,6 +726,11 @@ export class Sandbox {
       apiUrl: this.config.apiUrl,
       dataPlaneDomain: this.config.dataPlaneDomain,
       requestTimeoutMs: this.config.requestTimeoutMs,
+      headers: this.config.headers,
+      apiHeaders: this.config.apiHeaders,
+      debug: this.config.debug,
+      signal: this.config.signal,
+      proxy: this.config.proxy,
     }
   }
 }
@@ -704,7 +748,7 @@ function dataPlaneFromSession(session: unknown, config: ConnectionConfig): DataP
 
 function sandboxListPath(opts: SandboxListOpts, nextToken: string | undefined): string {
   const params = new URLSearchParams()
-  if (opts.team) params.set('team', opts.team)
+  if (opts.team !== undefined) params.set('team', String(opts.team))
   if (opts.limit !== undefined) params.set('limit', String(opts.limit))
   if (nextToken) params.set('next_token', nextToken)
 

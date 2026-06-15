@@ -13,12 +13,14 @@ export interface RunCodeOpts {
   envs?: Record<string, string>
   timeout?: number
   requestTimeoutMs?: number
+  signal?: AbortSignal
 }
 
 export interface CreateCodeContextOpts {
   cwd?: string
   language?: RunCodeLanguage
   requestTimeoutMs?: number
+  signal?: AbortSignal
 }
 
 /** One stdout or stderr line emitted by code execution. */
@@ -197,6 +199,7 @@ export class Sandbox extends BaseSandbox {
     })
     const response = await this.runtimePostJson('/runtime/v1/code/run', payload, {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     const execution = executionFromApi(response)
     emitCallbacks(execution, opts)
@@ -210,30 +213,34 @@ export class Sandbox extends BaseSandbox {
       language: _opts.language,
     }), {
       requestTimeoutMs: _opts.requestTimeoutMs,
+      signal: _opts.signal,
     })
     return contextFromApi(response)
   }
 
   /** Remove a persistent code context. */
-  async removeCodeContext(context: Context | string, opts: { requestTimeoutMs?: number } = {}): Promise<void> {
+  async removeCodeContext(context: Context | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<void> {
     await this.runtimeDeleteJson(`/runtime/v1/code/contexts/${encodeURIComponent(requireContextId(context))}`, {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
   }
 
   /** List persistent code contexts. */
-  async listCodeContexts(opts: { requestTimeoutMs?: number } = {}): Promise<Context[]> {
+  async listCodeContexts(opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<Context[]> {
     const response = await this.runtimeGetJson('/runtime/v1/code/contexts', {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     const contexts = Array.isArray(response) ? response : arrayOfUnknown(response.contexts)
     return contexts.map((item) => contextFromApi(record(item)))
   }
 
   /** Restart a persistent code context. */
-  async restartCodeContext(context: Context | string, opts: { requestTimeoutMs?: number } = {}): Promise<void> {
+  async restartCodeContext(context: Context | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<void> {
     await this.runtimePostJson(`/runtime/v1/code/contexts/${encodeURIComponent(requireContextId(context))}/restart`, {}, {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
   }
 }

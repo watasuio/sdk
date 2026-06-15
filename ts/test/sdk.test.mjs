@@ -44,6 +44,23 @@ test('connection config accepts access token alias', () => {
   assert.equal(config.authHeaders.Authorization, 'Bearer alias-key')
 })
 
+test('connection config keeps API headers and caller signal', () => {
+  const controller = new AbortController()
+  const config = new ConnectionConfig({
+    apiKey: 'key',
+    headers: { 'x-shared': 'shared' },
+    apiHeaders: { 'x-api': 'api' },
+    debug: true,
+    signal: controller.signal,
+  })
+
+  assert.equal(config.authHeaders.Authorization, 'Bearer key')
+  assert.equal(config.authHeaders['x-shared'], 'shared')
+  assert.equal(config.authHeaders['x-api'], 'api')
+  assert.equal(config.debug, true)
+  assert.equal(config.signal, controller.signal)
+})
+
 test('stream frame helpers match runtime base64 protocol', () => {
   assert.equal(base64DecodeText('NAo='), '4\n')
   assert.equal(base64Encode(new TextEncoder().encode('hi\n')), 'aGkK')
@@ -358,6 +375,11 @@ test('sandbox create uses root snake_case API payload', async () => {
       )
     }
 
+    const volume = new Volume({
+      volumeId: 'models-id',
+      name: 'models',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+    })
     const sbx = await Sandbox.create('base:82', {
       apiKey: 'key',
       timeoutMs: 120_000,
@@ -366,9 +388,9 @@ test('sandbox create uses root snake_case API payload', async () => {
       lifecycle: { onTimeout: 'pause', autoResume: true },
       volumeMounts: {
         '/workspace/cache': 'cache',
-        '/data/models': { name: 'models' },
+        '/data/models': volume,
       },
-      team: 'bridgeapp',
+      team: 40,
       network: {
         allowOut: ['pypi.org:443'],
         denyOut: ['10.0.0.0/8'],
@@ -392,7 +414,7 @@ test('sandbox create uses root snake_case API payload', async () => {
       allow_out: ['pypi.org:443'],
       deny_out: ['10.0.0.0/8'],
       allow_package_registry_access: true,
-      team: 'bridgeapp',
+      team: 40,
     })
   } finally {
     globalThis.fetch = originalFetch
@@ -473,7 +495,7 @@ test('volume helper uses control API paths and snake_case payloads', async () =>
       throw new Error(`unexpected request ${init.method} ${url}`)
     }
 
-    const volume = await Volume.create('cache', { apiKey: 'key', team: 'core' })
+    const volume = await Volume.create('cache', { apiKey: 'key', team: 40 })
     assert.ok(volume instanceof Volume)
     assert.equal(volume.id, '42')
     assert.equal(volume.name, 'cache')
@@ -494,7 +516,7 @@ test('volume helper uses control API paths and snake_case payloads', async () =>
       {
         url: 'https://api.watasu.io/v1/volumes',
         method: 'POST',
-        body: { name: 'cache', team: 'core' },
+        body: { name: 'cache', team: 40 },
       },
       {
         url: 'https://api.watasu.io/v1/volumes/42/files',
@@ -741,7 +763,7 @@ test('sandbox list returns a paginator and uses nested query params', async () =
 
     const paginator = Sandbox.list({
       apiKey: 'key',
-      team: 'bridgeapp',
+      team: 40,
       query: { metadata: { purpose: 'ci' }, state: ['running'] },
       limit: 1,
     })
@@ -756,12 +778,65 @@ test('sandbox list returns a paginator and uses nested query params', async () =
     assert.deepEqual([...firstPage, ...secondPage].map((item) => item.sandboxId), ['2', '1'])
     assert.equal(
       requests[0].url,
-      'https://api.watasu.io/v1/sandboxes?team=bridgeapp&limit=1&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
+      'https://api.watasu.io/v1/sandboxes?team=40&limit=1&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
     )
     assert.equal(
       requests[1].url,
-      'https://api.watasu.io/v1/sandboxes?team=bridgeapp&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
+      'https://api.watasu.io/v1/sandboxes?team=40&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
     )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('transport applies API headers and caller abort signals', async () => {
+  const originalFetch = globalThis.fetch
+  const controller = new AbortController()
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const headers = Object.fromEntries(new Headers(init.headers).entries())
+      requests.push({ url: String(url), headers, signal: init.signal })
+      if (String(url).startsWith('https://api.watasu.io')) {
+        assert.equal(init.signal.aborted, false)
+        controller.abort()
+        await Promise.resolve()
+        assert.equal(init.signal.aborted, true)
+        return new Response(JSON.stringify({ sandbox: { id: 'headers' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ entries: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    await Sandbox.getInfo('headers', {
+      apiKey: 'key',
+      headers: { 'x-shared': 'shared' },
+      apiHeaders: { 'x-api': 'api' },
+      signal: controller.signal,
+    })
+
+    const sbx = new Sandbox({
+      sandboxId: 'headers',
+      connectionConfig: new ConnectionConfig({
+        apiKey: 'key',
+        headers: { 'x-shared': 'shared' },
+        apiHeaders: { 'x-api': 'api' },
+      }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data-token' },
+    })
+    await sbx.files.list('/workspace')
+
+    assert.equal(requests[0].headers.authorization, 'Bearer key')
+    assert.equal(requests[0].headers['x-shared'], 'shared')
+    assert.equal(requests[0].headers['x-api'], 'api')
+    assert.equal(requests[1].headers.authorization, 'Bearer data-token')
+    assert.equal(requests[1].headers['x-shared'], 'shared')
+    assert.equal(requests[1].headers['x-api'], undefined)
   } finally {
     globalThis.fetch = originalFetch
   }

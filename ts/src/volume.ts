@@ -41,13 +41,13 @@ export interface VolumeEntryStat {
 }
 
 export interface VolumeApiParams extends ConnectionOpts {
-  team?: string
+  team?: string | number
 }
 
 export interface VolumeConnectionConfig extends ConnectionOpts {}
 
 export interface VolumeListOpts extends ConnectionOpts {
-  team?: string
+  team?: string | number
 }
 
 export interface VolumeListFilesOpts extends ConnectionOpts {
@@ -103,6 +103,7 @@ export class Volume {
     const payload = await control.post('/volumes', {
       json: compactRecord({ name, team: opts.team }),
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return volumeFromPayload(payload, config, control)
   }
@@ -113,6 +114,7 @@ export class Volume {
     const control = new ControlClient(config)
     const payload = await control.get(`/volumes/${encodeURIComponent(volumeId)}`, {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return volumeFromPayload(payload, config, control)
   }
@@ -123,6 +125,7 @@ export class Volume {
     const control = new ControlClient(config)
     const payload = await control.get(`/volumes/${encodeURIComponent(volumeId)}`, {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return volumeInfo(record(payload.volume ?? payload))
   }
@@ -132,7 +135,10 @@ export class Volume {
     const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
     const path = withQuery('/volumes', { team: opts.team })
-    const payload = await control.get(path, { requestTimeoutMs: opts.requestTimeoutMs })
+    const payload = await control.get(path, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
+    })
     const volumes = Array.isArray(payload.volumes) ? payload.volumes : []
     return volumes.map((item) => volumeInfo(record(item)))
   }
@@ -144,6 +150,7 @@ export class Volume {
     try {
       await control.delete(`/volumes/${encodeURIComponent(volumeId)}`, {
         requestTimeoutMs: opts.requestTimeoutMs,
+        signal: opts.signal,
       })
       return true
     } catch (error) {
@@ -168,6 +175,7 @@ export class Volume {
 
     const payload = await this.control.get(withQuery(`/volumes/${this.volumeId}/path`, { path }), {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return volumeEntry(record(payload.file ?? payload))
   }
@@ -179,6 +187,7 @@ export class Volume {
       depth: opts.depth,
     }), {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     const entries = Array.isArray(payload.entries) ? payload.entries : []
     return entries.map((item) => volumeEntry(record(item)))
@@ -189,6 +198,7 @@ export class Volume {
     const payload = await this.control.post(`/volumes/${this.volumeId}/directories`, {
       json: compactRecord({ path, ...metadataPayload(opts) }),
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return volumeEntry(record(payload.file ?? payload))
   }
@@ -209,6 +219,7 @@ export class Volume {
     const payload = await this.control.patch(`/volumes/${this.volumeId}/path`, {
       json: compactRecord({ path, ...metadataPayload(opts) }),
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return volumeEntry(record(payload.file ?? payload))
   }
@@ -221,6 +232,7 @@ export class Volume {
   async readFile(path: string, opts: VolumeReadFileOpts = {}): Promise<string | Uint8Array | Blob | ReadableStream<Uint8Array>> {
     const payload = await this.control.get(withQuery(`/volumes/${this.volumeId}/files`, { path }), {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     const file = record(payload.file ?? payload)
     const content = file.content_b64 ?? file.contentBase64 ?? file.content ?? ''
@@ -250,6 +262,7 @@ export class Volume {
         force: opts.force,
       }),
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return volumeEntry(record(payload.file ?? payload))
   }
@@ -258,6 +271,7 @@ export class Volume {
   async remove(path: string, opts: ConnectionOpts = {}): Promise<boolean> {
     await this.control.delete(withQuery(`/volumes/${this.volumeId}/path`, { path }), {
       requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return true
   }
@@ -278,6 +292,11 @@ export class Volume {
       apiUrl: this.config.apiUrl,
       dataPlaneDomain: this.config.dataPlaneDomain,
       requestTimeoutMs: this.config.requestTimeoutMs,
+      headers: this.config.headers,
+      apiHeaders: this.config.apiHeaders,
+      debug: this.config.debug,
+      signal: this.config.signal,
+      proxy: this.config.proxy,
       ...opts,
     }
   }

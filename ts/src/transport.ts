@@ -38,10 +38,12 @@ export class ControlClient {
         headers: {
           ...this.config.authHeaders,
           ...(opts.json ? { 'content-type': 'application/json' } : {}),
+          ...(opts.headers ?? {}),
         },
         body: opts.json ? JSON.stringify(opts.json) : undefined,
       },
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      opts.signal ?? this.config.signal
     )
 
     return parseJsonResponse(response)
@@ -89,13 +91,15 @@ export class DataPlaneClient {
       {
         method: opts.method,
         headers: {
+          ...this.config.headers,
           Authorization: `Bearer ${this.token}`,
           ...(opts.json ? { 'content-type': 'application/json' } : {}),
           ...(opts.headers ?? {}),
         },
         body: opts.json ? JSON.stringify(opts.json) : (opts.body as BodyInit | undefined),
       },
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      opts.signal ?? this.config.signal
     )
 
     if (!response.ok) {
@@ -115,6 +119,7 @@ export interface RequestOpts {
   body?: BodyInit | Uint8Array
   headers?: Record<string, string>
   requestTimeoutMs?: number
+  signal?: AbortSignal
 }
 
 export function withQuery(path: string, params: Record<string, string | number | boolean | undefined>) {
@@ -143,13 +148,25 @@ async function readJsonOrText(response: Response): Promise<unknown> {
   }
 }
 
-function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  let timedOut = false
+  const abortFromCaller = () => controller.abort()
+  if (signal?.aborted) controller.abort()
+  else signal?.addEventListener('abort', abortFromCaller, { once: true })
+
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+
   return fetch(url, { ...init, signal: controller.signal }).catch((error) => {
-    if (error?.name === 'AbortError') throw new TimeoutError()
+    if (error?.name === 'AbortError' && timedOut) throw new TimeoutError()
     throw error
-  }).finally(() => clearTimeout(timeout))
+  }).finally(() => {
+    clearTimeout(timeout)
+    signal?.removeEventListener('abort', abortFromCaller)
+  })
 }
 
 function joinUrl(base: string, path: string): string {

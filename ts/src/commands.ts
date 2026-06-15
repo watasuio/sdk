@@ -57,6 +57,7 @@ export interface CommandStartOpts {
   timeout?: number
   processID?: string
   requestTimeoutMs?: number
+  signal?: AbortSignal
 }
 
 /** Live handle for one sandbox process stream. */
@@ -169,14 +170,14 @@ export class Commands {
   }
 
   /** List processes currently known by the sandbox runtime. */
-  async list(opts: { requestTimeoutMs?: number } = {}): Promise<ProcessInfo[]> {
+  async list(opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<ProcessInfo[]> {
     const payload = await this.dataPlane.getJson('/runtime/v1/process', opts)
     const processes = Array.isArray(payload.processes) ? payload.processes : []
     return processes.map((item) => processInfo(item))
   }
 
   /** Send SIGKILL to a process by pid. */
-  async kill(pid: number | string, opts: { requestTimeoutMs?: number } = {}): Promise<boolean> {
+  async kill(pid: number | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<boolean> {
     await this.dataPlane.postJson(`/runtime/v1/process/${pid}/signal`, {
       ...opts,
       json: { signal: 'SIGKILL' },
@@ -185,7 +186,7 @@ export class Commands {
   }
 
   /** Attach to a process and send stdin bytes or text. */
-  async sendStdin(pid: number | string, data: string | Uint8Array, opts: { requestTimeoutMs?: number } = {}) {
+  async sendStdin(pid: number | string, data: string | Uint8Array, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}) {
     const handle = await this.connect(pid, opts)
     try {
       await handle.sendStdin(data)
@@ -195,7 +196,7 @@ export class Commands {
   }
 
   /** Attach to a process and close stdin, signalling EOF. */
-  async closeStdin(pid: number | string, opts: { requestTimeoutMs?: number } = {}) {
+  async closeStdin(pid: number | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}) {
     const handle = await this.connect(pid, opts)
     try {
       await handle.closeStdin()

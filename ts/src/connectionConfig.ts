@@ -16,6 +16,9 @@ export interface ConnectionOpts {
   dataPlaneDomain?: string
   requestTimeoutMs?: number
   headers?: Record<string, string>
+  apiHeaders?: Record<string, string>
+  debug?: boolean
+  signal?: AbortSignal
   proxy?: unknown
 }
 
@@ -27,6 +30,9 @@ export class ConnectionConfig {
   readonly dataPlaneDomain: string
   readonly requestTimeoutMs: number
   readonly headers: Record<string, string>
+  readonly apiHeaders: Record<string, string>
+  readonly debug: boolean
+  readonly signal?: AbortSignal
   readonly proxy?: unknown
 
   constructor(opts: ConnectionOpts = {}) {
@@ -44,13 +50,16 @@ export class ConnectionConfig {
       'watasuhost.com'
     this.requestTimeoutMs = opts.requestTimeoutMs ?? 60_000
     this.headers = opts.headers ?? {}
+    this.apiHeaders = opts.apiHeaders ?? {}
+    this.debug = opts.debug ?? false
+    this.signal = opts.signal
     this.proxy = opts.proxy
   }
 
   /** HTTP headers including the configured bearer token. */
   get authHeaders(): Record<string, string> {
     return this.apiKey
-      ? { ...this.headers, Authorization: `Bearer ${this.apiKey}` }
-      : { ...this.headers }
+      ? { ...this.headers, ...this.apiHeaders, Authorization: `Bearer ${this.apiKey}` }
+      : { ...this.headers, ...this.apiHeaders }
   }
 }

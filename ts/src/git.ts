@@ -25,6 +25,7 @@ export interface GitAuthOpts {
   timeout?: number
   timeoutMs?: number
   requestTimeoutMs?: number
+  signal?: AbortSignal
 }
 
 export interface GitCloneOpts extends GitAuthOpts {
@@ -322,8 +323,12 @@ export class Git {
     return String(result.value ?? '')
   }
 
-  private async run(path: string, json: Record<string, unknown>, opts: { requestTimeoutMs?: number }): Promise<GitCommandResult> {
-    const payload = await this.dataPlane.postJson(path, { json: compact(json), requestTimeoutMs: opts.requestTimeoutMs })
+  private async run(path: string, json: Record<string, unknown>, opts: { requestTimeoutMs?: number; signal?: AbortSignal }): Promise<GitCommandResult> {
+    const payload = await this.dataPlane.postJson(path, {
+      json: compact(json),
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
+    })
     return gitResult(payload.git ?? payload)
   }
 }

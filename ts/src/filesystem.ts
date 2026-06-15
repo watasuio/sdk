@@ -49,6 +49,7 @@ export interface WatchOpts {
 
 export interface FilesystemRequestOpts {
   requestTimeoutMs?: number
+  signal?: AbortSignal
   user?: string
 }
 
@@ -231,14 +232,14 @@ export class Filesystem {
   }
 
   /** List directory entries below `path`. */
-  async list(path: string, opts: { requestTimeoutMs?: number; depth?: number } = {}): Promise<EntryInfo[]> {
+  async list(path: string, opts: FilesystemRequestOpts & { depth?: number } = {}): Promise<EntryInfo[]> {
     const payload = await this.dataPlane.getJson(withQuery('/runtime/v1/directories', { path, depth: opts.depth }), opts)
     const entries = Array.isArray(payload.entries) ? payload.entries : []
     return entries.map(entryInfo)
   }
 
   /** Return whether a file or directory exists at `path`. */
-  async exists(path: string, opts: { requestTimeoutMs?: number } = {}): Promise<boolean> {
+  async exists(path: string, opts: FilesystemRequestOpts = {}): Promise<boolean> {
     try {
       await this.getInfo(path, opts)
       return true
@@ -249,18 +250,18 @@ export class Filesystem {
   }
 
   /** Return stat metadata for `path`. */
-  async getInfo(path: string, opts: { requestTimeoutMs?: number } = {}): Promise<EntryInfo> {
+  async getInfo(path: string, opts: FilesystemRequestOpts = {}): Promise<EntryInfo> {
     const payload = await this.dataPlane.getJson(withQuery('/runtime/v1/files/stat', { path }), opts)
     return entryInfo(payload.file ?? payload.entry ?? payload)
   }
 
   /** Remove a file at `path`. */
-  async remove(path: string, opts: { requestTimeoutMs?: number } = {}): Promise<void> {
+  async remove(path: string, opts: FilesystemRequestOpts = {}): Promise<void> {
     await this.dataPlane.deleteJson(withQuery('/runtime/v1/files', { path }), opts)
   }
 
   /** Move or rename a file. */
-  async rename(oldPath: string, newPath: string, opts: { requestTimeoutMs?: number } = {}): Promise<EntryInfo> {
+  async rename(oldPath: string, newPath: string, opts: FilesystemRequestOpts = {}): Promise<EntryInfo> {
     const payload = await this.dataPlane.postJson('/runtime/v1/files/move', {
       ...opts,
       json: { from_path: oldPath, to_path: newPath },
@@ -269,7 +270,7 @@ export class Filesystem {
   }
 
   /** Create a directory. */
-  async makeDir(path: string, opts: { requestTimeoutMs?: number } = {}): Promise<boolean> {
+  async makeDir(path: string, opts: FilesystemRequestOpts = {}): Promise<boolean> {
     await this.dataPlane.postJson(withQuery('/runtime/v1/directories', { path }), opts)
     return true
   }
