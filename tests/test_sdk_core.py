@@ -6,6 +6,7 @@ import json
 import pytest
 
 from watasu import (
+    ALL_TRAFFIC,
     AsyncSandbox,
     BuildException,
     CommandExitException,
@@ -15,8 +16,10 @@ from watasu import (
     Sandbox,
     SandboxBase,
     SandboxOpts,
+    McpServer,
     Template,
     TemplateBuildStatus,
+    get_signature,
     wait_for_timeout,
 )
 from watasu._transport.process_ws import ProcessSocket
@@ -710,9 +713,15 @@ def test_sandbox_create_with_mcp_starts_gateway_and_caches_token(monkeypatch):
 def test_python_sandbox_main_compatibility_imports():
     from watasu.sandbox.main import SandboxBase as ImportedSandboxBase
     from watasu.sandbox.main import SandboxOpts as ImportedSandboxOpts
+    from watasu.sandbox.mcp import McpServer as ImportedMcpServer
+    from watasu.sandbox.network import ALL_TRAFFIC as ImportedAllTraffic
+    from watasu.sandbox.signature import get_signature as imported_get_signature
 
     assert ImportedSandboxBase is SandboxBase
     assert ImportedSandboxOpts is SandboxOpts
+    assert ImportedMcpServer is McpServer
+    assert ImportedAllTraffic == ALL_TRAFFIC
+    assert imported_get_signature is get_signature
     assert Sandbox.default_template == "base"
     assert Sandbox.default_sandbox_timeout == 300
     assert Sandbox.default_mcp_template == "mcp-gateway"

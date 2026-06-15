@@ -22,7 +22,7 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   network?: SandboxNetworkUpdate
   team?: string
   /** MCP gateway configuration to launch inside an `mcp-gateway` sandbox. */
-  mcp?: unknown
+  mcp?: McpServer
   volumeMounts?: unknown
 }
 
@@ -100,6 +100,12 @@ export interface FileUrlInfo {
   expiresAt?: string
   raw: Record<string, unknown>
 }
+
+/** MCP gateway configuration accepted by `Sandbox.create({ mcp })`. */
+export type McpServer = Record<string, unknown>
+
+/** Name accepted by `Template.addMcpServer`. Watasu keeps this open-ended. */
+export type McpServerName = string
 
 export interface SandboxUrlOpts extends ConnectionOpts {
   user?: string

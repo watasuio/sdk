@@ -21,6 +21,8 @@ export type {
   SandboxInfo,
   SandboxListOpts,
   SandboxMetrics,
+  McpServer,
+  McpServerName,
   SandboxNetworkSelector,
   SandboxNetworkUpdate,
   SandboxNetworkUpdateOpts,
