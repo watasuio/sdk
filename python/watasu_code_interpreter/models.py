@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class OutputMessage:
+    """One stdout or stderr line emitted by code execution."""
+
+    line: str
+    timestamp: float = field(default_factory=time.time)
+    error: bool = False
+
+    def __str__(self) -> str:
+        return self.line
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "line": self.line,
+            "timestamp": self.timestamp,
+            "error": self.error,
+        }
+
+
+@dataclass
+class Logs:
+    """Captured stdout and stderr output for an execution."""
+
+    stdout: List[OutputMessage] = field(default_factory=list)
+    stderr: List[OutputMessage] = field(default_factory=list)
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "stdout": [message.to_json() for message in self.stdout],
+            "stderr": [message.to_json() for message in self.stderr],
+        }
+
+
+@dataclass
+class ExecutionError:
+    """Structured exception raised by user code inside the sandbox."""
+
+    name: str
+    value: str
+    traceback: str
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "value": self.value,
+            "traceback": self.traceback,
+        }
+
+
+@dataclass
+class Result:
+    """Rich result produced by the last expression of a code execution."""
+
+    text: Optional[str] = None
+    html: Optional[str] = None
+    markdown: Optional[str] = None
+    svg: Optional[str] = None
+    png: Optional[str] = None
+    jpeg: Optional[str] = None
+    pdf: Optional[str] = None
+    latex: Optional[str] = None
+    json: Any = None
+    javascript: Optional[str] = None
+    data: Any = None
+    chart: Any = None
+    extra: Dict[str, Any] = field(default_factory=dict)
+    is_main_result: bool = False
+
+    def formats(self) -> List[str]:
+        """Return available display formats for this result."""
+
+        names = [
+            "text",
+            "html",
+            "markdown",
+            "svg",
+            "png",
+            "jpeg",
+            "pdf",
+            "latex",
+            "json",
+            "javascript",
+            "data",
+            "chart",
+        ]
+        return [name for name in names if getattr(self, name) is not None]
+
+    def to_json(self) -> Dict[str, Any]:
+        payload = {
+            "text": self.text,
+            "html": self.html,
+            "markdown": self.markdown,
+            "svg": self.svg,
+            "png": self.png,
+            "jpeg": self.jpeg,
+            "pdf": self.pdf,
+            "latex": self.latex,
+            "json": self.json,
+            "javascript": self.javascript,
+            "data": self.data,
+            "chart": self.chart,
+            "extra": self.extra,
+            "is_main_result": self.is_main_result,
+        }
+        return {key: value for key, value in payload.items() if value is not None}
+
+    def __repr__(self) -> str:
+        return self.text or super().__repr__()
+
+
+@dataclass
+class Execution:
+    """Complete result of a sandbox code execution."""
+
+    results: List[Result] = field(default_factory=list)
+    logs: Logs = field(default_factory=Logs)
+    error: Optional[ExecutionError] = None
+    execution_count: Optional[int] = None
+
+    @property
+    def text(self) -> Optional[str]:
+        """Text for the main result, when code produced one."""
+
+        for result in self.results:
+            if result.is_main_result and result.text is not None:
+                return result.text
+        for result in self.results:
+            if result.text is not None:
+                return result.text
+        return None
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "results": [result.to_json() for result in self.results],
+            "logs": self.logs.to_json(),
+            "error": self.error.to_json() if self.error else None,
+            "execution_count": self.execution_count,
+        }
+
+
+@dataclass
+class Context:
+    """Code execution context metadata."""
+
+    id: str
+    language: Optional[str] = None
+    cwd: Optional[str] = None
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "language": self.language,
+            "cwd": self.cwd,
+        }
+
+
+def execution_from_api(payload: Dict[str, Any]) -> Execution:
+    execution = payload.get("execution") or payload
+    logs = execution.get("logs") or {}
+    return Execution(
+        results=[result_from_api(item) for item in execution.get("results") or []],
+        logs=Logs(
+            stdout=[
+                output_message_from_api(item, error=False)
+                for item in logs.get("stdout") or []
+            ],
+            stderr=[
+                output_message_from_api(item, error=True)
+                for item in logs.get("stderr") or []
+            ],
+        ),
+        error=error_from_api(execution.get("error")),
+        execution_count=execution.get("execution_count"),
+    )
+
+
+def result_from_api(payload: Dict[str, Any]) -> Result:
+    known = {
+        "text",
+        "html",
+        "markdown",
+        "svg",
+        "png",
+        "jpeg",
+        "pdf",
+        "latex",
+        "json",
+        "javascript",
+        "data",
+        "chart",
+        "extra",
+        "is_main_result",
+    }
+    return Result(
+        text=payload.get("text"),
+        html=payload.get("html"),
+        markdown=payload.get("markdown"),
+        svg=payload.get("svg"),
+        png=payload.get("png"),
+        jpeg=payload.get("jpeg"),
+        pdf=payload.get("pdf"),
+        latex=payload.get("latex"),
+        json=payload.get("json"),
+        javascript=payload.get("javascript"),
+        data=payload.get("data"),
+        chart=payload.get("chart"),
+        extra=payload.get("extra") or {
+            key: value for key, value in payload.items() if key not in known
+        },
+        is_main_result=bool(payload.get("is_main_result")),
+    )
+
+
+def output_message_from_api(payload: Any, error: bool) -> OutputMessage:
+    if isinstance(payload, dict):
+        return OutputMessage(
+            line=str(payload.get("line", "")),
+            timestamp=float(payload.get("timestamp") or time.time()),
+            error=bool(payload.get("error", error)),
+        )
+    return OutputMessage(line=str(payload), error=error)
+
+
+def error_from_api(payload: Any) -> Optional[ExecutionError]:
+    if not isinstance(payload, dict):
+        return None
+    return ExecutionError(
+        name=str(payload.get("name") or ""),
+        value=str(payload.get("value") or ""),
+        traceback=str(payload.get("traceback") or ""),
+    )

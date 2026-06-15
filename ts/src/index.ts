@@ -13,6 +13,7 @@ export {
 } from './errors.js'
 export { ConnectionConfig, KEEPALIVE_PING_INTERVAL_SEC } from './connectionConfig.js'
 export { Sandbox, SandboxPaginator, SnapshotPaginator } from './sandbox.js'
+export { Sandbox as CodeInterpreterSandbox } from './codeInterpreter.js'
 export type {
   CreateSnapshotOpts,
   RestoreSnapshotOpts,
@@ -30,6 +31,18 @@ export type {
   SnapshotInfo,
   FileUrlInfo,
 } from './sandbox.js'
+export type {
+  CreateCodeContextOpts,
+  RunCodeLanguage,
+  RunCodeOpts,
+} from './codeInterpreter.js'
+export {
+  Context as CodeInterpreterContext,
+  Execution as CodeInterpreterExecution,
+  ExecutionError as CodeInterpreterExecutionError,
+  OutputMessage as CodeInterpreterOutputMessage,
+  Result as CodeInterpreterResult,
+} from './codeInterpreter.js'
 export { CommandExitError, CommandHandle, Commands } from './commands.js'
 export type { CommandResult, CommandStartOpts, ProcessInfo } from './commands.js'
 export { Process, ProcessManager, ProcessMessage, ProcessOutput } from './process.js'

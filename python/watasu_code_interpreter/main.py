@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Callable, Dict, List, Optional
+
+from watasu.connection_config import ApiParams
+from watasu.exceptions import InvalidArgumentException
+from watasu.sandbox_async.main import AsyncSandbox as BaseAsyncSandbox
+from watasu.sandbox_async.main import _AsyncDualMethod, _thread_callback
+from watasu.sandbox_sync.main import Sandbox as BaseSandbox
+
+from .models import Context, Execution, ExecutionError, OutputMessage, Result
+from .models import execution_from_api
+
+
+class Sandbox(BaseSandbox):
+    """Sandbox specialized for running Python code."""
+
+    default_template = "code-interpreter"
+
+    def run_code(
+        self,
+        code: str,
+        language: Optional[str] = None,
+        context: Optional[Context] = None,
+        on_stdout: Optional[Callable[[OutputMessage], None]] = None,
+        on_stderr: Optional[Callable[[OutputMessage], None]] = None,
+        on_result: Optional[Callable[[Result], None]] = None,
+        on_error: Optional[Callable[[ExecutionError], None]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        timeout: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> Execution:
+        """Run Python code in the sandbox and return structured execution output."""
+
+        if not isinstance(code, str):
+            raise InvalidArgumentException("code must be a string")
+        if language is not None and context is not None:
+            raise InvalidArgumentException("language and context cannot both be set")
+
+        payload = _compact(
+            {
+                "code": code,
+                "language": language,
+                "context_id": _context_id(context),
+                "env_vars": envs,
+                "timeout_seconds": timeout,
+            }
+        )
+        response = self._require_data_plane().post_json(
+            "/runtime/v1/code/run",
+            json=payload,
+            request_timeout=request_timeout,
+        )
+        execution = execution_from_api(response)
+        _emit_callbacks(execution, on_stdout, on_stderr, on_result, on_error)
+        return execution
+
+    def create_code_context(
+        self,
+        cwd: Optional[str] = None,
+        language: Optional[str] = None,
+        request_timeout: Optional[float] = None,
+    ) -> Context:
+        """Create a persistent code context."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+    def remove_code_context(
+        self,
+        context: Context,
+        request_timeout: Optional[float] = None,
+    ) -> bool:
+        """Remove a persistent code context."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+    def list_code_contexts(self, request_timeout: Optional[float] = None) -> List[Context]:
+        """List persistent code contexts."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+    def restart_code_context(
+        self,
+        context: Context,
+        request_timeout: Optional[float] = None,
+    ) -> Context:
+        """Restart a persistent code context."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+
+class AsyncSandbox(BaseAsyncSandbox):
+    """Async sandbox specialized for running Python code."""
+
+    default_template = Sandbox.default_template
+
+    @classmethod
+    async def create(cls, *args: Any, **kwargs: Any) -> "AsyncSandbox":
+        """Create a code-interpreter sandbox and return async helpers."""
+
+        return cls(sync_sandbox=await asyncio.to_thread(Sandbox.create, *args, **kwargs))
+
+    beta_create = create
+
+    async def _connect_instance(
+        self, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> "AsyncSandbox":
+        """Reconnect this sandbox and refresh its data-plane session."""
+
+        await asyncio.to_thread(self._sync.connect, timeout=timeout, **opts)
+        self._set_sync(self._sync)
+        return self
+
+    @classmethod
+    async def _connect_class(
+        cls, sandbox_id: str, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> "AsyncSandbox":
+        """Connect to an existing code-interpreter sandbox by id."""
+
+        return cls(
+            sync_sandbox=await asyncio.to_thread(
+                Sandbox.connect, sandbox_id, timeout=timeout, **opts
+            )
+        )
+
+    connect = _AsyncDualMethod(_connect_instance, _connect_class)
+    reconnect = connect
+
+    async def run_code(
+        self,
+        code: str,
+        language: Optional[str] = None,
+        context: Optional[Context] = None,
+        on_stdout: Optional[Callable[[OutputMessage], None]] = None,
+        on_stderr: Optional[Callable[[OutputMessage], None]] = None,
+        on_result: Optional[Callable[[Result], None]] = None,
+        on_error: Optional[Callable[[ExecutionError], None]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        timeout: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> Execution:
+        """Run Python code in the sandbox and return structured execution output."""
+
+        loop = asyncio.get_running_loop()
+        return await asyncio.to_thread(
+            self._sync.run_code,
+            code,
+            language=language,
+            context=context,
+            on_stdout=_thread_callback(loop, on_stdout),
+            on_stderr=_thread_callback(loop, on_stderr),
+            on_result=_thread_callback(loop, on_result),
+            on_error=_thread_callback(loop, on_error),
+            envs=envs,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
+
+    async def create_code_context(
+        self,
+        cwd: Optional[str] = None,
+        language: Optional[str] = None,
+        request_timeout: Optional[float] = None,
+    ) -> Context:
+        """Create a persistent code context."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+    async def remove_code_context(
+        self,
+        context: Context,
+        request_timeout: Optional[float] = None,
+    ) -> bool:
+        """Remove a persistent code context."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+    async def list_code_contexts(
+        self, request_timeout: Optional[float] = None
+    ) -> List[Context]:
+        """List persistent code contexts."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+    async def restart_code_context(
+        self,
+        context: Context,
+        request_timeout: Optional[float] = None,
+    ) -> Context:
+        """Restart a persistent code context."""
+
+        raise NotImplementedError("code contexts are not supported by Watasu yet")
+
+
+def _emit_callbacks(
+    execution: Execution,
+    on_stdout: Optional[Callable[[OutputMessage], None]],
+    on_stderr: Optional[Callable[[OutputMessage], None]],
+    on_result: Optional[Callable[[Result], None]],
+    on_error: Optional[Callable[[ExecutionError], None]],
+) -> None:
+    for message in execution.logs.stdout:
+        if on_stdout is not None:
+            on_stdout(message)
+    for message in execution.logs.stderr:
+        if on_stderr is not None:
+            on_stderr(message)
+    for result in execution.results:
+        if on_result is not None:
+            on_result(result)
+    if execution.error is not None and on_error is not None:
+        on_error(execution.error)
+
+
+def _context_id(context: Optional[Context]) -> Optional[str]:
+    if context is None:
+        return None
+    if isinstance(context, str):
+        return context
+    if isinstance(context, dict):
+        value = context.get("id")
+        return str(value) if value is not None else None
+    value = getattr(context, "id", None)
+    return str(value) if value is not None else None
+
+
+def _compact(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+__all__ = [
+    "AsyncSandbox",
+    "Context",
+    "Execution",
+    "ExecutionError",
+    "OutputMessage",
+    "Result",
+    "Sandbox",
+]

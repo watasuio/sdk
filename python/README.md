@@ -41,6 +41,23 @@ with Sandbox.create() as sbx:
 
 Leaving the context manager calls `kill()`.
 
+## Code Interpreter
+
+```python
+from watasu_code_interpreter import Sandbox
+
+with Sandbox.create() as sbx:
+    execution = sbx.run_code(
+        "print('hello')\n2 + 3",
+        on_stdout=lambda message: print(message.line),
+    )
+    print(execution.text)
+```
+
+`watasu_code_interpreter.Sandbox` starts the `code-interpreter` template by
+default and returns structured `results`, `logs`, and `error` fields for each
+execution.
+
 ## MCP Gateway
 
 ```python

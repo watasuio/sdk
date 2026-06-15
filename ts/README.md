@@ -31,6 +31,24 @@ await sbx.betaPause()
 await sbx.resume({ timeoutMs: 300_000 })
 ```
 
+## Code Interpreter
+
+```ts
+import { Sandbox } from '@watasu/sdk/code-interpreter'
+
+const sbx = await Sandbox.create()
+const execution = await sbx.runCode("print('hello')\n2 + 3", {
+  language: 'python',
+  onStdout: (message) => console.log(message.line),
+})
+
+console.log(execution.text)
+await sbx.kill()
+```
+
+`@watasu/sdk/code-interpreter` starts the `code-interpreter` template by default
+and returns structured `results`, `logs`, and `error` fields for each execution.
+
 ## MCP Gateway
 
 ```ts

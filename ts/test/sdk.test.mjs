@@ -29,6 +29,7 @@ import {
   waitForTimeout,
   waitForURL,
 } from '../dist/index.js'
+import { Sandbox as CodeInterpreterSandbox } from '../dist/codeInterpreter.js'
 
 test('connection config defaults to Watasu hosts', () => {
   const config = new ConnectionConfig({ apiKey: 'key' })
@@ -382,6 +383,91 @@ test('sandbox create uses root snake_case API payload', async () => {
       allow_package_registry_access: true,
       team: 'bridgeapp',
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('code interpreter sandbox create defaults to code-interpreter template', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) })
+      return new Response(
+        JSON.stringify({
+          sandbox: { id: 'code-created', template_id: 'code-interpreter' },
+          session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const sbx = await CodeInterpreterSandbox.create({ apiKey: 'key' })
+
+    assert.ok(sbx instanceof CodeInterpreterSandbox)
+    assert.equal(sbx.sandboxId, 'code-created')
+    assert.equal(requests[0].body.template_id, 'code-interpreter')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('code interpreter runCode uses runtime API and parses callbacks', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      return new Response(
+        JSON.stringify({
+          execution: {
+            results: [{ text: '5', json: 5, is_main_result: true }],
+            logs: { stdout: ['hello'], stderr: ['warn'] },
+            error: null,
+            execution_count: null,
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const sbx = new CodeInterpreterSandbox({
+      sandboxId: 'code',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+    })
+    const stdout = []
+    const stderr = []
+    const results = []
+
+    const execution = await sbx.runCode("print('hello')\n2 + 3", {
+      language: 'python',
+      envs: { A: 'B' },
+      timeout: 5,
+      requestTimeoutMs: 10,
+      onStdout: (message) => stdout.push(message),
+      onStderr: (message) => stderr.push(message),
+      onResult: (result) => results.push(result),
+    })
+
+    assert.equal(execution.text, '5')
+    assert.equal(stdout[0].line, 'hello')
+    assert.equal(stderr[0].line, 'warn')
+    assert.equal(stderr[0].error, true)
+    assert.deepEqual(results[0].formats(), ['text', 'json'])
+    assert.deepEqual(requests, [
+      {
+        url: 'https://route.sandbox.watasuhost.com/runtime/v1/code/run',
+        method: 'POST',
+        body: {
+          code: "print('hello')\n2 + 3",
+          language: 'python',
+          env_vars: { A: 'B' },
+          timeout_seconds: 5,
+        },
+      },
+    ])
   } finally {
     globalThis.fetch = originalFetch
   }

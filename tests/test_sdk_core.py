@@ -34,6 +34,7 @@ from watasu.template_async import AsyncTemplate as TemplateAsyncExport
 from watasu.template_async.main import AsyncTemplate as TemplateAsyncMain
 from watasu.template_sync import Template as TemplateSyncExport
 from watasu.template_sync.main import Template as TemplateSyncMain
+from watasu_code_interpreter import Sandbox as CodeInterpreterSandbox
 
 
 def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
@@ -671,6 +672,98 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["kwargs"]["json"]["allow_out"] == ["pypi.org:443"]
     assert captured["kwargs"]["json"]["deny_out"] == ["10.0.0.0/8"]
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
+
+
+def test_code_interpreter_sandbox_uses_code_interpreter_template(monkeypatch):
+    captured = {}
+
+    class FakeControl:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def post(self, path, **kwargs):
+            captured["path"] = path
+            captured["kwargs"] = kwargs
+            return {
+                "sandbox": {"id": "code-created"},
+                "session": {
+                    "data_plane_url": "https://route.sandbox.watasuhost.com",
+                    "token": "data",
+                },
+            }
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    sbx = CodeInterpreterSandbox.create(api_key="key")
+
+    assert sbx.sandbox_id == "code-created"
+    assert captured["path"] == "/sandboxes"
+    assert captured["kwargs"]["json"]["template_id"] == "code-interpreter"
+
+
+def test_code_interpreter_run_code_uses_runtime_api_and_callbacks():
+    calls = []
+
+    class DataPlane:
+        def post_json(self, path, **kwargs):
+            calls.append((path, kwargs))
+            return {
+                "execution": {
+                    "results": [
+                        {"text": "5", "json": 5, "is_main_result": True},
+                    ],
+                    "logs": {
+                        "stdout": ["hello"],
+                        "stderr": ["warn"],
+                    },
+                    "error": None,
+                    "execution_count": None,
+                }
+            }
+
+    sbx = CodeInterpreterSandbox(
+        "code",
+        connection_config=ConnectionConfig(api_key="key"),
+        session={
+            "data_plane_url": "https://route.sandbox.watasuhost.com",
+            "token": "data",
+        },
+    )
+    sbx._data_plane = DataPlane()
+    stdout = []
+    stderr = []
+    results = []
+
+    execution = sbx.run_code(
+        "print('hello')\n2 + 3",
+        language="python",
+        envs={"A": "B"},
+        timeout=5,
+        request_timeout=10,
+        on_stdout=stdout.append,
+        on_stderr=stderr.append,
+        on_result=results.append,
+    )
+
+    assert execution.text == "5"
+    assert stdout[0].line == "hello"
+    assert stderr[0].line == "warn"
+    assert stderr[0].error is True
+    assert results[0].formats() == ["text", "json"]
+    assert calls == [
+        (
+            "/runtime/v1/code/run",
+            {
+                "json": {
+                    "code": "print('hello')\n2 + 3",
+                    "language": "python",
+                    "env_vars": {"A": "B"},
+                    "timeout_seconds": 5,
+                },
+                "request_timeout": 10,
+            },
+        )
+    ]
 
 
 def test_sandbox_create_with_mcp_sends_config_to_api_without_sdk_bootstrap(monkeypatch):

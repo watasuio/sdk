@@ -203,9 +203,9 @@ export class SandboxPaginator {
 /** Running Watasu sandbox with ready `files` and `commands` helpers. */
 export class Sandbox {
   /** Default template slug used when create is called without a template. */
-  static readonly defaultTemplate = 'base'
+  static readonly defaultTemplate: string = 'base'
   /** Default template slug used by MCP creation once Watasu supports it. */
-  static readonly defaultMcpTemplate = 'mcp-gateway'
+  static readonly defaultMcpTemplate: string = 'mcp-gateway'
   /** Default sandbox lifetime in milliseconds. */
   static readonly defaultSandboxTimeoutMs = 300_000
 
@@ -265,7 +265,7 @@ export class Sandbox {
     const sandboxOpts = typeof templateOrOpts === 'string' ? opts : templateOrOpts ?? {}
     const template = typeof templateOrOpts === 'string'
       ? templateOrOpts
-      : templateOrOpts?.template ?? (sandboxOpts.mcp === undefined ? Sandbox.defaultTemplate : undefined)
+      : templateOrOpts?.template ?? (sandboxOpts.mcp === undefined ? this.defaultTemplate : undefined)
 
     if (sandboxOpts.volumeMounts !== undefined) unsupported('volumeMounts')
 
@@ -290,7 +290,7 @@ export class Sandbox {
     const sandbox = record(response.sandbox ?? response)
     const sandboxId = sandbox.id ?? sandbox.sandbox_id
     if (sandboxId === undefined) throw new SandboxError('create response did not include sandbox id')
-    const sandboxInstance = new Sandbox({
+    const sandboxInstance = new this({
       sandboxId: String(sandboxId),
       connectionConfig: config,
       control,
@@ -310,7 +310,7 @@ export class Sandbox {
       json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
       requestTimeoutMs: sessionOperationRequestTimeout(config, opts),
     })
-    return new Sandbox({
+    return new this({
       sandboxId,
       connectionConfig: config,
       control,
@@ -635,6 +635,14 @@ export class Sandbox {
       requestTimeoutMs: opts.requestTimeoutMs,
     })
     return fileUrlInfo(record(payload.file_url ?? payload))
+  }
+
+  /** POST JSON to the sandbox data-plane runtime API. */
+  protected async runtimePostJson(path: string, json: Record<string, unknown>, opts: ConnectionOpts = {}): Promise<Record<string, unknown>> {
+    return this.dataPlane.postJson(path, {
+      json,
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
   }
 
   private configOptions(): ConnectionOpts {
