@@ -351,6 +351,9 @@ class AsyncGit:
     async def configure_user(self, *args, **kwargs) -> GitCommandResult:
         return await asyncio.to_thread(self._git.configure_user, *args, **kwargs)
 
+    async def init(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.init, *args, **kwargs)
+
     async def status(self, *args, **kwargs) -> GitStatus:
         return await asyncio.to_thread(self._git.status, *args, **kwargs)
 
@@ -369,6 +372,12 @@ class AsyncGit:
     async def commit(self, *args, **kwargs) -> GitCommandResult:
         return await asyncio.to_thread(self._git.commit, *args, **kwargs)
 
+    async def reset(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.reset, *args, **kwargs)
+
+    async def restore(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.restore, *args, **kwargs)
+
     async def pull(self, *args, **kwargs) -> GitCommandResult:
         return await asyncio.to_thread(self._git.pull, *args, **kwargs)
 
@@ -383,6 +392,9 @@ class AsyncGit:
 
     async def remote_add(self, *args, **kwargs) -> GitCommandResult:
         return await asyncio.to_thread(self._git.remote_add, *args, **kwargs)
+
+    async def remote_get(self, *args, **kwargs) -> Optional[str]:
+        return await asyncio.to_thread(self._git.remote_get, *args, **kwargs)
 
     async def set_config(self, *args, **kwargs) -> GitCommandResult:
         return await asyncio.to_thread(self._git.set_config, *args, **kwargs)

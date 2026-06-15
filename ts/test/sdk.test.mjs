@@ -508,6 +508,12 @@ test('git helper uses data-plane git routes', async () => {
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
       }
+      if (String(url).endsWith('/git/remote_get')) {
+        return new Response(
+          JSON.stringify({ git: { path: '/workspace/repo', name: 'origin', value: 'https://git.example/repo.git', url: 'https://git.example/repo.git', stdout: 'https://git.example/repo.git\n', stderr: '' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
       return new Response(
         JSON.stringify({ git: { path: '/workspace/repo', url: 'https://git.example/repo.git', branch: 'feature/test', remote: 'origin', name: 'origin', stdout: 'ok\n', stderr: '' } }),
         { status: 200, headers: { 'content-type': 'application/json' } }
@@ -524,17 +530,21 @@ test('git helper uses data-plane git routes', async () => {
     const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, timeoutMs: 10_000 })
     await sbx.git.dangerouslyAuthenticate({ username: 'user', password: 'token', host: 'git.example.com', protocol: 'https', timeout: 5 })
     await sbx.git.configureUser('Watasu Test', 'test@watasu.local', { scope: 'local', path: '/workspace/repo' })
+    await sbx.git.init('/workspace/repo', { initialBranch: 'main' })
     const status = await sbx.git.status('/workspace/repo')
     const branches = await sbx.git.branches('/workspace/repo')
     await sbx.git.createBranch('/workspace/repo', 'feature/test')
     await sbx.git.deleteBranch('/workspace/repo', 'feature/test', { force: true })
     await sbx.git.add('/workspace/repo', { files: ['README.md'] })
     await sbx.git.commit('/workspace/repo', 'change', { authorName: 'Watasu Test', authorEmail: 'test@watasu.local', allowEmpty: true })
+    await sbx.git.reset('/workspace/repo', { mode: 'hard', target: 'HEAD', paths: ['README.md'] })
+    await sbx.git.restore('/workspace/repo', { paths: ['README.md'], staged: true })
     await sbx.git.pull('/workspace/repo', { remote: 'origin', branch: 'main', username: 'user', password: 'token' })
     await sbx.git.push('/workspace/repo', { remote: 'origin', branch: 'main', setUpstream: true, username: 'user', password: 'token' })
     await sbx.git.checkout('/workspace/repo', 'main')
     await sbx.git.checkoutBranch('/workspace/repo', 'main')
     await sbx.git.remoteAdd('/workspace/repo', 'origin', 'https://git.example/repo.git', { fetch: true, overwrite: true })
+    const remoteUrl = await sbx.git.remoteGet('/workspace/repo', 'origin')
     await sbx.git.setConfig('pull.rebase', 'false', { scope: 'local', path: '/workspace/repo' })
     const configValue = await sbx.git.getConfig('pull.rebase', { scope: 'local', path: '/workspace/repo' })
 
@@ -545,22 +555,27 @@ test('git helper uses data-plane git routes', async () => {
     assert.equal(status.untrackedCount, 1)
     assert.deepEqual(branches.branches, ['main', 'feature/test'])
     assert.equal(branches.currentBranch, 'main')
+    assert.equal(remoteUrl, 'https://git.example/repo.git')
     assert.equal(configValue, 'false')
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/clone', { url: 'https://git.example/repo.git', timeout_seconds: 10, path: '/workspace/repo', branch: 'main', depth: 1 }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/dangerously_authenticate', { timeout_seconds: 5, username: 'user', password: 'token', host: 'git.example.com', protocol: 'https' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/configure_user', { name: 'Watasu Test', email: 'test@watasu.local', scope: 'local', path: '/workspace/repo' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/init', { path: '/workspace/repo', initial_branch: 'main' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/status', { path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/branches', { path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/create_branch', { path: '/workspace/repo', branch: 'feature/test' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/delete_branch', { path: '/workspace/repo', branch: 'feature/test', force: true }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/add', { path: '/workspace/repo', files: ['README.md'] }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/commit', { path: '/workspace/repo', message: 'change', author_name: 'Watasu Test', author_email: 'test@watasu.local', allow_empty: true }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/reset', { path: '/workspace/repo', mode: 'hard', target: 'HEAD', paths: ['README.md'] }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/restore', { path: '/workspace/repo', paths: ['README.md'], staged: true }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/pull', { path: '/workspace/repo', remote: 'origin', branch: 'main', username: 'user', password: 'token' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/push', { path: '/workspace/repo', remote: 'origin', branch: 'main', username: 'user', password: 'token', set_upstream: true }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/checkout', { path: '/workspace/repo', ref: 'main' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/checkout', { path: '/workspace/repo', ref: 'main' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/remote_add', { path: '/workspace/repo', name: 'origin', url: 'https://git.example/repo.git', fetch: true, overwrite: true }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/remote_get', { path: '/workspace/repo', name: 'origin' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/set_config', { key: 'pull.rebase', value: 'false', scope: 'local', path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/get_config', { key: 'pull.rebase', scope: 'local', path: '/workspace/repo' }],
     ])

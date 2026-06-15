@@ -46,7 +46,8 @@ pub use filesystem::{FilesystemEvent, WatchHandle, WatchOptions};
 pub use git::{
     Git, GitAddOptions, GitBranches, GitCloneOptions, GitCommandResult, GitCommitOptions,
     GitConfigOptions, GitConfigureUserOptions, GitCredentialOptions, GitDeleteBranchOptions,
-    GitFileStatus, GitRemoteAddOptions, GitRemoteOperationOptions, GitRequestOptions, GitStatus,
+    GitFileStatus, GitInitOptions, GitRemoteAddOptions, GitRemoteOperationOptions,
+    GitRequestOptions, GitResetOptions, GitRestoreOptions, GitStatus,
 };
 pub use process_socket::{decode_runtime_data, encode_runtime_data, ProcessSocket};
 pub use pty::{Pty, PtyCreateOptions, PtySize};

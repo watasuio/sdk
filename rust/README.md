@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.9"
+watasu = "0.1.10"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -43,13 +43,22 @@ sbx.resume().await?;
 ```rust
 use watasu::{
     CreateOptions, GitAddOptions, GitCloneOptions, GitCommitOptions,
-    GitConfigureUserOptions, GitRemoteOperationOptions, PtyCreateOptions,
-    Sandbox, WatchOptions, WriteEntry,
+    GitConfigureUserOptions, GitInitOptions, GitRemoteOperationOptions, GitResetOptions,
+    GitRestoreOptions, PtyCreateOptions, Sandbox, WatchOptions, WriteEntry,
 };
 
 # async fn run() -> watasu::Result<()> {
 let sbx = Sandbox::create(CreateOptions::default()).await?;
 
+sbx.git
+    .init(
+        "/workspace/new-project",
+        GitInitOptions {
+            initial_branch: Some("main".into()),
+            ..Default::default()
+        },
+    )
+    .await?;
 sbx.git
     .clone(
         "https://github.com/acme/project.git",
@@ -103,6 +112,29 @@ sbx.git
             remote: Some("origin".into()),
             branch: Some("feature/docs".into()),
             set_upstream: true,
+            ..Default::default()
+        },
+    )
+    .await?;
+let remote_url = sbx
+    .git
+    .remote_get("/workspace/project", "origin", Default::default())
+    .await?;
+sbx.git
+    .restore(
+        "/workspace/project",
+        GitRestoreOptions {
+            paths: vec!["README.md".into()],
+            ..Default::default()
+        },
+    )
+    .await?;
+sbx.git
+    .reset(
+        "/workspace/project",
+        GitResetOptions {
+            mode: Some("hard".into()),
+            target: Some("HEAD".into()),
             ..Default::default()
         },
     )

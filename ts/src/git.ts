@@ -36,6 +36,11 @@ export interface GitCloneOpts extends GitAuthOpts {
 
 export interface GitRequestOpts extends GitAuthOpts {}
 
+export interface GitInitOpts extends GitRequestOpts {
+  bare?: boolean
+  initialBranch?: string
+}
+
 export interface GitPullOpts extends GitAuthOpts {
   branch?: string
   remote?: string
@@ -69,6 +74,21 @@ export interface GitCommitOpts extends GitRequestOpts {
   authorName?: string
   authorEmail?: string
   allowEmpty?: boolean
+}
+
+export type GitResetMode = 'soft' | 'mixed' | 'hard' | 'merge' | 'keep'
+
+export interface GitResetOpts extends GitRequestOpts {
+  mode?: GitResetMode
+  target?: string
+  paths?: string[]
+}
+
+export interface GitRestoreOpts extends GitRequestOpts {
+  paths: string[]
+  staged?: boolean
+  worktree?: boolean
+  source?: string
 }
 
 export interface GitRemoteAddOpts extends GitRequestOpts {
@@ -153,6 +173,16 @@ export class Git {
     }, opts)
   }
 
+  /** Initialize a Git repository. */
+  async init(path: string, opts: GitInitOpts = {}): Promise<GitCommandResult> {
+    return this.run('/runtime/v1/git/init', {
+      path,
+      bare: opts.bare,
+      initial_branch: opts.initialBranch,
+      ...gitOpts(opts),
+    }, opts)
+  }
+
   /** Return parsed repository status for `path`. */
   async status(path: string, opts: GitRequestOpts = {}): Promise<GitStatus> {
     const result = await this.run('/runtime/v1/git/status', { path, ...gitOpts(opts) }, opts)
@@ -197,6 +227,29 @@ export class Git {
     }, opts)
   }
 
+  /** Reset the current HEAD to a specified state. */
+  async reset(path: string, opts: GitResetOpts = {}): Promise<GitCommandResult> {
+    return this.run('/runtime/v1/git/reset', {
+      path,
+      mode: opts.mode,
+      target: opts.target,
+      paths: opts.paths,
+      ...gitOpts(opts),
+    }, opts)
+  }
+
+  /** Restore working tree files or unstage changes. */
+  async restore(path: string, opts: GitRestoreOpts): Promise<GitCommandResult> {
+    return this.run('/runtime/v1/git/restore', {
+      path,
+      paths: opts.paths,
+      staged: opts.staged,
+      worktree: opts.worktree,
+      source: opts.source,
+      ...gitOpts(opts),
+    }, opts)
+  }
+
   /** Pull the current branch with a fast-forward-only merge. */
   async pull(path: string, opts: GitPullOpts = {}): Promise<GitCommandResult> {
     return this.run('/runtime/v1/git/pull', { path, ...gitOpts(opts), ...pick(opts, ['remote', 'branch', 'username', 'password']) }, opts)
@@ -232,6 +285,16 @@ export class Git {
       overwrite: opts.overwrite,
       ...gitOpts(opts),
     }, opts)
+  }
+
+  /** Return a remote URL, or undefined when the remote does not exist. */
+  async remoteGet(path: string, name: string, opts: GitRequestOpts = {}): Promise<string | undefined> {
+    const result = await this.run('/runtime/v1/git/remote_get', {
+      path,
+      name,
+      ...gitOpts(opts),
+    }, opts)
+    return result.value ?? result.url
   }
 
   /** Set a Git config value. */

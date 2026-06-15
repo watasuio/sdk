@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from watasu._transport.data_plane import DataPlaneClient
 
@@ -190,6 +190,32 @@ class Git:
             request_timeout,
         )
 
+    def init(
+        self,
+        path: str,
+        bare: bool = False,
+        initial_branch: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Initialize a Git repository."""
+        return self._run(
+            "/runtime/v1/git/init",
+            {
+                "path": path,
+                "bare": bare if bare else None,
+                "initial_branch": initial_branch,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
+            request_timeout,
+        )
+
     def status(
         self,
         path: str,
@@ -303,6 +329,64 @@ class Git:
             request_timeout,
         )
 
+    def reset(
+        self,
+        path: str,
+        mode: Optional[Literal["soft", "mixed", "hard", "merge", "keep"]] = None,
+        target: Optional[str] = None,
+        paths: Optional[List[str]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Reset the current HEAD to a specified state."""
+        return self._run(
+            "/runtime/v1/git/reset",
+            {
+                "path": path,
+                "mode": mode,
+                "target": target,
+                "paths": paths,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
+            request_timeout,
+        )
+
+    def restore(
+        self,
+        path: str,
+        paths: List[str],
+        staged: Optional[bool] = None,
+        worktree: Optional[bool] = None,
+        source: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Restore working tree files or unstage changes."""
+        return self._run(
+            "/runtime/v1/git/restore",
+            {
+                "path": path,
+                "paths": paths,
+                "staged": staged,
+                "worktree": worktree,
+                "source": source,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
+            request_timeout,
+        )
+
     def pull(
         self,
         path: str,
@@ -401,6 +485,31 @@ class Git:
             },
             request_timeout,
         )
+
+    def remote_get(
+        self,
+        path: str,
+        name: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> Optional[str]:
+        """Return a remote URL, or ``None`` when the remote does not exist."""
+        result = self._run(
+            "/runtime/v1/git/remote_get",
+            {
+                "path": path,
+                "name": name,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
+            request_timeout,
+        )
+        return result.value or result.url
 
     def set_config(
         self,

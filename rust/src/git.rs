@@ -146,6 +146,19 @@ pub struct GitRequestOptions {
     pub timeout_seconds: Option<u64>,
 }
 
+/// Options for initializing a Git repository.
+#[derive(Clone, Debug, Default)]
+pub struct GitInitOptions {
+    /// Initialize a bare repository.
+    pub bare: bool,
+    /// Initial branch name.
+    pub initial_branch: Option<String>,
+    /// Environment variables for the Git process.
+    pub envs: serde_json::Map<String, Value>,
+    /// Server-side timeout in seconds.
+    pub timeout_seconds: Option<u64>,
+}
+
 /// Options for Git credentials stored in the sandbox credential helper.
 #[derive(Clone, Debug, Default)]
 pub struct GitCredentialOptions {
@@ -207,6 +220,38 @@ pub struct GitCommitOptions {
     pub author_email: Option<String>,
     /// Allow empty commits.
     pub allow_empty: bool,
+    /// Environment variables for the Git process.
+    pub envs: serde_json::Map<String, Value>,
+    /// Server-side timeout in seconds.
+    pub timeout_seconds: Option<u64>,
+}
+
+/// Options for resetting Git state.
+#[derive(Clone, Debug, Default)]
+pub struct GitResetOptions {
+    /// Reset mode: soft, mixed, hard, merge, or keep.
+    pub mode: Option<String>,
+    /// Target commit or ref.
+    pub target: Option<String>,
+    /// Optional pathspecs.
+    pub paths: Vec<String>,
+    /// Environment variables for the Git process.
+    pub envs: serde_json::Map<String, Value>,
+    /// Server-side timeout in seconds.
+    pub timeout_seconds: Option<u64>,
+}
+
+/// Options for restoring Git paths.
+#[derive(Clone, Debug, Default)]
+pub struct GitRestoreOptions {
+    /// Pathspecs to restore.
+    pub paths: Vec<String>,
+    /// Restore staged content.
+    pub staged: Option<bool>,
+    /// Restore worktree content.
+    pub worktree: Option<bool>,
+    /// Source tree-ish.
+    pub source: Option<String>,
     /// Environment variables for the Git process.
     pub envs: serde_json::Map<String, Value>,
     /// Server-side timeout in seconds.
@@ -326,6 +371,18 @@ impl Git {
             .await
     }
 
+    /// Initialize a Git repository.
+    pub async fn init(&self, path: &str, opts: GitInitOptions) -> Result<GitCommandResult> {
+        let mut body = serde_json::Map::new();
+        body.insert("path".into(), Value::String(path.to_string()));
+        if opts.bare {
+            body.insert("bare".into(), Value::Bool(true));
+        }
+        put_if_some_string(&mut body, "initial_branch", opts.initial_branch);
+        put_request_options(&mut body, opts.envs, opts.timeout_seconds);
+        self.run("/runtime/v1/git/init", Value::Object(body)).await
+    }
+
     /// Return parsed repository status for `path`.
     pub async fn status(&self, path: &str, opts: GitRequestOptions) -> Result<GitStatus> {
         let result = self
@@ -412,6 +469,30 @@ impl Git {
             .await
     }
 
+    /// Reset the current HEAD to a specified state.
+    pub async fn reset(&self, path: &str, opts: GitResetOptions) -> Result<GitCommandResult> {
+        let mut body = serde_json::Map::new();
+        body.insert("path".into(), Value::String(path.to_string()));
+        put_if_some_string(&mut body, "mode", opts.mode);
+        put_if_some_string(&mut body, "target", opts.target);
+        put_string_array(&mut body, "paths", opts.paths);
+        put_request_options(&mut body, opts.envs, opts.timeout_seconds);
+        self.run("/runtime/v1/git/reset", Value::Object(body)).await
+    }
+
+    /// Restore working tree files or unstage changes.
+    pub async fn restore(&self, path: &str, opts: GitRestoreOptions) -> Result<GitCommandResult> {
+        let mut body = serde_json::Map::new();
+        body.insert("path".into(), Value::String(path.to_string()));
+        put_string_array(&mut body, "paths", opts.paths);
+        put_if_some_bool(&mut body, "staged", opts.staged);
+        put_if_some_bool(&mut body, "worktree", opts.worktree);
+        put_if_some_string(&mut body, "source", opts.source);
+        put_request_options(&mut body, opts.envs, opts.timeout_seconds);
+        self.run("/runtime/v1/git/restore", Value::Object(body))
+            .await
+    }
+
     /// Pull the current branch with a fast-forward-only merge.
     pub async fn pull(
         &self,
@@ -482,6 +563,21 @@ impl Git {
         put_request_options(&mut body, opts.envs, opts.timeout_seconds);
         self.run("/runtime/v1/git/remote_add", Value::Object(body))
             .await
+    }
+
+    /// Return a remote URL, or `None` when the remote does not exist.
+    pub async fn remote_get(
+        &self,
+        path: &str,
+        name: &str,
+        opts: GitRequestOptions,
+    ) -> Result<Option<String>> {
+        let mut body = object_from(repo_body(path, opts));
+        body.insert("name".into(), Value::String(name.to_string()));
+        let result = self
+            .run("/runtime/v1/git/remote_get", Value::Object(body))
+            .await?;
+        Ok(result.value.or(result.url))
     }
 
     /// Set a Git config value.
@@ -668,6 +764,21 @@ fn put_if_some_string(map: &mut serde_json::Map<String, Value>, key: &str, value
 fn put_if_some_u64(map: &mut serde_json::Map<String, Value>, key: &str, value: Option<u64>) {
     if let Some(value) = value {
         map.insert(key.to_string(), Value::from(value));
+    }
+}
+
+fn put_if_some_bool(map: &mut serde_json::Map<String, Value>, key: &str, value: Option<bool>) {
+    if let Some(value) = value {
+        map.insert(key.to_string(), Value::Bool(value));
+    }
+}
+
+fn put_string_array(map: &mut serde_json::Map<String, Value>, key: &str, values: Vec<String>) {
+    if !values.is_empty() {
+        map.insert(
+            key.to_string(),
+            Value::Array(values.into_iter().map(Value::String).collect()),
+        );
     }
 }
 

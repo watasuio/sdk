@@ -43,9 +43,13 @@ export type {
   GitCredentialOpts,
   GitCommitOpts,
   GitFileStatus,
+  GitInitOpts,
   GitPullOpts,
   GitPushOpts,
   GitRemoteAddOpts,
+  GitResetMode,
+  GitResetOpts,
+  GitRestoreOpts,
   GitRequestOpts,
   GitStatus,
 } from './git.js'

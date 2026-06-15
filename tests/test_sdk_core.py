@@ -264,6 +264,17 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
                         "stderr": "",
                     }
                 }
+            if path.endswith("/remote_get"):
+                return {
+                    "git": {
+                        "path": "/workspace/repo",
+                        "name": "origin",
+                        "value": "https://git.example/repo.git",
+                        "url": "https://git.example/repo.git",
+                        "stdout": "https://git.example/repo.git\n",
+                        "stderr": "",
+                    }
+                }
             return {
                 "git": {
                     "path": "/workspace/repo",
@@ -287,6 +298,7 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
     )
     git.dangerously_authenticate("user", "token", host="git.example.com", protocol="https", timeout=5)
     git.configure_user("Watasu Test", "test@watasu.local", scope="local", path="/workspace/repo")
+    git.init("/workspace/repo", initial_branch="main")
     status = git.status("/workspace/repo")
     branches = git.branches("/workspace/repo")
     git.create_branch("/workspace/repo", "feature/test")
@@ -299,6 +311,8 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
         author_email="test@watasu.local",
         allow_empty=True,
     )
+    git.reset("/workspace/repo", mode="hard", target="HEAD", paths=["README.md"])
+    git.restore("/workspace/repo", paths=["README.md"], staged=True)
     git.pull("/workspace/repo", remote="origin", branch="main", username="user", password="token")
     git.push(
         "/workspace/repo",
@@ -317,6 +331,7 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
         fetch=True,
         overwrite=True,
     )
+    remote_url = git.remote_get("/workspace/repo", "origin")
     git.set_config("pull.rebase", "false", scope="local", path="/workspace/repo")
     config_value = git.get_config("pull.rebase", scope="local", path="/workspace/repo")
 
@@ -327,6 +342,7 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
     assert status.untracked_count == 1
     assert branches.branches == ["main", "feature/test"]
     assert branches.current_branch == "main"
+    assert remote_url == "https://git.example/repo.git"
     assert config_value == "false"
     assert calls == [
         (
@@ -364,6 +380,13 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
                     "scope": "local",
                     "path": "/workspace/repo",
                 },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/init",
+            {
+                "json": {"path": "/workspace/repo", "initial_branch": "main"},
                 "request_timeout": None,
             },
         ),
@@ -411,6 +434,29 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
                     "author_name": "Watasu Test",
                     "author_email": "test@watasu.local",
                     "allow_empty": True,
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/reset",
+            {
+                "json": {
+                    "path": "/workspace/repo",
+                    "mode": "hard",
+                    "target": "HEAD",
+                    "paths": ["README.md"],
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/restore",
+            {
+                "json": {
+                    "path": "/workspace/repo",
+                    "paths": ["README.md"],
+                    "staged": True,
                 },
                 "request_timeout": None,
             },
@@ -466,6 +512,13 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
                     "fetch": True,
                     "overwrite": True,
                 },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/remote_get",
+            {
+                "json": {"path": "/workspace/repo", "name": "origin"},
                 "request_timeout": None,
             },
         ),

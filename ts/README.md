@@ -36,6 +36,7 @@ await sbx.resume({ timeoutMs: 300_000 })
 ```ts
 const sbx = await Sandbox.create()
 
+await sbx.git.init('/workspace/new-project', { initialBranch: 'main' })
 await sbx.git.clone('https://github.com/acme/project.git', {
   path: '/workspace/project',
   branch: 'main',
@@ -57,6 +58,9 @@ await sbx.git.push('/workspace/project', {
   branch: 'feature/docs',
   setUpstream: true,
 })
+const remoteUrl = await sbx.git.remoteGet('/workspace/project', 'origin')
+await sbx.git.restore('/workspace/project', { paths: ['README.md'] })
+await sbx.git.reset('/workspace/project', { mode: 'hard', target: 'HEAD' })
 
 await sbx.filesystem.writeFiles([
   { path: '/workspace/project/a.txt', data: 'alpha' },

@@ -47,6 +47,7 @@ Leaving the context manager calls `kill()`.
 from watasu import PtySize, Sandbox
 
 with Sandbox.create() as sbx:
+    sbx.git.init("/workspace/new-project", initial_branch="main")
     sbx.git.clone(
         "https://github.com/acme/project.git",
         path="/workspace/project",
@@ -74,6 +75,9 @@ with Sandbox.create() as sbx:
         branch="feature/docs",
         set_upstream=True,
     )
+    remote_url = sbx.git.remote_get("/workspace/project", "origin")
+    sbx.git.restore("/workspace/project", paths=["README.md"])
+    sbx.git.reset("/workspace/project", mode="hard", target="HEAD")
 
     watcher = sbx.files.watch_dir("/workspace/project", recursive=True)
     sbx.files.write_files(
