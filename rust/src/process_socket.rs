@@ -41,11 +41,12 @@ impl ProcessSocket {
 
     /// Send stdin bytes encoded in the sandbox runtime protocol.
     pub async fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
-        self.send_json(&serde_json::json!({
-            "type": "stdin",
-            "data": encode_runtime_data(data)
-        }))
-        .await
+        self.send_json(&stdin_payload(data)).await
+    }
+
+    /// Close stdin for the attached process.
+    pub async fn close_stdin(&mut self) -> Result<()> {
+        self.send_json(&close_stdin_payload()).await
     }
 
     /// Send a WebSocket ping frame.
@@ -115,6 +116,17 @@ pub fn encode_runtime_data(data: impl AsRef<[u8]>) -> String {
     BASE64.encode(data)
 }
 
+pub(crate) fn stdin_payload(data: impl AsRef<[u8]>) -> Value {
+    serde_json::json!({
+        "type": "stdin",
+        "data": encode_runtime_data(data)
+    })
+}
+
+pub(crate) fn close_stdin_payload() -> Value {
+    serde_json::json!({"type": "close_stdin"})
+}
+
 /// Decode base64 stdout/stderr frame data from the sandbox runtime protocol.
 pub fn decode_runtime_data(value: &str) -> String {
     BASE64
@@ -138,4 +150,20 @@ fn ws_url(base_url: &str, path: &str) -> Result<String> {
         url.set_query(Some(query));
     }
     Ok(url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{close_stdin_payload, stdin_payload};
+
+    #[test]
+    fn process_input_payloads_match_runtime_protocol() {
+        assert_eq!(
+            stdin_payload("hi\n"),
+            json!({"type": "stdin", "data": "aGkK"})
+        );
+        assert_eq!(close_stdin_payload(), json!({"type": "close_stdin"}));
+    }
 }

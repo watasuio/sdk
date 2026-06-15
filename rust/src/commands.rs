@@ -133,6 +133,22 @@ impl Commands {
         Ok(CommandHandle::new(actual_pid, socket, self.clone()))
     }
 
+    /// Send stdin bytes to a live process by pid.
+    pub async fn send_stdin(&self, pid: impl ToString, data: impl AsRef<[u8]>) -> Result<()> {
+        let mut handle = self.connect(pid).await?;
+        handle.send_stdin(data).await?;
+        let _ = handle.disconnect().await;
+        Ok(())
+    }
+
+    /// Close stdin for a live process by pid, signalling EOF.
+    pub async fn close_stdin(&self, pid: impl ToString) -> Result<()> {
+        let mut handle = self.connect(pid).await?;
+        handle.close_stdin().await?;
+        let _ = handle.disconnect().await;
+        Ok(())
+    }
+
     async fn start(&self, cmd: &str, opts: CommandOptions) -> Result<CommandHandle> {
         let mut socket = ProcessSocket::connect(
             &self.data_plane.base_url,
@@ -239,6 +255,16 @@ impl CommandHandle {
     /// Send stdin bytes to the process.
     pub async fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
         self.socket.send_stdin(data).await
+    }
+
+    /// Close stdin and signal EOF to the process.
+    pub async fn close_stdin(&mut self) -> Result<()> {
+        self.socket.close_stdin().await
+    }
+
+    /// Disconnect the local stream without killing the process.
+    pub async fn disconnect(&mut self) -> Result<()> {
+        self.socket.close().await
     }
 
     /// Resize the attached PTY stream.

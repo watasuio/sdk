@@ -88,6 +88,21 @@ test('command handle treats pty frames as terminal output', async () => {
   assert.deepEqual(seen, ['term\n'])
 })
 
+test('command handle can close stdin without disconnecting', async () => {
+  const sent = []
+  const socket = {
+    close() {},
+    closeStdin() {
+      sent.push({ type: 'close_stdin' })
+    },
+  }
+  const handle = new CommandHandle(123, socket, async () => true, (async function* () {})())
+
+  await handle.closeStdin()
+
+  assert.deepEqual(sent, [{ type: 'close_stdin' }])
+})
+
 test('sandbox construction requires a session', () => {
   assert.throws(
     () =>
@@ -224,6 +239,80 @@ test('filesystem writeFiles uses snake_case batch route', async () => {
       },
     }],
   ])
+})
+
+test('filesystem write overload accepts batches and browser data objects', async () => {
+  const calls = []
+  const fs = new Filesystem({
+    putJson(path, body, opts) {
+      calls.push(['put', path, Array.from(body), opts])
+      return Promise.resolve({ file: { path: '/tmp/a.txt', name: 'a.txt', type: 'file', bytes: body.byteLength } })
+    },
+    postJson(path, opts) {
+      calls.push(['post', path, opts])
+      return Promise.resolve({
+        files: opts.json.files.map((file) => ({
+          path: file.path,
+          name: file.path.split('/').pop(),
+          type: 'file',
+          bytes: 3,
+        })),
+      })
+    },
+  })
+
+  const blobWritten = await fs.write('/tmp/a.txt', new Blob(['abc']))
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('xyz'))
+      controller.close()
+    },
+  })
+  const batchWritten = await fs.write([
+    { path: '/tmp/b.txt', data: stream },
+    { path: '/tmp/c.bin', data: new Uint8Array([0, 1, 2]).buffer },
+  ])
+
+  assert.equal(blobWritten.size, 3)
+  assert.deepEqual(batchWritten.map((item) => item.path), ['/tmp/b.txt', '/tmp/c.bin'])
+  assert.deepEqual(calls, [
+    ['put', '/runtime/v1/files?path=%2Ftmp%2Fa.txt', [97, 98, 99], {}],
+    ['post', '/runtime/v1/files/write_files', {
+      json: {
+        files: [
+          { path: '/tmp/b.txt', data_base64: 'eHl6' },
+          { path: '/tmp/c.bin', data_base64: 'AAEC' },
+        ],
+      },
+    }],
+  ])
+})
+
+test('filesystem read supports blob and readable stream formats', async () => {
+  const fs = new Filesystem({
+    getBytes(path, opts) {
+      assert.equal(path, '/runtime/v1/files?path=%2Ftmp%2Fa.txt')
+      assert.equal(opts.format, 'blob')
+      return Promise.resolve(new TextEncoder().encode('abc'))
+    },
+  })
+
+  const blob = await fs.read('/tmp/a.txt', { format: 'blob' })
+  assert.equal(await blob.text(), 'abc')
+
+  const streamFs = new Filesystem({
+    getBytes() {
+      return Promise.resolve(new TextEncoder().encode('xyz'))
+    },
+  })
+  const stream = await streamFs.read('/tmp/a.txt', { format: 'stream' })
+  const reader = stream.getReader()
+  const first = await reader.read()
+  const second = await reader.read()
+
+  assert.equal(new TextDecoder().decode(first.value), 'xyz')
+  assert.equal(first.done, false)
+  assert.equal(second.done, true)
 })
 
 test('filesystem watchDir can return a lazy watcher', () => {

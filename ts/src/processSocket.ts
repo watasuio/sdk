@@ -64,6 +64,10 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     this.sendJson({ type: 'stdin', data: base64Encode(raw) })
   }
 
+  closeStdin(): void {
+    this.sendJson({ type: 'close_stdin' })
+  }
+
   close(): void {
     this.closed = true
     if (this.keepalive) clearInterval(this.keepalive)

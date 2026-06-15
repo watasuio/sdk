@@ -113,6 +113,22 @@ def test_command_handle_decodes_pty_frames_as_terminal_output():
     assert result.stdout == "term\n"
 
 
+def test_command_handle_close_stdin_sends_eof_frame():
+    sent = []
+    handle = CommandHandle(
+        pid=123,
+        handle_kill=lambda: True,
+        events=iter([]),
+        handle_close_stdin=lambda request_timeout=None: sent.append(
+            {"type": "close_stdin", "request_timeout": request_timeout}
+        ),
+    )
+
+    handle.close_stdin(request_timeout=5)
+
+    assert sent == [{"type": "close_stdin", "request_timeout": 5}]
+
+
 def test_process_socket_base64_encodes_stdin_frames():
     sent = []
 

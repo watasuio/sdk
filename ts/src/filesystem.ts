@@ -1,5 +1,5 @@
 import { DataPlaneClient, withQuery } from './transport.js'
-import { FileNotFoundError } from './errors.js'
+import { FileNotFoundError, InvalidArgumentError } from './errors.js'
 import { ProcessFrame, ProcessSocket, base64Encode } from './processSocket.js'
 
 export enum FileType {
@@ -26,9 +26,11 @@ export interface EntryInfo {
 
 export type WriteInfo = EntryInfo
 
+export type WriteData = string | Uint8Array | ArrayBuffer | Blob | ReadableStream<Uint8Array>
+
 export interface WriteEntry {
   path: string
-  data: string | Uint8Array
+  data: WriteData
 }
 
 export interface FilesystemEvent {
@@ -43,6 +45,20 @@ export interface WatchOpts {
   includeEntry?: boolean
   requestTimeoutMs?: number
   onExit?: (error?: Error) => void | Promise<void>
+}
+
+export interface FilesystemRequestOpts {
+  requestTimeoutMs?: number
+  user?: string
+}
+
+export interface FilesystemReadOpts extends FilesystemRequestOpts {
+  gzip?: boolean
+}
+
+export interface FilesystemWriteOpts extends FilesystemRequestOpts {
+  gzip?: boolean
+  metadata?: Record<string, string>
 }
 
 /** Live filesystem watcher. Call `stop()` to close the local watch stream. */
@@ -143,48 +159,71 @@ export class FilesystemWatcher {
 export class Filesystem {
   constructor(private readonly dataPlane: DataPlaneClient) {}
 
-  /** Read a file as UTF-8 text, bytes, or a one-chunk async byte stream. */
+  /** Read file content as text, bytes, a `Blob`, or a `ReadableStream`. */
   async read(
     path: string,
-    opts: { format?: 'text' | 'bytes' | 'stream'; requestTimeoutMs?: number; gzip?: boolean; user?: string } = {}
-  ): Promise<string | Uint8Array | AsyncIterable<Uint8Array>> {
+    opts?: FilesystemReadOpts & { format?: 'text' }
+  ): Promise<string>
+  async read(
+    path: string,
+    opts: FilesystemReadOpts & { format: 'bytes' }
+  ): Promise<Uint8Array>
+  async read(
+    path: string,
+    opts: FilesystemReadOpts & { format: 'blob' }
+  ): Promise<Blob>
+  async read(
+    path: string,
+    opts: FilesystemReadOpts & { format: 'stream' }
+  ): Promise<ReadableStream<Uint8Array>>
+  async read(
+    path: string,
+    opts: FilesystemReadOpts & { format?: 'text' | 'bytes' | 'blob' | 'stream' } = {}
+  ): Promise<string | Uint8Array | Blob | ReadableStream<Uint8Array>> {
     const bytes = await this.dataPlane.getBytes(withQuery('/runtime/v1/files', { path, gzip: opts.gzip }), opts)
     if (opts.format === 'bytes') return bytes
-    if (opts.format === 'stream') return (async function* () { yield bytes })()
+    if (opts.format === 'blob') return new Blob([toArrayBuffer(bytes)])
+    if (opts.format === 'stream') return new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close() } })
     return new TextDecoder().decode(bytes)
   }
 
   /** Read a file as raw bytes. */
-  async readBytes(path: string, opts: { requestTimeoutMs?: number; gzip?: boolean } = {}): Promise<Uint8Array> {
+  async readBytes(path: string, opts: FilesystemReadOpts = {}): Promise<Uint8Array> {
     return this.read(path, { ...opts, format: 'bytes' }) as Promise<Uint8Array>
   }
 
-  /** Write UTF-8 text or bytes to a file. */
+  /** Write UTF-8 text, bytes, browser data objects, or a batch of file entries. */
+  async write(path: string, data: WriteData, opts?: FilesystemWriteOpts): Promise<WriteInfo>
+  async write(files: WriteEntry[], opts?: FilesystemWriteOpts): Promise<WriteInfo[]>
   async write(
-    path: string,
-    data: string | Uint8Array,
-    opts: { requestTimeoutMs?: number; gzip?: boolean; metadata?: Record<string, string> } = {}
-  ): Promise<WriteInfo> {
-    const body = typeof data === 'string' ? new TextEncoder().encode(data) : data
-    const payload = await this.dataPlane.putJson(withQuery('/runtime/v1/files', { path, gzip: opts.gzip }), body, opts)
+    pathOrFiles: string | WriteEntry[],
+    dataOrOpts?: WriteData | FilesystemWriteOpts,
+    opts: FilesystemWriteOpts = {}
+  ): Promise<WriteInfo | WriteInfo[]> {
+    if (Array.isArray(pathOrFiles)) {
+      return this.writeFiles(pathOrFiles, dataOrOpts as FilesystemWriteOpts | undefined)
+    }
+
+    const body = await writeDataToBytes(dataOrOpts as WriteData)
+    const payload = await this.dataPlane.putJson(withQuery('/runtime/v1/files', { path: pathOrFiles, gzip: opts.gzip }), body, opts)
     return entryInfo(payload.file ?? payload)
   }
 
   /** Write raw bytes to a file. */
-  async writeBytes(path: string, data: Uint8Array, opts: { requestTimeoutMs?: number; gzip?: boolean; metadata?: Record<string, string> } = {}): Promise<WriteInfo> {
+  async writeBytes(path: string, data: Uint8Array | ArrayBuffer, opts: FilesystemWriteOpts = {}): Promise<WriteInfo> {
     return this.write(path, data, opts)
   }
 
   /** Write several files in one runtime API call. */
-  async writeFiles(files: WriteEntry[], opts: { requestTimeoutMs?: number } = {}): Promise<WriteInfo[]> {
+  async writeFiles(files: WriteEntry[], opts: FilesystemWriteOpts = {}): Promise<WriteInfo[]> {
     if (files.length === 0) return []
     const payload = await this.dataPlane.postJson('/runtime/v1/files/write_files', {
       ...opts,
       json: {
-        files: files.map((file) => ({
+        files: await Promise.all(files.map(async (file) => ({
           path: file.path,
-          data_base64: base64Encode(typeof file.data === 'string' ? new TextEncoder().encode(file.data) : file.data),
-        })),
+          data_base64: base64Encode(await writeDataToBytes(file.data)),
+        }))),
       },
     })
     const written = Array.isArray(payload.files) ? payload.files : []
@@ -253,6 +292,52 @@ export class Filesystem {
     return watcher.start().then(() => watcher)
   }
 
+}
+
+async function writeDataToBytes(data: WriteData): Promise<Uint8Array> {
+  if (typeof data === 'string') return new TextEncoder().encode(data)
+  if (data instanceof Uint8Array) return data
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return new Uint8Array(await data.arrayBuffer())
+  if (isReadableStream(data)) return readStreamToBytes(data)
+  throw new InvalidArgumentError(`Unsupported file data type: ${Object.prototype.toString.call(data)}`)
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  return buffer
+}
+
+function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return Boolean(value && typeof value === 'object' && typeof (value as ReadableStream<Uint8Array>).getReader === 'function')
+}
+
+async function readStreamToBytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!(value instanceof Uint8Array)) {
+        throw new InvalidArgumentError('ReadableStream file data must yield Uint8Array chunks')
+      }
+      chunks.push(value)
+      total += value.byteLength
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return bytes
 }
 
 function entryInfo(value: unknown): EntryInfo {

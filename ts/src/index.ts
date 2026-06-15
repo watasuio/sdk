@@ -33,7 +33,17 @@ export type { CommandResult, CommandStartOpts, ProcessInfo } from './commands.js
 export { Process, ProcessManager, ProcessMessage, ProcessOutput } from './process.js'
 export type { ProcessOpts } from './process.js'
 export { FileType, Filesystem, FilesystemWatcher, WatchHandle } from './filesystem.js'
-export type { EntryInfo, FilesystemEvent, WatchOpts, WriteEntry, WriteInfo } from './filesystem.js'
+export type {
+  EntryInfo,
+  FilesystemEvent,
+  FilesystemReadOpts,
+  FilesystemRequestOpts,
+  FilesystemWriteOpts,
+  WatchOpts,
+  WriteData,
+  WriteEntry,
+  WriteInfo,
+} from './filesystem.js'
 export { Git } from './git.js'
 export type {
   GitAddOpts,

@@ -102,6 +102,11 @@ export class CommandHandle implements Partial<CommandResult> {
     this.socket.sendStdin(data)
   }
 
+  /** Close the stdin stream and signal EOF to the process. */
+  async closeStdin(): Promise<void> {
+    this.socket.closeStdin()
+  }
+
   /** Resize the attached PTY stream when this handle was created as a PTY. */
   async resize(size: { cols: number; rows: number }): Promise<void> {
     this.socket.sendJson({ type: 'resize', cols: size.cols, rows: size.rows })
@@ -179,6 +184,16 @@ export class Commands {
     const handle = await this.connect(pid, opts)
     try {
       await handle.sendStdin(data)
+    } finally {
+      handle.disconnect()
+    }
+  }
+
+  /** Attach to a process and close stdin, signalling EOF. */
+  async closeStdin(pid: number | string, opts: { requestTimeoutMs?: number } = {}) {
+    const handle = await this.connect(pid, opts)
+    try {
+      await handle.closeStdin()
     } finally {
       handle.disconnect()
     }
