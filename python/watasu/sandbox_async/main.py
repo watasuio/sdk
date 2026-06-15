@@ -721,9 +721,16 @@ class AsyncSandbox:
         """Get signed download URL metadata."""
         return await asyncio.to_thread(self._sync.download_url_info, *args, **kwargs)
 
-    async def update_network(self, *args, **kwargs):
+    async def _update_network_instance(self, *args, **kwargs):
         """Atomically replace this sandbox's network egress policy."""
         return await asyncio.to_thread(self._sync.update_network, *args, **kwargs)
+
+    @classmethod
+    async def _update_network_class(cls, sandbox_id: str, *args, **kwargs):
+        """Atomically replace a sandbox network egress policy by id."""
+        return await asyncio.to_thread(Sandbox.update_network, sandbox_id, *args, **kwargs)
+
+    update_network = _AsyncDualMethod(_update_network_instance, _update_network_class)
 
     async def __aenter__(self):
         """Enter an async context manager without changing sandbox state."""

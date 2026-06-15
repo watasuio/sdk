@@ -376,6 +376,43 @@ test('sandbox updateNetwork uses snake_case API payload', async () => {
   }
 })
 
+test('sandbox static updateNetwork uses snake_case API payload', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+
+    await Sandbox.updateNetwork(
+      'network-sandbox',
+      {
+        allowOut: ['registry.npmjs.org:443'],
+        denyOut: ['10.0.0.0/8'],
+        allowInternetAccess: false,
+        allowPackageRegistryAccess: true,
+      },
+      { apiKey: 'key' }
+    )
+
+    assert.deepEqual(requests, [
+      {
+        url: 'https://api.watasu.io/v1/sandboxes/network-sandbox/network',
+        method: 'PUT',
+        body: {
+          allow_out: ['registry.npmjs.org:443'],
+          deny_out: ['10.0.0.0/8'],
+          allow_internet_access: false,
+          allow_package_registry_access: true,
+        },
+      },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('sandbox connect and setTimeout use root timeout payloads', async () => {
   const originalFetch = globalThis.fetch
   const requests = []

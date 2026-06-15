@@ -744,6 +744,53 @@ def test_sandbox_update_network_uses_snake_case_payload(monkeypatch):
     ]
 
 
+def test_sandbox_update_network_class_uses_snake_case_payload(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            calls.append(("config", config.api_key))
+
+        def put(self, path, **kwargs):
+            calls.append(("put", path, kwargs))
+            return {}
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    assert (
+        Sandbox.update_network(
+            "network-sandbox",
+            {
+                "allowOut": ["registry.npmjs.org:443"],
+                "denyOut": ["10.0.0.0/8"],
+                "allowInternetAccess": False,
+            },
+            allow_package_registry_access=True,
+            api_key="key",
+            request_timeout=3,
+        )
+        is None
+    )
+
+    assert calls == [
+        ("config", "key"),
+        (
+            "put",
+            "/sandboxes/network-sandbox/network",
+            {
+                "json": {
+                    "allow_out": ["registry.npmjs.org:443"],
+                    "deny_out": ["10.0.0.0/8"],
+                    "allow_internet_access": False,
+                    "allow_package_registry_access": True,
+                },
+                "resource": "sandbox",
+                "request_timeout": 3,
+            },
+        ),
+    ]
+
+
 def test_sandbox_constructor_creates_with_default_template(monkeypatch):
     captured = {}
 
@@ -1167,6 +1214,10 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
                 }
             raise AssertionError(f"unexpected GET {path}")
 
+        def put(self, path, **kwargs):
+            calls.append(("put", path, kwargs))
+            return {"sandbox": {"id": "async-123", "network_policy": kwargs["json"]}}
+
         def delete(self, path, **kwargs):
             calls.append(("delete", path, kwargs))
             return {}
@@ -1178,6 +1229,15 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
             metrics = await sbx.get_metrics()
             snapshot = await sbx.create_snapshot()
             snapshots = await sbx.list_snapshots().list_items()
+            await sbx.update_network(
+                {"allowInternetAccess": False}, request_timeout=2
+            )
+            await AsyncSandbox.update_network(
+                "async-123",
+                {"allowInternetAccess": True},
+                api_key="key",
+                request_timeout=4,
+            )
             return sbx.sandbox_id, metrics, snapshot, snapshots
 
     sandbox_id, metrics, snapshot, snapshots = asyncio.run(scenario())
@@ -1217,6 +1277,24 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
             "get",
             "/sandboxes/async-123/checkpoints",
             {"resource": "sandbox", "request_timeout": None},
+        ),
+        (
+            "put",
+            "/sandboxes/async-123/network",
+            {
+                "json": {"allow_internet_access": False},
+                "resource": "sandbox",
+                "request_timeout": 2,
+            },
+        ),
+        (
+            "put",
+            "/sandboxes/async-123/network",
+            {
+                "json": {"allow_internet_access": True},
+                "resource": "sandbox",
+                "request_timeout": 4,
+            },
         ),
         ("delete", "/sandboxes/async-123", {"resource": "sandbox"}),
     ]

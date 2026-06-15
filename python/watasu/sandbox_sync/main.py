@@ -624,7 +624,7 @@ class Sandbox:
         """Get signed download URL metadata for a sandbox file path."""
         return self._file_url_info("download_url", path, **opts)
 
-    def update_network(
+    def _update_network_instance(
         self,
         network: Optional[Dict[str, Any]] = None,
         *,
@@ -640,6 +640,29 @@ class Sandbox:
         )
         self._sandbox = response.get("sandbox") or self._sandbox
         return None
+
+    @classmethod
+    def _update_network_class(
+        cls,
+        sandbox_id: str,
+        network: Optional[Dict[str, Any]] = None,
+        *,
+        request_timeout: Optional[float] = None,
+        **opts: Any,
+    ) -> None:
+        """Atomically replace a sandbox network egress policy by id."""
+        api_opts, network_opts = _split_api_and_payload_opts(opts)
+        config = ConnectionConfig(**api_opts)
+        control = ControlClient(config)
+        control.put(
+            f"/sandboxes/{sandbox_id}/network",
+            json=_network_payload(network, network_opts),
+            resource="sandbox",
+            request_timeout=request_timeout,
+        )
+        return None
+
+    update_network = _DualMethod(_update_network_instance, _update_network_class)
 
     def __enter__(self):
         """Enter a context manager without changing sandbox state."""
@@ -689,6 +712,27 @@ def _reject_unsupported_opts(opts: Dict, keys: Iterable[str]) -> None:
     for key in keys:
         if key in opts and opts[key] is not None:
             unsupported(key)
+
+
+_API_PARAM_KEYS = {
+    "api_key",
+    "access_token",
+    "domain",
+    "request_timeout",
+    "headers",
+    "proxy",
+    "api_url",
+    "data_plane_domain",
+    "debug",
+}
+
+
+def _split_api_and_payload_opts(opts: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    api_opts = {key: value for key, value in opts.items() if key in _API_PARAM_KEYS}
+    payload_opts = {
+        key: value for key, value in opts.items() if key not in _API_PARAM_KEYS
+    }
+    return api_opts, payload_opts
 
 
 def _sandbox_list_params(

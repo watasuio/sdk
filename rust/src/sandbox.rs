@@ -511,13 +511,28 @@ impl Sandbox {
         let payload = self
             .control
             .put(
-                &format!("/sandboxes/{}/network", self.sandbox_id),
+                &sandbox_network_path(&self.sandbox_id),
                 network_payload(opts),
             )
             .await?;
         if let Some(sandbox) = payload.get("sandbox") {
             self.sandbox = sandbox.clone();
         }
+        Ok(())
+    }
+
+    /// Atomically replace a sandbox network egress policy by id.
+    pub async fn update_network_by_id(
+        sandbox_id: impl ToString,
+        opts: NetworkUpdateOptions,
+        connection: ConnectionOptions,
+    ) -> Result<()> {
+        let sandbox_id = sandbox_id.to_string();
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        control
+            .put(&sandbox_network_path(&sandbox_id), network_payload(opts))
+            .await?;
         Ok(())
     }
 
@@ -820,6 +835,10 @@ fn network_payload(opts: NetworkUpdateOptions) -> Value {
     Value::Object(body)
 }
 
+fn sandbox_network_path(sandbox_id: &str) -> String {
+    format!("/sandboxes/{sandbox_id}/network")
+}
+
 fn snapshot_info(value: &Value) -> SnapshotInfo {
     SnapshotInfo {
         snapshot_id: string_value(
@@ -920,8 +939,8 @@ mod tests {
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
     use super::{
-        metrics_list, network_payload, sandbox_list_path, snapshot_info, ListOptions,
-        NetworkUpdateOptions, SandboxListQuery,
+        metrics_list, network_payload, sandbox_list_path, sandbox_network_path, snapshot_info,
+        ListOptions, NetworkUpdateOptions, SandboxListQuery,
     };
 
     #[test]
@@ -973,6 +992,14 @@ mod tests {
                 "allow_out": ["pypi.org:443"],
                 "deny_out": ["10.0.0.0/8"]
             })
+        );
+    }
+
+    #[test]
+    fn builds_sandbox_network_update_path() {
+        assert_eq!(
+            sandbox_network_path("network-sandbox"),
+            "/sandboxes/network-sandbox/network"
         );
     }
 

@@ -345,6 +345,20 @@ export class Sandbox {
     return metricsList(payload.metrics ?? payload)
   }
 
+  /** Atomically replace a sandbox's network egress policy by id. */
+  static async updateNetwork(sandboxId: string, network: SandboxNetworkUpdate, opts: SandboxNetworkUpdateOpts = {}): Promise<void> {
+    await this.putNetwork(sandboxId, network, opts)
+  }
+
+  private static async putNetwork(sandboxId: string, network: SandboxNetworkUpdate, opts: SandboxNetworkUpdateOpts = {}): Promise<Record<string, unknown> | undefined> {
+    const control = new ControlClient(new ConnectionConfig(opts))
+    const response = await control.put(`/sandboxes/${sandboxId}/network`, {
+      json: networkUpdatePayload(network),
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    return response.sandbox === undefined ? undefined : record(response.sandbox)
+  }
+
   /** Deprecated alias for `getInfo`. */
   static async getFullInfo(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxInfo> {
     return this.getInfo(sandboxId, opts)
@@ -537,11 +551,8 @@ export class Sandbox {
 
   /** Atomically replace this sandbox's network egress policy. */
   async updateNetwork(network: SandboxNetworkUpdate, opts: SandboxNetworkUpdateOpts = {}): Promise<void> {
-    const response = await this.control.put(`/sandboxes/${this.sandboxId}/network`, {
-      json: networkUpdatePayload(network),
-      requestTimeoutMs: opts.requestTimeoutMs,
-    })
-    this.sandbox = record(response.sandbox ?? this.sandbox)
+    const sandbox = await Sandbox.putNetwork(this.sandboxId, network, { ...this.configOptions(), ...opts })
+    this.sandbox = sandbox ?? this.sandbox
   }
 
   /** Pause this sandbox. Returns false when it was already paused. */
