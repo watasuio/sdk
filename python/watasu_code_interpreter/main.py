@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
+from urllib.parse import quote
 
 from watasu.connection_config import ApiParams
 from watasu.exceptions import InvalidArgumentException
@@ -10,6 +11,7 @@ from watasu.sandbox_async.main import _AsyncDualMethod, _thread_callback
 from watasu.sandbox_sync.main import Sandbox as BaseSandbox
 
 from .models import Context, Execution, ExecutionError, OutputMessage, Result
+from .models import context_from_api
 from .models import execution_from_api
 
 
@@ -22,7 +24,7 @@ class Sandbox(BaseSandbox):
         self,
         code: str,
         language: Optional[str] = None,
-        context: Optional[Context] = None,
+        context: Optional[Union[Context, str]] = None,
         on_stdout: Optional[Callable[[OutputMessage], None]] = None,
         on_stderr: Optional[Callable[[OutputMessage], None]] = None,
         on_result: Optional[Callable[[Result], None]] = None,
@@ -64,30 +66,48 @@ class Sandbox(BaseSandbox):
     ) -> Context:
         """Create a persistent code context."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        payload = _compact({"cwd": cwd, "language": language})
+        response = self._require_data_plane().post_json(
+            "/runtime/v1/code/contexts",
+            json=payload,
+            request_timeout=request_timeout,
+        )
+        return context_from_api(response)
 
     def remove_code_context(
         self,
-        context: Context,
+        context: Union[Context, str],
         request_timeout: Optional[float] = None,
-    ) -> bool:
+    ) -> None:
         """Remove a persistent code context."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        self._require_data_plane().delete_json(
+            f"/runtime/v1/code/contexts/{_context_path_id(context)}",
+            request_timeout=request_timeout,
+        )
 
     def list_code_contexts(self, request_timeout: Optional[float] = None) -> List[Context]:
         """List persistent code contexts."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        response = self._require_data_plane().get_json(
+            "/runtime/v1/code/contexts",
+            request_timeout=request_timeout,
+        )
+        contexts = response if isinstance(response, list) else response.get("contexts", [])
+        return [context_from_api(item) for item in contexts]
 
     def restart_code_context(
         self,
-        context: Context,
+        context: Union[Context, str],
         request_timeout: Optional[float] = None,
-    ) -> Context:
+    ) -> None:
         """Restart a persistent code context."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        self._require_data_plane().post_json(
+            f"/runtime/v1/code/contexts/{_context_path_id(context)}/restart",
+            json={},
+            request_timeout=request_timeout,
+        )
 
 
 class AsyncSandbox(BaseAsyncSandbox):
@@ -131,7 +151,7 @@ class AsyncSandbox(BaseAsyncSandbox):
         self,
         code: str,
         language: Optional[str] = None,
-        context: Optional[Context] = None,
+        context: Optional[Union[Context, str]] = None,
         on_stdout: Optional[Callable[[OutputMessage], None]] = None,
         on_stderr: Optional[Callable[[OutputMessage], None]] = None,
         on_result: Optional[Callable[[Result], None]] = None,
@@ -165,32 +185,48 @@ class AsyncSandbox(BaseAsyncSandbox):
     ) -> Context:
         """Create a persistent code context."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        return await asyncio.to_thread(
+            self._sync.create_code_context,
+            cwd=cwd,
+            language=language,
+            request_timeout=request_timeout,
+        )
 
     async def remove_code_context(
         self,
-        context: Context,
+        context: Union[Context, str],
         request_timeout: Optional[float] = None,
-    ) -> bool:
+    ) -> None:
         """Remove a persistent code context."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        await asyncio.to_thread(
+            self._sync.remove_code_context,
+            context,
+            request_timeout=request_timeout,
+        )
 
     async def list_code_contexts(
         self, request_timeout: Optional[float] = None
     ) -> List[Context]:
         """List persistent code contexts."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        return await asyncio.to_thread(
+            self._sync.list_code_contexts,
+            request_timeout=request_timeout,
+        )
 
     async def restart_code_context(
         self,
-        context: Context,
+        context: Union[Context, str],
         request_timeout: Optional[float] = None,
-    ) -> Context:
+    ) -> None:
         """Restart a persistent code context."""
 
-        raise NotImplementedError("code contexts are not supported by Watasu yet")
+        await asyncio.to_thread(
+            self._sync.restart_code_context,
+            context,
+            request_timeout=request_timeout,
+        )
 
 
 def _emit_callbacks(
@@ -213,16 +249,29 @@ def _emit_callbacks(
         on_error(execution.error)
 
 
-def _context_id(context: Optional[Context]) -> Optional[str]:
+def _context_id(context: Optional[Union[Context, str]]) -> Optional[str]:
     if context is None:
         return None
+    return _context_id_required(context)
+
+
+def _context_id_required(context: Union[Context, str]) -> str:
     if isinstance(context, str):
-        return context
-    if isinstance(context, dict):
+        context_id = context
+    elif isinstance(context, dict):
         value = context.get("id")
-        return str(value) if value is not None else None
-    value = getattr(context, "id", None)
-    return str(value) if value is not None else None
+        context_id = str(value) if value is not None else ""
+    else:
+        value = getattr(context, "id", None)
+        context_id = str(value) if value is not None else ""
+
+    if not context_id:
+        raise InvalidArgumentException("context id is required")
+    return context_id
+
+
+def _context_path_id(context: Union[Context, str]) -> str:
+    return quote(_context_id_required(context), safe="")
 
 
 def _compact(payload: Dict[str, Any]) -> Dict[str, Any]:

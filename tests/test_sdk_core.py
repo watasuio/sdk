@@ -24,6 +24,7 @@ from watasu import (
     get_signature,
     wait_for_timeout,
 )
+from watasu._transport.data_plane import DataPlaneClient
 from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.filesystem.filesystem import FileType
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
@@ -762,6 +763,95 @@ def test_code_interpreter_run_code_uses_runtime_api_and_callbacks():
                 },
                 "request_timeout": 10,
             },
+        )
+    ]
+
+
+def test_code_interpreter_context_methods_use_runtime_api():
+    calls = []
+
+    class DataPlane:
+        def post_json(self, path, **kwargs):
+            calls.append(("POST", path, kwargs))
+            if path == "/runtime/v1/code/contexts":
+                return {"id": "ctx-1", "language": "python", "cwd": "/workspace/app"}
+            return {}
+
+        def get_json(self, path, **kwargs):
+            calls.append(("GET", path, kwargs))
+            return [{"id": "ctx-1", "language": "python", "cwd": "/workspace/app"}]
+
+        def delete_json(self, path, **kwargs):
+            calls.append(("DELETE", path, kwargs))
+            return {}
+
+    sbx = CodeInterpreterSandbox(
+        "code",
+        connection_config=ConnectionConfig(api_key="key"),
+        session={
+            "data_plane_url": "https://route.sandbox.watasuhost.com",
+            "token": "data",
+        },
+    )
+    sbx._data_plane = DataPlane()
+
+    context = sbx.create_code_context(
+        cwd="/workspace/app", language="python", request_timeout=5
+    )
+    contexts = sbx.list_code_contexts(request_timeout=6)
+    sbx.restart_code_context(context, request_timeout=7)
+    sbx.remove_code_context("ctx-1", request_timeout=8)
+
+    assert context.id == "ctx-1"
+    assert contexts[0].cwd == "/workspace/app"
+    assert calls == [
+        (
+            "POST",
+            "/runtime/v1/code/contexts",
+            {
+                "json": {"cwd": "/workspace/app", "language": "python"},
+                "request_timeout": 5,
+            },
+        ),
+        ("GET", "/runtime/v1/code/contexts", {"request_timeout": 6}),
+        (
+            "POST",
+            "/runtime/v1/code/contexts/ctx-1/restart",
+            {"json": {}, "request_timeout": 7},
+        ),
+        ("DELETE", "/runtime/v1/code/contexts/ctx-1", {"request_timeout": 8}),
+    ]
+
+
+def test_data_plane_post_json_accepts_empty_success_response(monkeypatch):
+    calls = []
+
+    class Response:
+        status_code = 204
+        content = b""
+        text = ""
+
+        def json(self):
+            raise AssertionError("empty 204 responses should not be parsed")
+
+    def request(self, method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        return Response()
+
+    monkeypatch.setattr("requests.Session.request", request)
+
+    client = DataPlaneClient(
+        "https://route.sandbox.watasuhost.com",
+        "data",
+        ConnectionConfig(api_key="key"),
+    )
+
+    assert client.post_json("/runtime/v1/code/contexts/ctx-1/restart", json={}) == {}
+    assert calls == [
+        (
+            "POST",
+            "https://route.sandbox.watasuhost.com/runtime/v1/code/contexts/ctx-1/restart",
+            {},
         )
     ]
 

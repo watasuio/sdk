@@ -145,13 +145,25 @@ class Execution:
         }
 
 
-@dataclass
+@dataclass(init=False)
 class Context:
     """Code execution context metadata."""
 
     id: str
     language: Optional[str] = None
     cwd: Optional[str] = None
+
+    def __init__(
+        self,
+        id: Optional[str] = None,
+        language: Optional[str] = None,
+        cwd: Optional[str] = None,
+        context_id: Optional[str] = None,
+        **_: Any,
+    ) -> None:
+        self.id = str(context_id if context_id is not None else id)
+        self.language = language
+        self.cwd = cwd
 
     def to_json(self) -> Dict[str, Any]:
         return {
@@ -178,6 +190,14 @@ def execution_from_api(payload: Dict[str, Any]) -> Execution:
         ),
         error=error_from_api(execution.get("error")),
         execution_count=execution.get("execution_count"),
+    )
+
+
+def context_from_api(payload: Dict[str, Any]) -> Context:
+    return Context(
+        id=payload.get("id"),
+        language=payload.get("language"),
+        cwd=payload.get("cwd"),
     )
 
 

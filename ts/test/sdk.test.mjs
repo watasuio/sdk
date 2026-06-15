@@ -473,6 +473,68 @@ test('code interpreter runCode uses runtime API and parses callbacks', async () 
   }
 })
 
+test('code interpreter context methods use runtime API', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      const path = new URL(String(url)).pathname
+      if (init.method === 'POST' && path.endsWith('/runtime/v1/code/contexts')) {
+        return new Response(
+          JSON.stringify({ id: 'ctx-1', language: 'python', cwd: '/workspace/app' }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (init.method === 'GET' && path.endsWith('/runtime/v1/code/contexts')) {
+        return new Response(
+          JSON.stringify([{ id: 'ctx-1', language: 'python', cwd: '/workspace/app' }]),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      return new Response(null, { status: 204 })
+    }
+
+    const sbx = new CodeInterpreterSandbox({
+      sandboxId: 'code',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+    })
+
+    const context = await sbx.createCodeContext({ cwd: '/workspace/app', language: 'python', requestTimeoutMs: 5 })
+    const contexts = await sbx.listCodeContexts({ requestTimeoutMs: 6 })
+    await sbx.restartCodeContext(context, { requestTimeoutMs: 7 })
+    await sbx.removeCodeContext('ctx-1', { requestTimeoutMs: 8 })
+
+    assert.equal(context.id, 'ctx-1')
+    assert.equal(contexts[0].cwd, '/workspace/app')
+    assert.deepEqual(requests, [
+      {
+        url: 'https://route.sandbox.watasuhost.com/runtime/v1/code/contexts',
+        method: 'POST',
+        body: { cwd: '/workspace/app', language: 'python' },
+      },
+      {
+        url: 'https://route.sandbox.watasuhost.com/runtime/v1/code/contexts',
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: 'https://route.sandbox.watasuhost.com/runtime/v1/code/contexts/ctx-1/restart',
+        method: 'POST',
+        body: {},
+      },
+      {
+        url: 'https://route.sandbox.watasuhost.com/runtime/v1/code/contexts/ctx-1',
+        method: 'DELETE',
+        body: undefined,
+      },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('sandbox create with mcp sends config to API without SDK-side bootstrap', async () => {
   const originalFetch = globalThis.fetch
   const originalRun = Commands.prototype.run

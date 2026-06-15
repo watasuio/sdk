@@ -1,11 +1,11 @@
-import { InvalidArgumentError, NotImplementedError } from './errors.js'
+import { InvalidArgumentError } from './errors.js'
 import { Sandbox as BaseSandbox, SandboxConnectOpts, SandboxCreateOpts } from './sandbox.js'
 
 export type RunCodeLanguage = 'python' | 'python3' | string
 
 export interface RunCodeOpts {
   language?: RunCodeLanguage
-  context?: Context
+  context?: Context | string
   onStdout?: (message: OutputMessage) => void
   onStderr?: (message: OutputMessage) => void
   onResult?: (result: Result) => void
@@ -205,22 +205,36 @@ export class Sandbox extends BaseSandbox {
 
   /** Create a persistent code context. */
   async createCodeContext(_opts: CreateCodeContextOpts = {}): Promise<Context> {
-    throw new NotImplementedError('code contexts are not supported by Watasu yet')
+    const response = await this.runtimePostJson('/runtime/v1/code/contexts', compactRecord({
+      cwd: _opts.cwd,
+      language: _opts.language,
+    }), {
+      requestTimeoutMs: _opts.requestTimeoutMs,
+    })
+    return contextFromApi(response)
   }
 
   /** Remove a persistent code context. */
-  async removeCodeContext(_context: Context, _opts: { requestTimeoutMs?: number } = {}): Promise<boolean> {
-    throw new NotImplementedError('code contexts are not supported by Watasu yet')
+  async removeCodeContext(context: Context | string, opts: { requestTimeoutMs?: number } = {}): Promise<void> {
+    await this.runtimeDeleteJson(`/runtime/v1/code/contexts/${encodeURIComponent(requireContextId(context))}`, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
   }
 
   /** List persistent code contexts. */
-  async listCodeContexts(_opts: { requestTimeoutMs?: number } = {}): Promise<Context[]> {
-    throw new NotImplementedError('code contexts are not supported by Watasu yet')
+  async listCodeContexts(opts: { requestTimeoutMs?: number } = {}): Promise<Context[]> {
+    const response = await this.runtimeGetJson('/runtime/v1/code/contexts', {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    const contexts = Array.isArray(response) ? response : arrayOfUnknown(response.contexts)
+    return contexts.map((item) => contextFromApi(record(item)))
   }
 
   /** Restart a persistent code context. */
-  async restartCodeContext(_context: Context, _opts: { requestTimeoutMs?: number } = {}): Promise<Context> {
-    throw new NotImplementedError('code contexts are not supported by Watasu yet')
+  async restartCodeContext(context: Context | string, opts: { requestTimeoutMs?: number } = {}): Promise<void> {
+    await this.runtimePostJson(`/runtime/v1/code/contexts/${encodeURIComponent(requireContextId(context))}/restart`, {}, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
   }
 }
 
@@ -267,8 +281,22 @@ function emitCallbacks(execution: Execution, opts: RunCodeOpts): void {
   if (execution.error !== undefined) opts.onError?.(execution.error)
 }
 
-function contextId(context: Context | undefined): string | undefined {
-  return context?.id
+function contextId(context: Context | string | undefined): string | undefined {
+  if (context === undefined) return undefined
+  return requireContextId(context)
+}
+
+function requireContextId(context: Context | string): string {
+  if (typeof context === 'string') return context
+  return context.id
+}
+
+function contextFromApi(payload: Record<string, unknown>): Context {
+  return new Context(
+    String(payload.id ?? ''),
+    stringValue(payload.language),
+    stringValue(payload.cwd)
+  )
 }
 
 function compactRecord(payload: Record<string, unknown>): Record<string, unknown> {

@@ -37,17 +37,20 @@ await sbx.resume({ timeoutMs: 300_000 })
 import { Sandbox } from '@watasu/sdk/code-interpreter'
 
 const sbx = await Sandbox.create()
+const context = await sbx.createCodeContext()
 const execution = await sbx.runCode("print('hello')\n2 + 3", {
-  language: 'python',
+  context,
   onStdout: (message) => console.log(message.line),
 })
 
 console.log(execution.text)
+await sbx.removeCodeContext(context)
 await sbx.kill()
 ```
 
-`@watasu/sdk/code-interpreter` starts the `code-interpreter` template by default
-and returns structured `results`, `logs`, and `error` fields for each execution.
+`@watasu/sdk/code-interpreter` starts the `code-interpreter` template by default.
+Code runs in persistent Python contexts and returns structured `results`, `logs`,
+and `error` fields for each execution.
 
 ## MCP Gateway
 

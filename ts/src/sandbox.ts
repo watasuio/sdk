@@ -645,6 +645,20 @@ export class Sandbox {
     })
   }
 
+  /** GET JSON from the sandbox data-plane runtime API. */
+  protected async runtimeGetJson(path: string, opts: ConnectionOpts = {}): Promise<Record<string, unknown>> {
+    return this.dataPlane.getJson(path, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+  }
+
+  /** DELETE JSON from the sandbox data-plane runtime API. */
+  protected async runtimeDeleteJson(path: string, opts: ConnectionOpts = {}): Promise<Record<string, unknown>> {
+    return this.dataPlane.deleteJson(path, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+  }
+
   private configOptions(): ConnectionOpts {
     return {
       apiKey: this.config.apiKey,

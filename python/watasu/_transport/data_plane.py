@@ -71,13 +71,13 @@ class DataPlaneClient:
         return self.request("GET", path, **kwargs).json()
 
     def post_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
-        return self.request("POST", path, **kwargs).json()
+        return _json_or_empty(self.request("POST", path, **kwargs))
 
     def put_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
-        return self.request("PUT", path, **kwargs).json()
+        return _json_or_empty(self.request("PUT", path, **kwargs))
 
     def delete_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
-        return self.request("DELETE", path, **kwargs).json()
+        return _json_or_empty(self.request("DELETE", path, **kwargs))
 
     def get_bytes(self, path: str, **kwargs: Any) -> bytes:
         return self.request("GET", path, **kwargs).content
@@ -95,3 +95,9 @@ def _requests_proxies(proxy: Any):
     if isinstance(proxy, str):
         return {"http": proxy, "https": proxy}
     return proxy
+
+
+def _json_or_empty(response: requests.Response) -> Dict[str, Any]:
+    if not response.content:
+        return {}
+    return response.json()
