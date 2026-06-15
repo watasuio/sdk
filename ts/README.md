@@ -31,6 +31,21 @@ await sbx.betaPause()
 await sbx.resume({ timeoutMs: 300_000 })
 ```
 
+## Listing Sandboxes
+
+```ts
+import { Sandbox } from '@watasu/sdk'
+
+const paginator = Sandbox.list({
+  query: { metadata: { purpose: 'ci' }, state: ['running'] },
+  limit: 20,
+})
+
+for (const sandbox of await paginator.listItems()) {
+  console.log(sandbox.sandboxId, sandbox.state)
+}
+```
+
 ## Git, Watch, PTY, And Signed File URLs
 
 ```ts

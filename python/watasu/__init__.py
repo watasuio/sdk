@@ -69,6 +69,7 @@ from .sandbox_async.main import (
     AsyncGit,
     AsyncPty,
     AsyncSandbox,
+    AsyncSandboxPaginator,
     AsyncSnapshotPaginator,
     AsyncWatchHandle,
 )
@@ -124,6 +125,7 @@ __all__ = [
     "AsyncGit",
     "AsyncPty",
     "AuthenticationException",
+    "AsyncSandboxPaginator",
     "BuildException",
     "BuildInfo",
     "BuildStatusReason",

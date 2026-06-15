@@ -434,6 +434,44 @@ class AsyncSnapshotPaginator:
             raise StopAsyncIteration from exc
 
 
+class AsyncSandboxPaginator:
+    """Async paginator for listing Watasu sandboxes."""
+
+    def __init__(self, paginator: SandboxPaginator[SandboxInfo]) -> None:
+        self._paginator = paginator
+        self._iter_items = None
+
+    @property
+    def has_next(self) -> bool:
+        """Return whether another page can be fetched."""
+        return self._paginator.has_next
+
+    @property
+    def next_token(self) -> Optional[str]:
+        """Return the next pagination cursor."""
+        return self._paginator.next_token
+
+    async def list_items(self) -> List[SandboxInfo]:
+        """Drain all remaining pages and return them as a list."""
+        return await asyncio.to_thread(self._paginator.list_items)
+
+    async def next_items(self, **opts: ApiParams) -> List[SandboxInfo]:
+        """Fetch and return the next page of sandboxes."""
+        return await asyncio.to_thread(self._paginator.next_items, **opts)
+
+    def __aiter__(self):
+        self._iter_items = None
+        return self
+
+    async def __anext__(self):
+        if self._iter_items is None:
+            self._iter_items = iter(await self.list_items())
+        try:
+            return next(self._iter_items)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
 class AsyncSandbox:
     """Async Watasu sandbox with sync and async helpers."""
 
@@ -658,9 +696,10 @@ class AsyncSandbox:
         return await asyncio.to_thread(self._sync.restore, *args, **kwargs)
 
     @staticmethod
-    async def list(**opts: ApiParams) -> SandboxPaginator[SandboxInfo]:
-        """List sandboxes visible to the configured API token."""
-        return await asyncio.to_thread(Sandbox.list, **opts)
+    async def list(**opts: ApiParams) -> AsyncSandboxPaginator:
+        """Return an async paginator for visible sandboxes."""
+        paginator = await asyncio.to_thread(Sandbox.list, **opts)
+        return AsyncSandboxPaginator(paginator)
 
     def get_host(self, port: int) -> str:
         """Return the public hostname for an exposed sandbox port."""
@@ -721,6 +760,7 @@ __all__ = [
     "AsyncGit",
     "AsyncPty",
     "AsyncSandbox",
+    "AsyncSandboxPaginator",
     "AsyncSnapshotPaginator",
     "AsyncWatchHandle",
 ]

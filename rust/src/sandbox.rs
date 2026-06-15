@@ -62,6 +62,31 @@ impl Default for CreateOptions {
     }
 }
 
+/// Query filters for listing sandboxes.
+#[derive(Clone, Debug, Default)]
+pub struct SandboxListQuery {
+    /// Metadata key-value pairs that must be present on the sandbox.
+    pub metadata: serde_json::Map<String, Value>,
+    /// Lifecycle states to include. The API accepts `running` and `paused`
+    /// aliases as well as Watasu-native states.
+    pub state: Vec<String>,
+}
+
+/// Options for `Sandbox::list`.
+#[derive(Clone, Debug, Default)]
+pub struct ListOptions {
+    /// Connection options used for the control-plane request.
+    pub connection: ConnectionOptions,
+    /// Optional filters.
+    pub query: Option<SandboxListQuery>,
+    /// Maximum number of sandboxes to return.
+    pub limit: Option<u64>,
+    /// Pagination cursor returned by the previous page.
+    pub next_token: Option<String>,
+    /// Team slug to list within.
+    pub team: Option<String>,
+}
+
 /// Control-plane metadata for a sandbox.
 #[derive(Clone, Debug, Default)]
 pub struct SandboxInfo {
@@ -134,6 +159,15 @@ pub struct FileUrlInfo {
     pub expires_at: Option<String>,
     /// Full raw file URL payload.
     pub raw: Value,
+}
+
+/// One page of sandbox list results.
+#[derive(Clone, Debug, Default)]
+pub struct SandboxListPage {
+    /// Sandboxes returned on this page.
+    pub sandboxes: Vec<SandboxInfo>,
+    /// Cursor for the next page, when more results exist.
+    pub next_token: Option<String>,
 }
 
 /// Options for atomically replacing a sandbox network policy.
@@ -265,6 +299,25 @@ impl Sandbox {
             sandbox.sandbox = info.get("sandbox").cloned().unwrap_or(Value::Null);
         }
         Ok(sandbox)
+    }
+
+    /// List sandboxes visible to the configured API token.
+    pub async fn list(opts: ListOptions) -> Result<SandboxListPage> {
+        let path = sandbox_list_path(&opts);
+        let config = ConnectionConfig::new(opts.connection);
+        let control = ControlClient::new(config)?;
+        let payload = control.get(&path).await?;
+        Ok(SandboxListPage {
+            sandboxes: payload
+                .get("sandboxes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| sandbox_info(&value))
+                .collect(),
+            next_token: string_value(&payload, &["next_token", "nextToken"]),
+        })
     }
 
     /// Resume a paused sandbox by id.
@@ -607,6 +660,40 @@ impl Sandbox {
     }
 }
 
+fn sandbox_list_path(opts: &ListOptions) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(team) = &opts.team {
+        serializer.append_pair("team", team);
+    }
+    if let Some(limit) = opts.limit {
+        serializer.append_pair("limit", &limit.to_string());
+    }
+    if let Some(next_token) = &opts.next_token {
+        serializer.append_pair("next_token", next_token);
+    }
+    if let Some(query) = &opts.query {
+        for (key, value) in &query.metadata {
+            serializer.append_pair(&format!("query[metadata][{key}]"), &query_value(value));
+        }
+        for state in &query.state {
+            serializer.append_pair("query[state][]", state);
+        }
+    }
+    let query = serializer.finish();
+    if query.is_empty() {
+        "/sandboxes".to_string()
+    } else {
+        format!("/sandboxes?{query}")
+    }
+}
+
+fn query_value(value: &Value) -> String {
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| value.to_string())
+}
+
 fn data_plane_from_session(
     session: Option<&Value>,
     config: &ConnectionConfig,
@@ -828,11 +915,14 @@ fn host_only(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
-    use super::{metrics_list, network_payload, snapshot_info, NetworkUpdateOptions};
+    use super::{
+        metrics_list, network_payload, sandbox_list_path, snapshot_info, ListOptions,
+        NetworkUpdateOptions, SandboxListQuery,
+    };
 
     #[test]
     fn runtime_base64_helpers_match_protocol() {
@@ -883,6 +973,28 @@ mod tests {
                 "allow_out": ["pypi.org:443"],
                 "deny_out": ["10.0.0.0/8"]
             })
+        );
+    }
+
+    #[test]
+    fn builds_sandbox_list_query_path() {
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("purpose".to_string(), Value::String("ci".to_string()));
+
+        let path = sandbox_list_path(&ListOptions {
+            team: Some("bridgeapp".to_string()),
+            limit: Some(1),
+            next_token: Some("2".to_string()),
+            query: Some(SandboxListQuery {
+                metadata,
+                state: vec!["running".to_string()],
+            }),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            path,
+            "/sandboxes?team=bridgeapp&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running"
         );
     }
 }

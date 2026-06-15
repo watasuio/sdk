@@ -21,7 +21,7 @@ class ControlClient:
         path: str,
         *,
         json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
+        params: Optional[Any] = None,
         request_timeout: Optional[float] = None,
         resource: Optional[str] = None,
     ) -> Dict[str, Any]:

@@ -626,6 +626,70 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
 
 
+def test_sandbox_list_returns_paginator_and_uses_nested_query_params(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            pass
+
+        def get(self, path, **kwargs):
+            calls.append((path, kwargs))
+            params = dict(kwargs["params"])
+            if params.get("next_token") == "2":
+                return {"sandboxes": [{"id": "1", "state": "ready"}]}
+            return {
+                "sandboxes": [{"id": "2", "state": "creating"}],
+                "next_token": "2",
+            }
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    paginator = Sandbox.list(
+        api_key="key",
+        team="bridgeapp",
+        query={"metadata": {"purpose": "ci"}, "state": ["running"]},
+        limit=1,
+    )
+
+    first_page = paginator.next_items(request_timeout=5)
+    assert paginator.has_next is True
+    assert paginator.next_token == "2"
+    second_page = paginator.next_items()
+    assert paginator.has_next is False
+
+    assert [item.sandbox_id for item in first_page + second_page] == ["2", "1"]
+    assert calls == [
+        (
+            "/sandboxes",
+            {
+                "params": [
+                    ("team", "bridgeapp"),
+                    ("limit", "1"),
+                    ("query[metadata][purpose]", "ci"),
+                    ("query[state][]", "running"),
+                ],
+                "resource": "sandbox",
+                "request_timeout": 5,
+            },
+        ),
+        (
+            "/sandboxes",
+            {
+                "params": [
+                    ("team", "bridgeapp"),
+                    ("limit", "1"),
+                    ("next_token", "2"),
+                    ("query[metadata][purpose]", "ci"),
+                    ("query[state][]", "running"),
+                ],
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
+        ),
+    ]
+
+
 def test_sandbox_update_network_uses_snake_case_payload(monkeypatch):
     calls = []
 

@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.11"
+watasu = "0.1.12"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -34,6 +34,32 @@ supplies a usable data-plane session. The crate does not poll sandbox readiness.
 # async fn run(mut sbx: watasu::Sandbox) -> watasu::Result<()> {
 sbx.beta_pause().await?;
 sbx.resume().await?;
+# Ok(())
+# }
+```
+
+## Listing Sandboxes
+
+```rust
+use watasu::{ListOptions, Sandbox, SandboxListQuery};
+
+# async fn run() -> watasu::Result<()> {
+let mut metadata = serde_json::Map::new();
+metadata.insert("purpose".into(), serde_json::Value::String("ci".into()));
+
+let page = Sandbox::list(ListOptions {
+    query: Some(SandboxListQuery {
+        metadata,
+        state: vec!["running".into()],
+    }),
+    limit: Some(20),
+    ..Default::default()
+})
+.await?;
+
+for sandbox in page.sandboxes {
+    println!("{} {:?}", sandbox.sandbox_id, sandbox.state);
+}
 # Ok(())
 # }
 ```

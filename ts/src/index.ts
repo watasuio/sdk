@@ -12,13 +12,14 @@ export {
   TimeoutError,
 } from './errors.js'
 export { ConnectionConfig, KEEPALIVE_PING_INTERVAL_SEC } from './connectionConfig.js'
-export { Sandbox, SnapshotPaginator } from './sandbox.js'
+export { Sandbox, SandboxPaginator, SnapshotPaginator } from './sandbox.js'
 export type {
   CreateSnapshotOpts,
   RestoreSnapshotOpts,
   SandboxCreateOpts,
   SandboxConnectOpts,
   SandboxInfo,
+  SandboxListOpts,
   SandboxMetrics,
   SandboxNetworkSelector,
   SandboxNetworkUpdate,

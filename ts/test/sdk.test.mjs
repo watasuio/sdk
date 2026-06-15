@@ -12,6 +12,7 @@ import {
   ProcessSocket,
   Sandbox,
   SandboxError,
+  SandboxPaginator,
   WatchHandle,
   base64DecodeText,
   base64Encode,
@@ -273,6 +274,56 @@ test('sandbox create uses root snake_case API payload', async () => {
       allow_package_registry_access: true,
       team: 'bridgeapp',
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('sandbox list returns a paginator and uses nested query params', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method })
+      const parsed = new URL(String(url))
+      if (parsed.searchParams.get('next_token') === '2') {
+        return new Response(
+          JSON.stringify({ sandboxes: [{ id: '1', state: 'ready' }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      return new Response(
+        JSON.stringify({
+          sandboxes: [{ id: '2', state: 'creating' }],
+          next_token: '2',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const paginator = Sandbox.list({
+      apiKey: 'key',
+      team: 'bridgeapp',
+      query: { metadata: { purpose: 'ci' }, state: ['running'] },
+      limit: 1,
+    })
+
+    assert.ok(paginator instanceof SandboxPaginator)
+    const firstPage = await paginator.nextItems()
+    assert.equal(paginator.hasNext, true)
+    assert.equal(paginator.nextToken, '2')
+    const secondPage = await paginator.nextItems()
+    assert.equal(paginator.hasNext, false)
+
+    assert.deepEqual([...firstPage, ...secondPage].map((item) => item.sandboxId), ['2', '1'])
+    assert.equal(
+      requests[0].url,
+      'https://api.watasu.io/v1/sandboxes?team=bridgeapp&limit=1&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
+    )
+    assert.equal(
+      requests[1].url,
+      'https://api.watasu.io/v1/sandboxes?team=bridgeapp&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
+    )
   } finally {
     globalThis.fetch = originalFetch
   }

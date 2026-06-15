@@ -45,6 +45,20 @@ export interface SandboxConnectOpts extends ConnectionOpts {
   timeoutMs?: number
 }
 
+export interface SandboxListOpts extends ConnectionOpts {
+  /** Filters applied by the Watasu API. */
+  query?: {
+    metadata?: Record<string, string>
+    state?: Array<'running' | 'paused' | string>
+  }
+  /** Maximum number of sandboxes to return per page. */
+  limit?: number
+  /** Pagination cursor returned by a previous page. */
+  nextToken?: string
+  /** Team slug to list within. */
+  team?: string
+}
+
 export interface SandboxInfo {
   sandboxId: string
   templateId?: string
@@ -116,6 +130,38 @@ export class SnapshotPaginator {
     this.consumed = true
     this.hasNext = false
     return this.loadItems()
+  }
+}
+
+/** Paginator for listing sandboxes. */
+export class SandboxPaginator {
+  hasNext = true
+  nextToken: string | undefined
+
+  constructor(private readonly opts: SandboxListOpts = {}) {
+    this.nextToken = opts.nextToken
+  }
+
+  /** Fetch the next page of sandbox metadata. */
+  async nextItems(opts: ConnectionOpts = {}): Promise<SandboxInfo[]> {
+    if (!this.hasNext) throw new SandboxError('No more sandboxes to fetch')
+
+    const config = new ConnectionConfig({ ...this.opts, ...opts })
+    const control = new ControlClient(config)
+    const payload = await control.get(sandboxListPath(this.opts, this.nextToken), {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    this.nextToken = stringValue(payload.next_token ?? payload.nextToken)
+    this.hasNext = this.nextToken !== undefined
+    const sandboxes = Array.isArray(payload.sandboxes) ? payload.sandboxes : []
+    return sandboxes.map((item) => sandboxInfo(record(item)))
+  }
+
+  /** Drain all remaining pages into one list. */
+  async listItems(opts: ConnectionOpts = {}): Promise<SandboxInfo[]> {
+    const items: SandboxInfo[] = []
+    while (this.hasNext) items.push(...await this.nextItems(opts))
+    return items
   }
 }
 
@@ -437,13 +483,10 @@ export class Sandbox {
     return sandboxInfo(record(response.sandbox ?? response))
   }
 
-  /** List sandboxes visible to the configured API key. */
-  static async list(opts: (ConnectionOpts & { team?: string }) | string = {}): Promise<SandboxInfo[]> {
+  /** Return a paginator for sandboxes visible to the configured API key. */
+  static list(opts: SandboxListOpts | string = {}): SandboxPaginator {
     const listOpts = typeof opts === 'string' ? { apiKey: opts } : opts
-    const control = new ControlClient(new ConnectionConfig(listOpts))
-    const payload = await control.get(listOpts.team ? `/sandboxes?team=${encodeURIComponent(listOpts.team)}` : '/sandboxes')
-    const sandboxes = Array.isArray(payload.sandboxes) ? payload.sandboxes : []
-    return sandboxes.map((item) => sandboxInfo(record(item)))
+    return new SandboxPaginator(listOpts)
   }
 
   /** Return the public hostname for an exposed sandbox port. */
@@ -549,6 +592,25 @@ function dataPlaneFromSession(session: unknown, config: ConnectionConfig): DataP
     throw new SandboxError('sandbox session did not include data_plane_url and token')
   }
   return new DataPlaneClient(url, token, config)
+}
+
+function sandboxListPath(opts: SandboxListOpts, nextToken: string | undefined): string {
+  const params = new URLSearchParams()
+  if (opts.team) params.set('team', opts.team)
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
+  if (nextToken) params.set('next_token', nextToken)
+
+  if (opts.query?.metadata) {
+    for (const [key, value] of Object.entries(opts.query.metadata)) {
+      params.append(`query[metadata][${key}]`, value)
+    }
+  }
+  for (const state of opts.query?.state ?? []) {
+    params.append('query[state][]', state)
+  }
+
+  const query = params.toString()
+  return query ? `/sandboxes?${query}` : '/sandboxes'
 }
 
 function fileUrlInfo(payload: Record<string, unknown>): FileUrlInfo {

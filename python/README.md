@@ -41,6 +41,20 @@ with Sandbox.create() as sbx:
 
 Leaving the context manager calls `kill()`.
 
+## Listing Sandboxes
+
+```python
+from watasu import Sandbox
+
+paginator = Sandbox.list(
+    query={"metadata": {"purpose": "ci"}, "state": ["running"]},
+    limit=20,
+)
+
+for sandbox in paginator.list_items():
+    print(sandbox.sandbox_id, sandbox.state)
+```
+
 ## Git, Watch, PTY, And Signed File URLs
 
 ```python

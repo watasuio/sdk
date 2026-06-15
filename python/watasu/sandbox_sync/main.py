@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from watasu._transport.control import ControlClient
 from watasu._transport.data_plane import DataPlaneClient
@@ -535,14 +535,40 @@ class Sandbox:
         return sandbox_info_from_api(payload.get("sandbox") or payload)
 
     @staticmethod
-    def list(**opts: ApiParams) -> SandboxPaginator[SandboxInfo]:
-        """List sandboxes visible to the configured API token."""
-        config = ConnectionConfig(**opts)
-        control = ControlClient(config)
-        payload = control.get("/sandboxes")
-        return SandboxPaginator(
-            [sandbox_info_from_api(item) for item in payload.get("sandboxes", [])]
-        )
+    def list(
+        query: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
+        next_token: Optional[str] = None,
+        **opts: ApiParams,
+    ) -> SandboxPaginator[SandboxInfo]:
+        """Return a paginator for sandboxes visible to the configured API token.
+
+        ``query`` supports ``metadata`` and ``state`` filters. The state values
+        ``"running"`` and ``"paused"`` are resolved by the Watasu API.
+        """
+        team = opts.pop("team", None)
+
+        def load_page(
+            page_token: Optional[str], page_opts: Dict[str, Any]
+        ) -> Tuple[List[SandboxInfo], Optional[str]]:
+            config = ConnectionConfig(**{**opts, **page_opts})
+            control = ControlClient(config)
+            payload = control.get(
+                "/sandboxes",
+                params=_sandbox_list_params(query, limit, page_token, team),
+                resource="sandbox",
+                request_timeout=page_opts.get("request_timeout"),
+            )
+            return (
+                [
+                    sandbox_info_from_api(item)
+                    for item in payload.get("sandboxes", [])
+                    if isinstance(item, dict)
+                ],
+                payload.get("next_token"),
+            )
+
+        return SandboxPaginator(load_page=load_page, next_token=next_token)
 
     def get_host(self, port: int) -> str:
         """Return the public hostname for an exposed sandbox port."""
@@ -663,6 +689,43 @@ def _reject_unsupported_opts(opts: Dict, keys: Iterable[str]) -> None:
     for key in keys:
         if key in opts and opts[key] is not None:
             unsupported(key)
+
+
+def _sandbox_list_params(
+    query: Optional[Dict[str, Any]],
+    limit: Optional[int],
+    next_token: Optional[str],
+    team: Optional[str],
+):
+    params = []
+    if team:
+        params.append(("team", str(team)))
+    if limit is not None:
+        params.append(("limit", str(limit)))
+    if next_token:
+        params.append(("next_token", str(next_token)))
+
+    if isinstance(query, dict):
+        metadata = query.get("metadata")
+        if isinstance(metadata, dict):
+            for key, value in metadata.items():
+                params.append((f"query[metadata][{key}]", str(value)))
+
+        for state in _list_query_values(query.get("state")):
+            params.append(("query[state][]", state))
+
+    return params
+
+
+def _list_query_values(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        values = []
+        for item in value:
+            values.extend(_list_query_values(item))
+        return values
+    return [str(value)]
 
 
 def _compact(payload: Dict) -> Dict:
