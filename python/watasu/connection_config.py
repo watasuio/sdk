@@ -19,6 +19,7 @@ class ApiParams(TypedDict, total=False):
     headers: Optional[Dict[str, str]]
     proxy: Optional[ProxyTypes]
     api_url: Optional[str]
+    data_plane_domain: Optional[str]
     debug: Optional[bool]
 
 

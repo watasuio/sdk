@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import datetime
+import inspect
 import json
 
 import pytest
@@ -60,6 +61,17 @@ def test_connection_config_accepts_access_token_alias(monkeypatch):
 
     assert config.api_key == "alias-key"
     assert config.auth_headers["Authorization"] == "Bearer alias-key"
+
+
+def test_public_team_ref_signatures_are_explicit():
+    assert "team" in inspect.signature(Sandbox.create).parameters
+    assert "team" in inspect.signature(Sandbox.list).parameters
+    assert "team" in inspect.signature(AsyncSandbox.create).parameters
+    assert "team" in inspect.signature(AsyncSandbox.list).parameters
+    assert "team" in inspect.signature(Volume.create).parameters
+    assert "team" in inspect.signature(Volume.list).parameters
+    assert "team" in inspect.signature(AsyncVolume.create).parameters
+    assert "team" in inspect.signature(AsyncVolume.list).parameters
 
 
 def test_template_sync_and_async_import_paths_match_top_level_exports():
@@ -127,7 +139,7 @@ def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatc
 
     monkeypatch.setattr(volume_module, "ControlClient", FakeControl)
 
-    volume = Volume.create("cache", api_key="key", team="core")
+    volume = Volume.create("cache", api_key="key", team="watasu")
     assert isinstance(volume, Volume)
     assert volume.id == "42"
     assert volume.name == "cache"
@@ -144,7 +156,7 @@ def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatc
         "POST",
         "/volumes",
         {
-            "json": {"name": "cache", "team": "core"},
+            "json": {"name": "cache", "team": "watasu"},
             "resource": "volume",
             "request_timeout": None,
         },
@@ -810,7 +822,7 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
 
     sbx = Sandbox.create(
         api_key="key",
-        team="bridgeapp",
+        team="watasu",
         template="base:82",
         envs={"HELLO": "world"},
         lifecycle={"on_timeout": "pause", "auto_resume": True},
@@ -837,7 +849,7 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
         {"path": "/workspace/cache", "name": "cache"},
         {"path": "/data/models", "name": "models"},
     ]
-    assert captured["kwargs"]["json"]["team"] == "bridgeapp"
+    assert captured["kwargs"]["json"]["team"] == "watasu"
     assert captured["kwargs"]["json"]["allow_out"] == ["pypi.org:443"]
     assert captured["kwargs"]["json"]["deny_out"] == ["10.0.0.0/8"]
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
@@ -1122,7 +1134,7 @@ def test_sandbox_list_returns_paginator_and_uses_nested_query_params(monkeypatch
 
     paginator = Sandbox.list(
         api_key="key",
-        team="bridgeapp",
+        team="watasu",
         query={"metadata": {"purpose": "ci"}, "state": ["running"]},
         limit=1,
     )
@@ -1139,7 +1151,7 @@ def test_sandbox_list_returns_paginator_and_uses_nested_query_params(monkeypatch
             "/sandboxes",
             {
                 "params": [
-                    ("team", "bridgeapp"),
+                    ("team", "watasu"),
                     ("limit", "1"),
                     ("query[metadata][purpose]", "ci"),
                     ("query[state][]", "running"),
@@ -1152,7 +1164,7 @@ def test_sandbox_list_returns_paginator_and_uses_nested_query_params(monkeypatch
             "/sandboxes",
             {
                 "params": [
-                    ("team", "bridgeapp"),
+                    ("team", "watasu"),
                     ("limit", "1"),
                     ("next_token", "2"),
                     ("query[metadata][purpose]", "ci"),
@@ -1315,7 +1327,7 @@ def test_sandbox_beta_create_uses_auto_pause_payload(monkeypatch):
     monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
 
     sbx = Sandbox.beta_create(
-        api_key="key", template="base", timeout=60, auto_pause=True
+        api_key="key", template="base", timeout=60, auto_pause=True, team="watasu"
     )
 
     assert sbx.sandbox_id == "beta-created"
@@ -1323,6 +1335,7 @@ def test_sandbox_beta_create_uses_auto_pause_payload(monkeypatch):
     assert captured["kwargs"]["json"]["template_id"] == "base"
     assert captured["kwargs"]["json"]["timeout"] == 60
     assert captured["kwargs"]["json"]["auto_pause"] is True
+    assert captured["kwargs"]["json"]["team"] == "watasu"
 
 
 def test_sandbox_info_parses_lifecycle():
@@ -2004,7 +2017,7 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
         cpu_count=4,
         memory_mb=4096,
         skip_cache=True,
-        team="sdk-team",
+        team="watasu",
     )
     status = Template.get_build_status(build, logs_offset=1)
 
@@ -2038,7 +2051,7 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
                     "setup": ["echo ready"],
                     "env": {"TOKEN": "secret"},
                 },
-                "team": "sdk-team",
+                "team": "watasu",
             },
             None,
         ),

@@ -1288,7 +1288,7 @@ mod tests {
         metadata.insert("purpose".to_string(), Value::String("ci".to_string()));
 
         let path = sandbox_list_path(&ListOptions {
-            team: Some("bridgeapp".to_string()),
+            team: Some("watasu".to_string()),
             limit: Some(1),
             next_token: Some("2".to_string()),
             query: Some(SandboxListQuery {
@@ -1300,7 +1300,7 @@ mod tests {
 
         assert_eq!(
             path,
-            "/sandboxes?team=bridgeapp&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running"
+            "/sandboxes?team=watasu&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running"
         );
     }
 

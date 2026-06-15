@@ -390,7 +390,7 @@ test('sandbox create uses root snake_case API payload', async () => {
         '/workspace/cache': 'cache',
         '/data/models': volume,
       },
-      team: 40,
+      team: 'watasu',
       network: {
         allowOut: ['pypi.org:443'],
         denyOut: ['10.0.0.0/8'],
@@ -414,7 +414,7 @@ test('sandbox create uses root snake_case API payload', async () => {
       allow_out: ['pypi.org:443'],
       deny_out: ['10.0.0.0/8'],
       allow_package_registry_access: true,
-      team: 40,
+      team: 'watasu',
     })
   } finally {
     globalThis.fetch = originalFetch
@@ -495,7 +495,7 @@ test('volume helper uses control API paths and snake_case payloads', async () =>
       throw new Error(`unexpected request ${init.method} ${url}`)
     }
 
-    const volume = await Volume.create('cache', { apiKey: 'key', team: 40 })
+    const volume = await Volume.create('cache', { apiKey: 'key', team: 'watasu' })
     assert.ok(volume instanceof Volume)
     assert.equal(volume.id, '42')
     assert.equal(volume.name, 'cache')
@@ -516,7 +516,7 @@ test('volume helper uses control API paths and snake_case payloads', async () =>
       {
         url: 'https://api.watasu.io/v1/volumes',
         method: 'POST',
-        body: { name: 'cache', team: 40 },
+        body: { name: 'cache', team: 'watasu' },
       },
       {
         url: 'https://api.watasu.io/v1/volumes/42/files',
@@ -763,7 +763,7 @@ test('sandbox list returns a paginator and uses nested query params', async () =
 
     const paginator = Sandbox.list({
       apiKey: 'key',
-      team: 40,
+      team: 'watasu',
       query: { metadata: { purpose: 'ci' }, state: ['running'] },
       limit: 1,
     })
@@ -778,11 +778,11 @@ test('sandbox list returns a paginator and uses nested query params', async () =
     assert.deepEqual([...firstPage, ...secondPage].map((item) => item.sandboxId), ['2', '1'])
     assert.equal(
       requests[0].url,
-      'https://api.watasu.io/v1/sandboxes?team=40&limit=1&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
+      'https://api.watasu.io/v1/sandboxes?team=watasu&limit=1&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
     )
     assert.equal(
       requests[1].url,
-      'https://api.watasu.io/v1/sandboxes?team=40&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
+      'https://api.watasu.io/v1/sandboxes?team=watasu&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running'
     )
   } finally {
     globalThis.fetch = originalFetch
@@ -1265,7 +1265,7 @@ test('template builder sends snake_case build payloads and parses status', async
       memoryMB: 4096,
       tags: ['stable'],
       skipCache: true,
-      team: 'sdk-team',
+      team: 'watasu',
     })
     const status = await Template.getBuildStatus(build, { apiKey: 'key', logsOffset: 1 })
 
@@ -1349,7 +1349,7 @@ test('template builder sends snake_case build payloads and parses status', async
             setup: ['echo ready'],
             env: { TOKEN: 'secret' },
           },
-          team: 'sdk-team',
+          team: 'watasu',
         },
       },
       {

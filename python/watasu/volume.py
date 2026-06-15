@@ -92,9 +92,10 @@ class Volume:
         self._control = control or ControlClient(connection_config)
 
     @classmethod
-    def create(cls, name: str, **opts: ApiParams) -> "Volume":
+    def create(
+        cls, name: str, team: Optional[str] = None, **opts: ApiParams
+    ) -> "Volume":
         """Create a persistent volume and return a connected SDK object."""
-        team = opts.pop("team", None)
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         payload = control.post(
@@ -161,9 +162,10 @@ class Volume:
         return [volume_entry_from_api(item) for item in payload.get("entries", [])]
 
     @classmethod
-    def _list_class(cls, **opts: ApiParams) -> List[VolumeInfo]:
+    def _list_class(
+        cls, team: Optional[str] = None, **opts: ApiParams
+    ) -> List[VolumeInfo]:
         """List volumes visible to the configured API key."""
-        team = opts.pop("team", None)
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         payload = control.get(
@@ -317,9 +319,11 @@ class AsyncVolume:
         self.token = volume.token
 
     @classmethod
-    async def create(cls, name: str, **opts: ApiParams) -> "AsyncVolume":
+    async def create(
+        cls, name: str, team: Optional[str] = None, **opts: ApiParams
+    ) -> "AsyncVolume":
         """Create a persistent volume asynchronously."""
-        volume = await asyncio.to_thread(Volume.create, name, **opts)
+        volume = await asyncio.to_thread(Volume.create, name, team=team, **opts)
         return cls(volume)
 
     @classmethod
@@ -348,9 +352,11 @@ class AsyncVolume:
         return await asyncio.to_thread(self._volume.list, path, depth=depth, **opts)
 
     @classmethod
-    async def _list_class(cls, **opts: ApiParams) -> List[VolumeInfo]:
+    async def _list_class(
+        cls, team: Optional[str] = None, **opts: ApiParams
+    ) -> List[VolumeInfo]:
         """List volumes visible to the configured API key."""
-        return await asyncio.to_thread(Volume.list, **opts)
+        return await asyncio.to_thread(Volume.list, team=team, **opts)
 
     list = _DualMethod(_list_instance, _list_class)
 

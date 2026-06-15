@@ -19,7 +19,7 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   secure?: boolean
   allowInternetAccess?: boolean
   network?: SandboxNetworkUpdate
-  team?: string | number
+  team?: string
   /** MCP gateway configuration to launch inside an `mcp-gateway` sandbox. */
   mcp?: McpServer
   /** Timeout lifecycle policy. Defaults to killing the sandbox at timeout. */
@@ -66,7 +66,7 @@ export interface SandboxListOpts extends ConnectionOpts {
   /** Pagination cursor returned by a previous page. */
   nextToken?: string
   /** Team slug to list within. */
-  team?: string | number
+  team?: string
 }
 
 type SandboxRequestOpts = Pick<ConnectionOpts, 'requestTimeoutMs' | 'signal'>

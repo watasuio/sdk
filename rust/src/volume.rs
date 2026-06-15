@@ -436,10 +436,10 @@ mod tests {
     fn builds_volume_list_query_path() {
         assert_eq!(
             volume_list_path(&VolumeListOptions {
-                team: Some("core".to_string()),
+                team: Some("watasu".to_string()),
                 ..VolumeListOptions::default()
             }),
-            "/volumes?team=core"
+            "/volumes?team=watasu"
         );
     }
 

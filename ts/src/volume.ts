@@ -41,13 +41,13 @@ export interface VolumeEntryStat {
 }
 
 export interface VolumeApiParams extends ConnectionOpts {
-  team?: string | number
+  team?: string
 }
 
 export interface VolumeConnectionConfig extends ConnectionOpts {}
 
 export interface VolumeListOpts extends ConnectionOpts {
-  team?: string | number
+  team?: string
 }
 
 export interface VolumeListFilesOpts extends ConnectionOpts {

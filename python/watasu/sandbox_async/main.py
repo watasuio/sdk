@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import inspect
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from watasu.connection_config import ApiParams, ConnectionConfig, Username
 from watasu.exceptions import InvalidArgumentException, SandboxException
@@ -535,15 +535,73 @@ class AsyncSandbox:
         )
 
     @classmethod
-    async def create(cls, *args, **kwargs) -> "AsyncSandbox":
+    async def create(
+        cls,
+        template: Optional[str] = None,
+        timeout: Optional[int] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        secure: bool = True,
+        allow_internet_access: bool = True,
+        mcp: Optional[Dict[str, Any]] = None,
+        network=None,
+        volume_mounts: Optional[Dict[str, Any]] = None,
+        lifecycle=None,
+        auto_pause: Optional[bool] = None,
+        team: Optional[str] = None,
+        **opts: ApiParams,
+    ) -> "AsyncSandbox":
         """Create a sandbox and return it with async helpers ready."""
-        return cls(sync_sandbox=await asyncio.to_thread(Sandbox.create, *args, **kwargs))
+        return cls(
+            sync_sandbox=await asyncio.to_thread(
+                Sandbox.create,
+                template=template,
+                timeout=timeout,
+                metadata=metadata,
+                envs=envs,
+                secure=secure,
+                allow_internet_access=allow_internet_access,
+                mcp=mcp,
+                network=network,
+                volume_mounts=volume_mounts,
+                lifecycle=lifecycle,
+                auto_pause=auto_pause,
+                team=team,
+                **opts,
+            )
+        )
 
     @classmethod
-    async def beta_create(cls, *args, **kwargs) -> "AsyncSandbox":
+    async def beta_create(
+        cls,
+        template: Optional[str] = None,
+        timeout: Optional[int] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        secure: bool = True,
+        allow_internet_access: bool = True,
+        mcp: Optional[Dict[str, Any]] = None,
+        network=None,
+        auto_pause: bool = False,
+        team: Optional[str] = None,
+        **opts: ApiParams,
+    ) -> "AsyncSandbox":
         """Create a sandbox with beta lifecycle options such as auto_pause."""
         return cls(
-            sync_sandbox=await asyncio.to_thread(Sandbox.beta_create, *args, **kwargs)
+            sync_sandbox=await asyncio.to_thread(
+                Sandbox.beta_create,
+                template=template,
+                timeout=timeout,
+                metadata=metadata,
+                envs=envs,
+                secure=secure,
+                allow_internet_access=allow_internet_access,
+                mcp=mcp,
+                network=network,
+                auto_pause=auto_pause,
+                team=team,
+                **opts,
+            )
         )
 
     async def _connect_instance(
@@ -716,9 +774,22 @@ class AsyncSandbox:
         return await asyncio.to_thread(self._sync.restore, *args, **kwargs)
 
     @staticmethod
-    async def list(**opts: ApiParams) -> AsyncSandboxPaginator:
+    async def list(
+        query: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
+        next_token: Optional[str] = None,
+        team: Optional[str] = None,
+        **opts: ApiParams,
+    ) -> AsyncSandboxPaginator:
         """Return an async paginator for visible sandboxes."""
-        paginator = await asyncio.to_thread(Sandbox.list, **opts)
+        paginator = await asyncio.to_thread(
+            Sandbox.list,
+            query=query,
+            limit=limit,
+            next_token=next_token,
+            team=team,
+            **opts,
+        )
         return AsyncSandboxPaginator(paginator)
 
     def get_host(self, port: int) -> str:

@@ -100,6 +100,7 @@ class Sandbox(SandboxBase):
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
         lifecycle=None,
+        team: Optional[str] = None,
         **opts: ApiParams,
     ) -> None:
         if (
@@ -121,6 +122,7 @@ class Sandbox(SandboxBase):
                     mcp=mcp,
                     network=network,
                     lifecycle=lifecycle,
+                    team=team,
                     **opts,
                 )
 
@@ -174,6 +176,7 @@ class Sandbox(SandboxBase):
         volume_mounts: Optional[Dict[str, Any]] = None,
         lifecycle=None,
         auto_pause: Optional[bool] = None,
+        team: Optional[str] = None,
         **opts: ApiParams,
     ) -> "Sandbox":
         """Create a sandbox and return it with ``files`` and ``commands`` ready.
@@ -204,9 +207,8 @@ class Sandbox(SandboxBase):
             sandbox_params["volume_mounts"] = _volume_mounts_payload(volume_mounts)
         sandbox_params.update(_lifecycle_payload(lifecycle))
         sandbox_params.update(_network_payload(network))
-        for key in ("team",):
-            if key in opts:
-                sandbox_params[key] = opts[key]
+        if team is not None:
+            sandbox_params["team"] = team
         response = control.post(
             "/sandboxes",
             json=sandbox_params,
@@ -240,6 +242,7 @@ class Sandbox(SandboxBase):
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
         auto_pause: bool = False,
+        team: Optional[str] = None,
         **opts: ApiParams,
     ) -> "Sandbox":
         """Create a sandbox and optionally pause it instead of killing it at timeout."""
@@ -253,6 +256,7 @@ class Sandbox(SandboxBase):
             mcp=mcp,
             network=network,
             auto_pause=auto_pause,
+            team=team,
             **opts,
         )
 
@@ -647,6 +651,7 @@ class Sandbox(SandboxBase):
         query: Optional[Dict[str, Any]] = None,
         limit: Optional[int] = None,
         next_token: Optional[str] = None,
+        team: Optional[str] = None,
         **opts: ApiParams,
     ) -> SandboxPaginator[SandboxInfo]:
         """Return a paginator for sandboxes visible to the configured API token.
@@ -654,8 +659,6 @@ class Sandbox(SandboxBase):
         ``query`` supports ``metadata`` and ``state`` filters. The state values
         ``"running"`` and ``"paused"`` are resolved by the Watasu API.
         """
-        team = opts.pop("team", None)
-
         def load_page(
             page_token: Optional[str], page_opts: Dict[str, Any]
         ) -> Tuple[List[SandboxInfo], Optional[str]]:
@@ -869,7 +872,7 @@ def _sandbox_list_params(
     team: Optional[str],
 ):
     params = []
-    if team:
+    if team is not None:
         params.append(("team", str(team)))
     if limit is not None:
         params.append(("limit", str(limit)))
