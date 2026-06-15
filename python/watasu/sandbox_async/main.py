@@ -7,10 +7,13 @@ from typing import Callable, Dict, List, Optional, Union
 from watasu.connection_config import ApiParams, ConnectionConfig, Username
 from watasu.exceptions import InvalidArgumentException, SandboxException
 from watasu.sandbox.commands.command_handle import CommandResult, PtyOutput, Stderr, Stdout
+from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.commands.main import ProcessInfo
-from watasu.sandbox.filesystem.filesystem import EntryInfo, WriteInfo
-from watasu.sandbox.sandbox_api import SandboxInfo, SandboxMetrics, SnapshotInfo
+from watasu.sandbox.filesystem.filesystem import EntryInfo, FilesystemEvent, WriteInfo
+from watasu.sandbox.sandbox_api import FileUrlInfo, SandboxInfo, SandboxMetrics, SnapshotInfo
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
+from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
+from watasu.sandbox_sync.git import GitCommandResult, GitStatus
 from watasu.sandbox_sync.main import Sandbox
 from watasu.sandbox_sync.paginator import SandboxPaginator
 from watasu.stubs import unsupported
@@ -208,9 +211,176 @@ class AsyncFilesystem:
         """Create a directory."""
         return await asyncio.to_thread(self._files.make_dir, *args, **kwargs)
 
-    async def watch_dir(self, *args, **kwargs):
-        """Directory watching is not implemented yet."""
-        unsupported("sandbox.files.watch_dir")
+    async def watch_dir(
+        self,
+        path: str,
+        on_event: Optional[Callable[[FilesystemEvent], None]] = None,
+        user=None,
+        request_timeout: Optional[float] = None,
+        recursive: bool = False,
+        include_entry: bool = False,
+    ) -> "AsyncWatchHandle":
+        """Watch a directory for filesystem events."""
+        handle = await asyncio.to_thread(
+            self._files.watch_dir,
+            path,
+            user=user,
+            request_timeout=request_timeout,
+            recursive=recursive,
+            include_entry=include_entry,
+        )
+        async_handle = AsyncWatchHandle(handle)
+        if on_event is not None:
+            async_handle.start_callback(on_event)
+        return async_handle
+
+
+class AsyncWatchHandle:
+    """Async wrapper for a filesystem watcher."""
+
+    def __init__(self, handle: WatchHandle) -> None:
+        self._handle = handle
+        self._task: Optional[asyncio.Task] = None
+
+    async def stop(self) -> None:
+        """Stop watching the directory."""
+        await asyncio.to_thread(self._handle.stop)
+        if self._task is not None:
+            self._task.cancel()
+
+    close = stop
+
+    async def get_new_events(self) -> List[FilesystemEvent]:
+        """Return queued filesystem events."""
+        return await asyncio.to_thread(self._handle.get_new_events)
+
+    def start_callback(self, on_event: Callable[[FilesystemEvent], None]) -> None:
+        async def pump():
+            while True:
+                for event in await self.get_new_events():
+                    result = on_event(event)
+                    if inspect.isawaitable(result):
+                        await result
+                await asyncio.sleep(0.1)
+
+        self._task = asyncio.create_task(pump())
+
+
+class AsyncPty:
+    """Async PTY helper."""
+
+    def __init__(self, pty):
+        self._pty = pty
+
+    async def create(
+        self,
+        size: PtySize,
+        user=None,
+        cwd: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = 60,
+        request_timeout: Optional[float] = None,
+    ) -> AsyncCommandHandle:
+        handle = await asyncio.to_thread(
+            self._pty.create,
+            size,
+            user=user,
+            cwd=cwd,
+            envs=envs,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
+        return AsyncCommandHandle(handle)
+
+    async def connect(
+        self,
+        pid,
+        timeout: Optional[float] = 60,
+        request_timeout: Optional[float] = None,
+    ) -> AsyncCommandHandle:
+        handle = await asyncio.to_thread(
+            self._pty.connect,
+            pid,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
+        return AsyncCommandHandle(handle)
+
+    async def send_stdin(
+        self, pid, data: Union[str, bytes], request_timeout: Optional[float] = None
+    ) -> None:
+        await asyncio.to_thread(
+            self._pty.send_stdin, pid, data, request_timeout=request_timeout
+        )
+
+    send_input = send_stdin
+
+    async def resize(
+        self, pid, size: PtySize, request_timeout: Optional[float] = None
+    ) -> None:
+        await asyncio.to_thread(
+            self._pty.resize, pid, size, request_timeout=request_timeout
+        )
+
+    async def kill(self, pid, request_timeout: Optional[float] = None) -> bool:
+        return await asyncio.to_thread(
+            self._pty.kill, pid, request_timeout=request_timeout
+        )
+
+
+class AsyncGit:
+    """Async Git helper."""
+
+    def __init__(self, git):
+        self._git = git
+
+    async def clone(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.clone, *args, **kwargs)
+
+    async def dangerously_authenticate(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.dangerously_authenticate, *args, **kwargs)
+
+    async def configure_user(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.configure_user, *args, **kwargs)
+
+    async def status(self, *args, **kwargs) -> GitStatus:
+        return await asyncio.to_thread(self._git.status, *args, **kwargs)
+
+    async def branches(self, *args, **kwargs):
+        return await asyncio.to_thread(self._git.branches, *args, **kwargs)
+
+    async def create_branch(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.create_branch, *args, **kwargs)
+
+    async def delete_branch(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.delete_branch, *args, **kwargs)
+
+    async def add(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.add, *args, **kwargs)
+
+    async def commit(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.commit, *args, **kwargs)
+
+    async def pull(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.pull, *args, **kwargs)
+
+    async def push(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.push, *args, **kwargs)
+
+    async def checkout(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.checkout, *args, **kwargs)
+
+    async def checkout_branch(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.checkout_branch, *args, **kwargs)
+
+    async def remote_add(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.remote_add, *args, **kwargs)
+
+    async def set_config(self, *args, **kwargs) -> GitCommandResult:
+        return await asyncio.to_thread(self._git.set_config, *args, **kwargs)
+
+    async def get_config(self, *args, **kwargs) -> str:
+        return await asyncio.to_thread(self._git.get_config, *args, **kwargs)
 
 
 class AsyncSnapshotPaginator:
@@ -267,11 +437,11 @@ class AsyncSandbox:
 
     @property
     def pty(self):
-        unsupported("sandbox.pty")
+        return self._pty
 
     @property
     def git(self):
-        unsupported("sandbox.git")
+        return self._git
 
     def __init__(
         self,
@@ -414,6 +584,17 @@ class AsyncSandbox:
 
     list_snapshots = _AsyncDualMethod(_list_snapshots_instance, _list_snapshots_class)
 
+    async def _delete_snapshot_instance(self, *args, **kwargs) -> bool:
+        """Delete a snapshot by id."""
+        return await asyncio.to_thread(self._sync.delete_snapshot, *args, **kwargs)
+
+    @classmethod
+    async def _delete_snapshot_class(cls, snapshot_id: str, **opts: ApiParams) -> bool:
+        """Delete a snapshot by id."""
+        return await asyncio.to_thread(Sandbox.delete_snapshot, snapshot_id, **opts)
+
+    delete_snapshot = _AsyncDualMethod(_delete_snapshot_instance, _delete_snapshot_class)
+
     async def restore(self, *args, **kwargs) -> SandboxInfo:
         """Restore a checkpoint into a new sandbox and return its metadata."""
         return await asyncio.to_thread(self._sync.restore, *args, **kwargs)
@@ -427,6 +608,22 @@ class AsyncSandbox:
         """Return the public hostname for an exposed sandbox port."""
         return self._sync.get_host(port)
 
+    async def upload_url(self, *args, **kwargs) -> str:
+        """Get a signed URL for uploading a file."""
+        return await asyncio.to_thread(self._sync.upload_url, *args, **kwargs)
+
+    async def download_url(self, *args, **kwargs) -> str:
+        """Get a signed URL for downloading a file."""
+        return await asyncio.to_thread(self._sync.download_url, *args, **kwargs)
+
+    async def upload_url_info(self, *args, **kwargs) -> FileUrlInfo:
+        """Get signed upload URL metadata."""
+        return await asyncio.to_thread(self._sync.upload_url_info, *args, **kwargs)
+
+    async def download_url_info(self, *args, **kwargs) -> FileUrlInfo:
+        """Get signed download URL metadata."""
+        return await asyncio.to_thread(self._sync.download_url_info, *args, **kwargs)
+
     async def update_network(self, *args, **kwargs):
         unsupported("Sandbox.update_network")
 
@@ -437,9 +634,6 @@ class AsyncSandbox:
 
     async def resume(self, *args, **kwargs) -> bool:
         unsupported("Sandbox.resume")
-
-    async def delete_snapshot(self, *args, **kwargs):
-        unsupported("Sandbox.delete_snapshot")
 
     async def __aenter__(self):
         """Enter an async context manager without changing sandbox state."""
@@ -453,6 +647,8 @@ class AsyncSandbox:
         self._sync = sandbox
         self._files = AsyncFilesystem(sandbox.files)
         self._commands = AsyncCommands(sandbox.commands)
+        self._pty = AsyncPty(sandbox.pty)
+        self._git = AsyncGit(sandbox.git)
 
 
 def _thread_callback(loop, callback):
@@ -471,6 +667,9 @@ __all__ = [
     "AsyncCommandHandle",
     "AsyncCommands",
     "AsyncFilesystem",
+    "AsyncGit",
+    "AsyncPty",
     "AsyncSandbox",
     "AsyncSnapshotPaginator",
+    "AsyncWatchHandle",
 ]

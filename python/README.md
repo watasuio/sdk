@@ -36,6 +36,53 @@ with Sandbox.create() as sbx:
 
 Leaving the context manager calls `kill()`.
 
+## Git, Watch, PTY, And Signed File URLs
+
+```python
+from watasu import PtySize, Sandbox
+
+with Sandbox.create() as sbx:
+    sbx.git.clone(
+        "https://github.com/acme/project.git",
+        path="/workspace/project",
+        branch="main",
+        depth=1,
+    )
+    status = sbx.git.status("/workspace/project")
+    sbx.git.configure_user(
+        "Watasu Bot",
+        "bot@watasu.local",
+        scope="local",
+        path="/workspace/project",
+    )
+    sbx.git.create_branch("/workspace/project", "feature/docs")
+    sbx.git.add("/workspace/project", files=["README.md"])
+    sbx.git.commit(
+        "/workspace/project",
+        "Update docs",
+        author_name="Watasu Bot",
+        author_email="bot@watasu.local",
+    )
+    sbx.git.push(
+        "/workspace/project",
+        remote="origin",
+        branch="feature/docs",
+        set_upstream=True,
+    )
+
+    watcher = sbx.files.watch_dir("/workspace/project", recursive=True)
+
+    terminal = sbx.pty.create(PtySize(rows=30, cols=100))
+    terminal.send_stdin("echo hello\n")
+    result = terminal.wait()
+
+    upload_url = sbx.upload_url("/workspace/input.bin")
+    download_url = sbx.download_url("/workspace/output.bin")
+
+    events = watcher.get_new_events()
+    watcher.stop()
+```
+
 ## Metrics And Snapshots
 
 ```python
@@ -46,6 +93,7 @@ with Sandbox.create() as sbx:
     snapshot = sbx.create_snapshot(name="ready")
     snapshots = sbx.list_snapshots().list_items()
     restored = sbx.restore(snapshot_id=snapshot.snapshot_id)
+    sbx.delete_snapshot(snapshot.snapshot_id)
 ```
 
 Watasu snapshots are backed by sandbox checkpoints. Use the returned
@@ -65,6 +113,7 @@ async def main() -> None:
         metrics = await sbx.get_metrics()
         snapshot = await sbx.create_snapshot(name="ready")
         snapshots = await sbx.list_snapshots().list_items()
+        await sbx.delete_snapshot(snapshot.snapshot_id)
 ```
 
 Unsupported surfaces raise explicit not-implemented errors instead of silently

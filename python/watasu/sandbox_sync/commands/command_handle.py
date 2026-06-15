@@ -58,6 +58,10 @@ class CommandHandle:
                     out = _frame_data(frame)
                     self._stderr += out
                     yield None, out, None
+                elif frame_type == "pty":
+                    raw = _frame_bytes(frame)
+                    self._stdout += raw.decode("utf-8", "replace")
+                    yield None, None, raw
                 elif frame_type == "exit":
                     self._result = CommandResult(
                         stderr=self._stderr,
@@ -147,3 +151,15 @@ def _frame_data(frame) -> str:
     if isinstance(data, bytes):
         return data.decode("utf-8", "replace")
     return str(data)
+
+
+def _frame_bytes(frame) -> bytes:
+    data = frame.get("data", b"")
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, str):
+        try:
+            return base64.b64decode(data, validate=True)
+        except Exception:
+            return data.encode("utf-8")
+    return str(data).encode("utf-8")

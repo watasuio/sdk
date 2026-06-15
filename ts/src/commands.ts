@@ -1,6 +1,6 @@
 import { ConnectionConfig } from './connectionConfig.js'
 import { DataPlaneClient } from './transport.js'
-import { ProcessFrame, ProcessSocket, base64DecodeText } from './processSocket.js'
+import { ProcessFrame, ProcessSocket, base64DecodeBytes, base64DecodeText } from './processSocket.js'
 import { SandboxError } from './errors.js'
 
 export interface CommandResult {
@@ -41,6 +41,7 @@ export interface CommandStartOpts {
   envs?: Record<string, string>
   onStdout?: (data: string) => void | Promise<void>
   onStderr?: (data: string) => void | Promise<void>
+  onPty?: (data: Uint8Array) => void | Promise<void>
   stdin?: boolean
   timeoutMs?: number
   requestTimeoutMs?: number
@@ -59,7 +60,8 @@ export class CommandHandle implements Partial<CommandResult> {
     private readonly handleKill: () => Promise<boolean>,
     private readonly events: AsyncIterable<ProcessFrame>,
     private readonly onStdout?: (data: string) => void | Promise<void>,
-    private readonly onStderr?: (data: string) => void | Promise<void>
+    private readonly onStderr?: (data: string) => void | Promise<void>,
+    private readonly onPty?: (data: Uint8Array) => void | Promise<void>
   ) {
     this.pending = this.handleEvents()
   }
@@ -87,6 +89,11 @@ export class CommandHandle implements Partial<CommandResult> {
     this.socket.sendStdin(data)
   }
 
+  /** Resize the attached PTY stream when this handle was created as a PTY. */
+  async resize(size: { cols: number; rows: number }): Promise<void> {
+    this.socket.sendJson({ type: 'resize', cols: size.cols, rows: size.rows })
+  }
+
   /** Detach the local stream without killing the process. */
   disconnect(): void {
     this.socket.close()
@@ -105,6 +112,11 @@ export class CommandHandle implements Partial<CommandResult> {
           const out = base64DecodeText(frame.data)
           this._stderr += out
           await this.onStderr?.(out)
+        } else if (type === 'pty') {
+          const bytes = base64DecodeBytes(frame.data)
+          const out = new TextDecoder().decode(bytes)
+          this._stdout += out
+          await this.onPty?.(bytes)
         } else if (type === 'exit') {
           this.result = {
             exitCode: Number(frame.exit_code ?? frame.exitCode ?? 0),
@@ -176,7 +188,7 @@ export class Commands {
     ).connect()
     const first = await nextStarted(socket)
     const actualPid = framePid(first) ?? pid
-    return new CommandHandle(actualPid, socket, () => this.kill(actualPid), socket, opts.onStdout, opts.onStderr)
+    return new CommandHandle(actualPid, socket, () => this.kill(actualPid), socket, opts.onStdout, opts.onStderr, opts.onPty)
   }
 
   private async start(cmd: string, opts: CommandStartOpts): Promise<CommandHandle> {
@@ -201,7 +213,7 @@ export class Commands {
     const first = await nextStarted(socket)
     const pid = framePid(first)
     if (pid === undefined) throw new SandboxError('process started frame did not include pid')
-    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), opts.onStdout, opts.onStderr)
+    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), opts.onStdout, opts.onStderr, opts.onPty)
   }
 }
 

@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.5"
+watasu = "0.1.6"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -30,6 +30,100 @@ async fn main() -> watasu::Result<()> {
 `Sandbox::create` and `Sandbox::connect` return only after the Watasu API
 supplies a usable data-plane session. The crate does not poll sandbox readiness.
 
+## Git, Watch, PTY, And Signed File URLs
+
+```rust
+use watasu::{
+    CreateOptions, GitAddOptions, GitCloneOptions, GitCommitOptions,
+    GitConfigureUserOptions, GitRemoteOperationOptions, PtyCreateOptions,
+    Sandbox, WatchOptions,
+};
+
+# async fn run() -> watasu::Result<()> {
+let sbx = Sandbox::create(CreateOptions::default()).await?;
+
+sbx.git
+    .clone(
+        "https://github.com/acme/project.git",
+        GitCloneOptions {
+            path: Some("/workspace/project".into()),
+            branch: Some("main".into()),
+            depth: Some(1),
+            ..Default::default()
+        },
+    )
+    .await?;
+let status = sbx.git.status("/workspace/project", Default::default()).await?;
+sbx.git
+    .configure_user(
+        "Watasu Bot",
+        "bot@watasu.local",
+        GitConfigureUserOptions {
+            scope: Some("local".into()),
+            path: Some("/workspace/project".into()),
+            ..Default::default()
+        },
+    )
+    .await?;
+sbx.git
+    .create_branch("/workspace/project", "feature/docs", Default::default())
+    .await?;
+sbx.git
+    .add(
+        "/workspace/project",
+        GitAddOptions {
+            files: vec!["README.md".into()],
+            ..Default::default()
+        },
+    )
+    .await?;
+sbx.git
+    .commit(
+        "/workspace/project",
+        "Update docs",
+        GitCommitOptions {
+            author_name: Some("Watasu Bot".into()),
+            author_email: Some("bot@watasu.local".into()),
+            ..Default::default()
+        },
+    )
+    .await?;
+sbx.git
+    .push(
+        "/workspace/project",
+        GitRemoteOperationOptions {
+            remote: Some("origin".into()),
+            branch: Some("feature/docs".into()),
+            set_upstream: true,
+            ..Default::default()
+        },
+    )
+    .await?;
+
+let mut watcher = sbx
+    .files
+    .watch_dir(
+        "/workspace/project",
+        WatchOptions {
+            recursive: true,
+            include_entry: true,
+        },
+    )
+    .await?;
+
+let mut terminal = sbx.pty.create(PtyCreateOptions::default()).await?;
+terminal.send_stdin("echo hello\n").await?;
+
+let upload_url = sbx.upload_url("/workspace/input.bin", Default::default()).await?;
+let download_url = sbx.download_url("/workspace/output.bin", Default::default()).await?;
+
+watcher.stop().await?;
+terminal.kill().await?;
+sbx.kill().await?;
+# Ok(())
+# }
+```
+
 ## Metrics And Snapshots
 
 ```rust
@@ -45,12 +139,14 @@ let snapshot = sbx
     })
     .await?;
 let snapshots = sbx.list_snapshots().await?;
+let snapshot_id = snapshot.snapshot_id.clone();
 let restored = sbx
     .restore(RestoreOptions {
-        checkpoint_id: snapshot.snapshot_id,
+        checkpoint_id: snapshot_id.clone(),
         timeout_seconds: None,
     })
     .await?;
+sbx.delete_snapshot(snapshot_id).await?;
 sbx.kill().await?;
 # Ok(())
 # }

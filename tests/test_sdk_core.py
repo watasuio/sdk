@@ -16,6 +16,8 @@ from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.filesystem.filesystem import FileType
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
+from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
+from watasu.sandbox_sync.git import Git
 
 
 def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
@@ -87,6 +89,22 @@ def test_command_handle_decodes_runtime_base64_stream_frames():
     assert result == CommandResult(
         stderr="err\n", stdout="4\n", exit_code=0, error=None
     )
+
+
+def test_command_handle_decodes_pty_frames_as_terminal_output():
+    frames = iter(
+        [
+            {"type": "pty", "data": "dGVybQo="},
+            {"type": "exit", "exit_code": 0, "error": None},
+        ]
+    )
+    handle = CommandHandle(pid=123, handle_kill=lambda: True, events=frames)
+    seen = []
+
+    result = handle.wait(on_pty=seen.append)
+
+    assert seen == [b"term\n"]
+    assert result.stdout == "term\n"
 
 
 def test_process_socket_base64_encodes_stdin_frames():
@@ -182,6 +200,307 @@ def test_filesystem_maps_watasu_file_entries():
 
     renamed = fs.rename("/home/user/a.txt", "/home/user/b.txt")
     assert renamed.path == "/home/user/b.txt"
+
+
+def test_git_helper_uses_data_plane_routes_and_parses_status():
+    calls = []
+
+    class DataPlane:
+        def post_json(self, path, **kwargs):
+            calls.append((path, kwargs))
+            if path.endswith("/status"):
+                return {
+                    "git": {
+                        "path": "/workspace/repo",
+                        "stdout": "## main...origin/main [ahead 1]\n M a.txt\n?? b.txt\n",
+                        "stderr": "",
+                    }
+                }
+            if path.endswith("/branches"):
+                return {
+                    "git": {
+                        "path": "/workspace/repo",
+                        "branches": ["main", "feature/test"],
+                        "current_branch": "main",
+                        "stdout": "",
+                        "stderr": "",
+                    }
+                }
+            if path.endswith("/get_config"):
+                return {
+                    "git": {
+                        "path": "/workspace/repo",
+                        "key": "pull.rebase",
+                        "value": "false",
+                        "stdout": "false\n",
+                        "stderr": "",
+                    }
+                }
+            return {
+                "git": {
+                    "path": "/workspace/repo",
+                    "url": "https://git.example/repo.git",
+                    "branch": "feature/test",
+                    "remote": "origin",
+                    "name": "origin",
+                    "stdout": "ok\n",
+                    "stderr": "",
+                }
+            }
+
+    git = Git(DataPlane())
+
+    cloned = git.clone(
+        "https://git.example/repo.git",
+        path="/workspace/repo",
+        branch="main",
+        depth=1,
+        timeout=10,
+    )
+    git.dangerously_authenticate("user", "token", host="git.example.com", protocol="https", timeout=5)
+    git.configure_user("Watasu Test", "test@watasu.local", scope="local", path="/workspace/repo")
+    status = git.status("/workspace/repo")
+    branches = git.branches("/workspace/repo")
+    git.create_branch("/workspace/repo", "feature/test")
+    git.delete_branch("/workspace/repo", "feature/test", force=True)
+    git.add("/workspace/repo", files=["README.md"])
+    git.commit(
+        "/workspace/repo",
+        "change",
+        author_name="Watasu Test",
+        author_email="test@watasu.local",
+        allow_empty=True,
+    )
+    git.pull("/workspace/repo", remote="origin", branch="main", username="user", password="token")
+    git.push(
+        "/workspace/repo",
+        remote="origin",
+        branch="main",
+        set_upstream=True,
+        username="user",
+        password="token",
+    )
+    git.checkout("/workspace/repo", "main")
+    git.checkout_branch("/workspace/repo", "main")
+    git.remote_add(
+        "/workspace/repo",
+        "origin",
+        "https://git.example/repo.git",
+        fetch=True,
+        overwrite=True,
+    )
+    git.set_config("pull.rebase", "false", scope="local", path="/workspace/repo")
+    config_value = git.get_config("pull.rebase", scope="local", path="/workspace/repo")
+
+    assert cloned.path == "/workspace/repo"
+    assert status.current_branch == "main"
+    assert status.ahead == 1
+    assert status.has_changes is True
+    assert status.untracked_count == 1
+    assert branches.branches == ["main", "feature/test"]
+    assert branches.current_branch == "main"
+    assert config_value == "false"
+    assert calls == [
+        (
+            "/runtime/v1/git/clone",
+            {
+                "json": {
+                    "url": "https://git.example/repo.git",
+                    "path": "/workspace/repo",
+                    "branch": "main",
+                    "depth": 1,
+                    "timeout_seconds": 10,
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/dangerously_authenticate",
+            {
+                "json": {
+                    "username": "user",
+                    "password": "token",
+                    "host": "git.example.com",
+                    "protocol": "https",
+                    "timeout_seconds": 5,
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/configure_user",
+            {
+                "json": {
+                    "name": "Watasu Test",
+                    "email": "test@watasu.local",
+                    "scope": "local",
+                    "path": "/workspace/repo",
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/status",
+            {
+                "json": {"path": "/workspace/repo"},
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/branches",
+            {
+                "json": {"path": "/workspace/repo"},
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/create_branch",
+            {
+                "json": {"path": "/workspace/repo", "branch": "feature/test"},
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/delete_branch",
+            {
+                "json": {"path": "/workspace/repo", "branch": "feature/test", "force": True},
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/add",
+            {
+                "json": {"path": "/workspace/repo", "files": ["README.md"]},
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/commit",
+            {
+                "json": {
+                    "path": "/workspace/repo",
+                    "message": "change",
+                    "author_name": "Watasu Test",
+                    "author_email": "test@watasu.local",
+                    "allow_empty": True,
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/pull",
+            {
+                "json": {
+                    "path": "/workspace/repo",
+                    "branch": "main",
+                    "remote": "origin",
+                    "username": "user",
+                    "password": "token",
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/push",
+            {
+                "json": {
+                    "path": "/workspace/repo",
+                    "branch": "main",
+                    "remote": "origin",
+                    "set_upstream": True,
+                    "username": "user",
+                    "password": "token",
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/checkout",
+            {
+                "json": {"path": "/workspace/repo", "ref": "main"},
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/checkout",
+            {
+                "json": {"path": "/workspace/repo", "ref": "main"},
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/remote_add",
+            {
+                "json": {
+                    "path": "/workspace/repo",
+                    "name": "origin",
+                    "url": "https://git.example/repo.git",
+                    "fetch": True,
+                    "overwrite": True,
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/set_config",
+            {
+                "json": {
+                    "key": "pull.rebase",
+                    "value": "false",
+                    "scope": "local",
+                    "path": "/workspace/repo",
+                },
+                "request_timeout": None,
+            },
+        ),
+        (
+            "/runtime/v1/git/get_config",
+            {
+                "json": {"key": "pull.rebase", "scope": "local", "path": "/workspace/repo"},
+                "request_timeout": None,
+            },
+        ),
+    ]
+
+
+def test_watch_handle_drains_runtime_events():
+    class Socket:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    socket = Socket()
+    frames = iter(
+        [
+            {
+                "type": "events",
+                "events": [
+                    {
+                        "type": "modify",
+                        "path": "/tmp/a.txt",
+                        "file": {
+                            "path": "/tmp/a.txt",
+                            "name": "a.txt",
+                            "type": "file",
+                            "bytes": 2,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+
+    handle = WatchHandle(socket, frames)
+    import time
+
+    time.sleep(0.05)
+    events = handle.get_new_events()
+
+    assert events[0].type.value == "write"
+    assert events[0].name == "a.txt"
+    assert events[0].entry.name == "a.txt"
 
 
 def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
@@ -388,7 +707,7 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
 
         def post(self, path, **kwargs):
             calls.append(("post", path, kwargs))
-            if path.endswith("/checkpoints"):
+            if path.endswith("/snapshots"):
                 return {
                     "sandbox_checkpoint": {
                         "id": 9,
@@ -405,7 +724,27 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
                         "template_id": "base",
                     }
                 }
+            if path.endswith("/files/upload_url"):
+                return {
+                    "file_url": {
+                        "method": "POST",
+                        "path": kwargs["json"]["path"],
+                        "url": "https://signed.example/upload",
+                    }
+                }
+            if path.endswith("/files/download_url"):
+                return {
+                    "file_url": {
+                        "method": "GET",
+                        "path": kwargs["json"]["path"],
+                        "url": "https://signed.example/download",
+                    }
+                }
             raise AssertionError(f"unexpected POST {path}")
+
+        def delete(self, path, **kwargs):
+            calls.append(("delete", path, kwargs))
+            return {"deleted": True}
 
     sbx = Sandbox(
         "123",
@@ -422,11 +761,17 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
     snapshot = sbx.create_snapshot(name="ready", metadata={"reason": "test"})
     snapshots = sbx.list_snapshots().list_items()
     restored = sbx.restore(snapshot_id=snapshot.snapshot_id, timeout=120)
+    deleted = sbx.delete_snapshot(snapshot.snapshot_id)
+    upload_url = sbx.upload_url("/tmp/a.txt", use_signature_expiration=300)
+    download_url = sbx.download_url("/tmp/a.txt")
 
     assert metrics[0].backend == "firecracker"
     assert snapshot.snapshot_id == "9"
     assert snapshots[0].status == "ready"
     assert restored.sandbox_id == "restored"
+    assert deleted is True
+    assert upload_url == "https://signed.example/upload"
+    assert download_url == "https://signed.example/download"
     assert calls == [
         (
             "get",
@@ -435,7 +780,7 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
         ),
         (
             "post",
-            "/sandboxes/123/checkpoints",
+            "/sandboxes/123/snapshots",
             {
                 "json": {"name": "ready", "metadata": {"reason": "test"}},
                 "resource": "sandbox",
@@ -452,6 +797,29 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
             "/sandboxes/123/restore",
             {
                 "json": {"checkpoint_id": "9", "timeout_seconds": 120},
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
+        ),
+        (
+            "delete",
+            "/sandbox_snapshots/9",
+            {"resource": "sandbox", "request_timeout": None},
+        ),
+        (
+            "post",
+            "/sandboxes/123/files/upload_url",
+            {
+                "json": {"path": "/tmp/a.txt", "use_signature_expiration": 300},
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
+        ),
+        (
+            "post",
+            "/sandboxes/123/files/download_url",
+            {
+                "json": {"path": "/tmp/a.txt"},
                 "resource": "sandbox",
                 "request_timeout": None,
             },
@@ -476,7 +844,7 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
                         "token": "data",
                     },
                 }
-            if path.endswith("/checkpoints"):
+            if path.endswith("/snapshots"):
                 return {
                     "sandbox_checkpoint": {
                         "id": 10,
@@ -541,7 +909,7 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
         ),
         (
             "post",
-            "/sandboxes/async-123/checkpoints",
+            "/sandboxes/async-123/snapshots",
             {"json": {}, "resource": "sandbox", "request_timeout": None},
         ),
         (

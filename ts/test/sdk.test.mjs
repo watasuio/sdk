@@ -8,6 +8,7 @@ import {
   ProcessSocket,
   Sandbox,
   SandboxError,
+  WatchHandle,
   base64DecodeText,
   base64Encode,
 } from '../dist/index.js'
@@ -61,6 +62,23 @@ test('command handle closes stream after terminal exit frame', async () => {
   assert.equal(result.stdout, 'ok\n')
   assert.equal(result.exitCode, 0)
   assert.equal(closeCount, 1)
+})
+
+test('command handle treats pty frames as terminal output', async () => {
+  async function* frames() {
+    yield { type: 'pty', data: 'dGVybQo=' }
+    yield { type: 'exit', exit_code: 0 }
+  }
+  const seen = []
+  const socket = { close() {} }
+  const handle = new CommandHandle(123, socket, async () => true, frames(), undefined, undefined, (bytes) => {
+    seen.push(new TextDecoder().decode(bytes))
+  })
+
+  const result = await handle.wait()
+
+  assert.equal(result.stdout, 'term\n')
+  assert.deepEqual(seen, ['term\n'])
 })
 
 test('sandbox construction requires a session', () => {
@@ -222,7 +240,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
       }
-      if (String(url).endsWith('/checkpoints') && init.method === 'POST') {
+      if (String(url).endsWith('/snapshots') && init.method === 'POST') {
         return new Response(
           JSON.stringify({ sandbox_checkpoint: { id: 9, sandbox_id: '1', name: 'ready', status: 'pending' } }),
           { status: 202, headers: { 'content-type': 'application/json' } }
@@ -240,6 +258,19 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
           { status: 202, headers: { 'content-type': 'application/json' } }
         )
       }
+      if (String(url).endsWith('/sandbox_snapshots/9') && init.method === 'DELETE') {
+        return new Response(JSON.stringify({ deleted: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (String(url).endsWith('/files/upload_url') || String(url).endsWith('/files/download_url')) {
+        const body = JSON.parse(init.body)
+        return new Response(
+          JSON.stringify({ file_url: { method: String(url).endsWith('/upload_url') ? 'POST' : 'GET', path: body.path, url: `https://signed.example${body.path}`, expires_at: '2026-01-01T00:00:00Z' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
       throw new Error(`unexpected request ${url}`)
     }
 
@@ -254,18 +285,129 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     const snapshot = await sbx.createSnapshot({ name: 'ready', metadata: { reason: 'test' } })
     const snapshots = await sbx.listSnapshots().nextItems()
     const restored = await sbx.restore({ snapshotId: snapshot.snapshotId, timeoutMs: 120_000 })
+    const deleted = await sbx.deleteSnapshot(snapshot.snapshotId)
+    const uploadUrl = await sbx.uploadUrl('/tmp/a.txt', { useSignatureExpiration: 300 })
+    const downloadUrl = await sbx.downloadUrl('/tmp/a.txt')
 
     assert.equal(metrics[0].backend, 'firecracker')
     assert.equal(snapshot.snapshotId, '9')
     assert.equal(snapshots[0].status, 'ready')
     assert.equal(restored.sandboxId, 'restored')
+    assert.equal(deleted, true)
+    assert.equal(uploadUrl, 'https://signed.example/tmp/a.txt')
+    assert.equal(downloadUrl, 'https://signed.example/tmp/a.txt')
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
       ['GET', 'https://api.watasu.io/v1/sandboxes/1/metrics', undefined],
-      ['POST', 'https://api.watasu.io/v1/sandboxes/1/checkpoints', { name: 'ready', metadata: { reason: 'test' } }],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/1/snapshots', { name: 'ready', metadata: { reason: 'test' } }],
       ['GET', 'https://api.watasu.io/v1/sandboxes/1/checkpoints', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/restore', { checkpoint_id: '9', timeout_seconds: 120 }],
+      ['DELETE', 'https://api.watasu.io/v1/sandbox_snapshots/9', undefined],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/upload_url', { path: '/tmp/a.txt', use_signature_expiration: 300 }],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/download_url', { path: '/tmp/a.txt' }],
     ])
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('git helper uses data-plane git routes', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      if (String(url).endsWith('/git/status')) {
+        return new Response(
+          JSON.stringify({ git: { path: '/workspace/repo', stdout: '## main...origin/main [ahead 1]\n M a.txt\n?? b.txt\n', stderr: '' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (String(url).endsWith('/git/branches')) {
+        return new Response(
+          JSON.stringify({ git: { path: '/workspace/repo', branches: ['main', 'feature/test'], current_branch: 'main', stdout: '', stderr: '' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (String(url).endsWith('/git/get_config')) {
+        return new Response(
+          JSON.stringify({ git: { path: '/workspace/repo', key: 'pull.rebase', value: 'false', stdout: 'false\n', stderr: '' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      return new Response(
+        JSON.stringify({ git: { path: '/workspace/repo', url: 'https://git.example/repo.git', branch: 'feature/test', remote: 'origin', name: 'origin', stdout: 'ok\n', stderr: '' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const sbx = new Sandbox({
+      sandboxId: '1',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+      sandbox: { route_token: 'route-token' },
+    })
+
+    const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, timeoutMs: 10_000 })
+    await sbx.git.dangerouslyAuthenticate({ username: 'user', password: 'token', host: 'git.example.com', protocol: 'https', timeout: 5 })
+    await sbx.git.configureUser('Watasu Test', 'test@watasu.local', { scope: 'local', path: '/workspace/repo' })
+    const status = await sbx.git.status('/workspace/repo')
+    const branches = await sbx.git.branches('/workspace/repo')
+    await sbx.git.createBranch('/workspace/repo', 'feature/test')
+    await sbx.git.deleteBranch('/workspace/repo', 'feature/test', { force: true })
+    await sbx.git.add('/workspace/repo', { files: ['README.md'] })
+    await sbx.git.commit('/workspace/repo', 'change', { authorName: 'Watasu Test', authorEmail: 'test@watasu.local', allowEmpty: true })
+    await sbx.git.pull('/workspace/repo', { remote: 'origin', branch: 'main', username: 'user', password: 'token' })
+    await sbx.git.push('/workspace/repo', { remote: 'origin', branch: 'main', setUpstream: true, username: 'user', password: 'token' })
+    await sbx.git.checkout('/workspace/repo', 'main')
+    await sbx.git.checkoutBranch('/workspace/repo', 'main')
+    await sbx.git.remoteAdd('/workspace/repo', 'origin', 'https://git.example/repo.git', { fetch: true, overwrite: true })
+    await sbx.git.setConfig('pull.rebase', 'false', { scope: 'local', path: '/workspace/repo' })
+    const configValue = await sbx.git.getConfig('pull.rebase', { scope: 'local', path: '/workspace/repo' })
+
+    assert.equal(clone.path, '/workspace/repo')
+    assert.equal(status.currentBranch, 'main')
+    assert.equal(status.ahead, 1)
+    assert.equal(status.hasChanges, true)
+    assert.equal(status.untrackedCount, 1)
+    assert.deepEqual(branches.branches, ['main', 'feature/test'])
+    assert.equal(branches.currentBranch, 'main')
+    assert.equal(configValue, 'false')
+    assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/clone', { url: 'https://git.example/repo.git', timeout_seconds: 10, path: '/workspace/repo', branch: 'main', depth: 1 }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/dangerously_authenticate', { timeout_seconds: 5, username: 'user', password: 'token', host: 'git.example.com', protocol: 'https' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/configure_user', { name: 'Watasu Test', email: 'test@watasu.local', scope: 'local', path: '/workspace/repo' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/status', { path: '/workspace/repo' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/branches', { path: '/workspace/repo' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/create_branch', { path: '/workspace/repo', branch: 'feature/test' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/delete_branch', { path: '/workspace/repo', branch: 'feature/test', force: true }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/add', { path: '/workspace/repo', files: ['README.md'] }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/commit', { path: '/workspace/repo', message: 'change', author_name: 'Watasu Test', author_email: 'test@watasu.local', allow_empty: true }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/pull', { path: '/workspace/repo', remote: 'origin', branch: 'main', username: 'user', password: 'token' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/push', { path: '/workspace/repo', remote: 'origin', branch: 'main', username: 'user', password: 'token', set_upstream: true }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/checkout', { path: '/workspace/repo', ref: 'main' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/checkout', { path: '/workspace/repo', ref: 'main' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/remote_add', { path: '/workspace/repo', name: 'origin', url: 'https://git.example/repo.git', fetch: true, overwrite: true }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/set_config', { key: 'pull.rebase', value: 'false', scope: 'local', path: '/workspace/repo' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/get_config', { key: 'pull.rebase', scope: 'local', path: '/workspace/repo' }],
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('watch handle dispatches filesystem events and can be stopped', async () => {
+  let closed = false
+  const socket = { close() { closed = true } }
+  async function* frames() {
+    yield { type: 'events', events: [{ type: 'modify', path: '/tmp/a.txt', file: { path: '/tmp/a.txt', name: 'a.txt', type: 'file', bytes: 2 } }] }
+  }
+  const events = []
+  const handle = new WatchHandle(socket, frames(), (event) => events.push(event))
+
+  await handle.wait()
+  handle.stop()
+
+  assert.equal(events[0].type, 'write')
+  assert.equal(events[0].entry.name, 'a.txt')
+  assert.equal(closed, true)
 })

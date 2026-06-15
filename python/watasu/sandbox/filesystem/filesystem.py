@@ -43,6 +43,8 @@ class FilesystemEventType(Enum):
 class FilesystemEvent:
     type: FilesystemEventType
     path: str
+    name: str = ""
+    entry: Optional[EntryInfo] = None
 
 
 def file_type_from_api(value) -> Optional[FileType]:

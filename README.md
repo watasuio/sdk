@@ -12,3 +12,8 @@ the language the user is installing:
 `Sandbox.create` and `Sandbox.connect` are single provider operations: the
 control-plane API waits for the runtime lifecycle internally and returns success
 only with a usable data-plane session. SDKs do not poll sandbox readiness.
+
+Supported sandbox helpers include streaming commands, PTY sessions, filesystem
+read/write/list/watch, Git clone/auth/status/branches/add/commit/pull/push/
+remotes/config, signed upload/download URLs, metrics, disk snapshots, snapshot
+restore, and snapshot delete.

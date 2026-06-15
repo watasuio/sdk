@@ -40,10 +40,8 @@ from .sandbox.filesystem.filesystem import (
 )
 from .sandbox.sandbox_api import (
     ALL_TRAFFIC,
-    GitBranches,
-    GitFileStatus,
+    FileUrlInfo,
     GitResetMode,
-    GitStatus,
     GitHubMcpServer,
     GitHubMcpServerConfig,
     McpServer,
@@ -65,15 +63,22 @@ from .sandbox.sandbox_api import (
     SnapshotInfo,
     get_signature,
 )
-from .sandbox_async.main import AsyncSandbox, AsyncSnapshotPaginator
+from .sandbox_async.main import (
+    AsyncGit,
+    AsyncPty,
+    AsyncSandbox,
+    AsyncSnapshotPaginator,
+    AsyncWatchHandle,
+)
 from .sandbox_sync.commands.command_handle import CommandHandle
+from .sandbox_sync.commands.pty import Pty
 from .sandbox_sync.filesystem.watch_handle import WatchHandle
+from .sandbox_sync.git import Git, GitBranches, GitCommandResult, GitFileStatus, GitStatus
 from .sandbox_sync.main import Sandbox
 from .sandbox_sync.paginator import SandboxPaginator, SnapshotPaginator
 from .stubs import (
     AsyncTemplate,
     AsyncVolume,
-    AsyncWatchHandle,
     BuildInfo,
     BuildStatusReason,
     CopyItem,
@@ -114,6 +119,8 @@ __all__ = [
     "AsyncTemplate",
     "AsyncVolume",
     "AsyncWatchHandle",
+    "AsyncGit",
+    "AsyncPty",
     "AuthenticationException",
     "BuildException",
     "BuildInfo",
@@ -124,13 +131,16 @@ __all__ = [
     "ConnectionConfig",
     "CopyItem",
     "EntryInfo",
+    "FileUrlInfo",
     "FileNotFoundException",
     "FileType",
     "FileUploadException",
     "FilesystemEvent",
     "FilesystemEventType",
     "GitAuthException",
+    "Git",
     "GitBranches",
+    "GitCommandResult",
     "GitFileStatus",
     "GitHubMcpServer",
     "GitHubMcpServerConfig",
@@ -148,6 +158,7 @@ __all__ = [
     "OutputHandler",
     "ProxyTypes",
     "PtyOutput",
+    "Pty",
     "PtySize",
     "RateLimitException",
     "ReadyCmd",

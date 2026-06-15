@@ -59,6 +59,15 @@ class SnapshotInfo:
 
 
 @dataclass
+class FileUrlInfo:
+    method: str
+    path: str
+    url: str
+    expires_at: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class SandboxInfo:
     sandbox_id: str
     template_id: Optional[str] = None
@@ -123,6 +132,16 @@ def snapshot_info_from_api(payload: Dict[str, Any]) -> SnapshotInfo:
         status=_string(payload.get("status")),
         size_bytes=_int(_first(payload, "size_bytes", "sizeBytes")),
         created_at=_string(_first(payload, "created_at", "createdAt")),
+        expires_at=_string(_first(payload, "expires_at", "expiresAt")),
+        raw=payload,
+    )
+
+
+def file_url_info_from_api(payload: Dict[str, Any]) -> FileUrlInfo:
+    return FileUrlInfo(
+        method=str(payload.get("method") or ""),
+        path=str(payload.get("path") or ""),
+        url=str(payload.get("url") or ""),
         expires_at=_string(_first(payload, "expires_at", "expiresAt")),
         raw=payload,
     )

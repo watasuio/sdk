@@ -169,7 +169,7 @@ pub struct CommandHandle {
 }
 
 impl CommandHandle {
-    fn new(pid: String, socket: ProcessSocket, commands: Commands) -> Self {
+    pub(crate) fn new(pid: String, socket: ProcessSocket, commands: Commands) -> Self {
         Self {
             pid,
             socket,
@@ -188,6 +188,9 @@ impl CommandHandle {
                     frame.get("data").and_then(Value::as_str).unwrap_or(""),
                 )),
                 Some("stderr") => self.stderr.push_str(&decode_runtime_data(
+                    frame.get("data").and_then(Value::as_str).unwrap_or(""),
+                )),
+                Some("pty") => self.stdout.push_str(&decode_runtime_data(
                     frame.get("data").and_then(Value::as_str).unwrap_or(""),
                 )),
                 Some("exit") => {
@@ -236,6 +239,13 @@ impl CommandHandle {
     /// Send stdin bytes to the process.
     pub async fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
         self.socket.send_stdin(data).await
+    }
+
+    /// Resize the attached PTY stream.
+    pub async fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        self.socket
+            .send_json(&serde_json::json!({"type": "resize", "cols": cols, "rows": rows}))
+            .await
     }
 }
 

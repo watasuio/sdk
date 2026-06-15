@@ -128,10 +128,15 @@ export function base64Encode(bytes: Uint8Array): string {
 export function base64DecodeText(value: unknown): string {
   if (typeof value !== 'string') return String(value ?? '')
   try {
-    return Buffer.from(value, 'base64').toString('utf8')
+    return Buffer.from(base64DecodeBytes(value)).toString('utf8')
   } catch {
     return value
   }
+}
+
+export function base64DecodeBytes(value: unknown): Uint8Array {
+  if (typeof value !== 'string') return new TextEncoder().encode(String(value ?? ''))
+  return new Uint8Array(Buffer.from(value, 'base64'))
 }
 
 function rawDataToText(message: RawData): string {

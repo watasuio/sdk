@@ -4,6 +4,8 @@ use crate::commands::Commands;
 use crate::config::{ConnectionConfig, ConnectionOptions};
 use crate::error::{Error, Result};
 use crate::filesystem::Filesystem;
+use crate::git::Git;
+use crate::pty::Pty;
 use crate::transport::{ControlClient, DataPlaneClient};
 
 /// Options for `Sandbox::create`.
@@ -116,6 +118,32 @@ pub struct SnapshotInfo {
     pub raw: Value,
 }
 
+/// Signed file URL metadata.
+#[derive(Clone, Debug, Default)]
+pub struct FileUrlInfo {
+    /// HTTP method accepted by the signed URL.
+    pub method: String,
+    /// Sandbox file path.
+    pub path: String,
+    /// Signed URL.
+    pub url: String,
+    /// Expiration timestamp.
+    pub expires_at: Option<String>,
+    /// Full raw file URL payload.
+    pub raw: Value,
+}
+
+/// Options for signed file URL creation.
+#[derive(Clone, Debug, Default)]
+pub struct FileUrlOptions {
+    /// Optional sandbox user.
+    pub user: Option<String>,
+    /// Signature expiration in seconds.
+    pub use_signature_expiration: Option<u64>,
+    /// URL expiration in seconds.
+    pub expires_in_seconds: Option<u64>,
+}
+
 /// Options for creating a Watasu checkpoint.
 #[derive(Clone, Debug, Default)]
 pub struct CreateSnapshotOptions {
@@ -146,6 +174,10 @@ pub struct Sandbox {
     pub commands: Commands,
     /// Filesystem helper for this sandbox.
     pub files: Filesystem,
+    /// PTY helper for this sandbox.
+    pub pty: Pty,
+    /// Git helper for this sandbox.
+    pub git: Git,
     config: ConnectionConfig,
     control: ControlClient,
     sandbox: Value,
@@ -243,7 +275,7 @@ impl Sandbox {
         let response = self
             .control
             .post(
-                &format!("/sandboxes/{}/checkpoints", self.sandbox_id),
+                &format!("/sandboxes/{}/snapshots", self.sandbox_id),
                 snapshot_payload(opts),
             )
             .await?;
@@ -269,6 +301,56 @@ impl Sandbox {
             .into_iter()
             .map(|value| snapshot_info(&value))
             .collect())
+    }
+
+    /// Delete a snapshot by id.
+    pub async fn delete_snapshot(&self, snapshot_id: impl ToString) -> Result<bool> {
+        match self
+            .control
+            .delete(&format!("/sandbox_snapshots/{}", snapshot_id.to_string()))
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(Error::NotFound(_)) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Delete a snapshot by id using explicit connection options.
+    pub async fn delete_snapshot_by_id(
+        snapshot_id: impl ToString,
+        connection: ConnectionOptions,
+    ) -> Result<bool> {
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        match control
+            .delete(&format!("/sandbox_snapshots/{}", snapshot_id.to_string()))
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(Error::NotFound(_)) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Get a signed URL for uploading a file with a POST request.
+    pub async fn upload_url(&self, path: &str, opts: FileUrlOptions) -> Result<String> {
+        Ok(self.upload_url_info(path, opts).await?.url)
+    }
+
+    /// Get a signed URL for downloading a file with a GET request.
+    pub async fn download_url(&self, path: &str, opts: FileUrlOptions) -> Result<String> {
+        Ok(self.download_url_info(path, opts).await?.url)
+    }
+
+    /// Get signed upload URL metadata.
+    pub async fn upload_url_info(&self, path: &str, opts: FileUrlOptions) -> Result<FileUrlInfo> {
+        self.file_url_info("upload_url", path, opts).await
+    }
+
+    /// Get signed download URL metadata.
+    pub async fn download_url_info(&self, path: &str, opts: FileUrlOptions) -> Result<FileUrlInfo> {
+        self.file_url_info("download_url", path, opts).await
     }
 
     /// Restore a checkpoint into a new sandbox and return its control-plane metadata.
@@ -360,11 +442,38 @@ impl Sandbox {
         Ok(Self {
             sandbox_id,
             files: Filesystem::new(data_plane.clone()),
-            commands: Commands::new(data_plane, envs),
+            commands: Commands::new(data_plane.clone(), envs),
+            pty: Pty::new(data_plane.clone()),
+            git: Git::new(data_plane),
             config,
             control,
             sandbox,
         })
+    }
+
+    async fn file_url_info(
+        &self,
+        route: &str,
+        path: &str,
+        opts: FileUrlOptions,
+    ) -> Result<FileUrlInfo> {
+        let mut body = serde_json::Map::new();
+        body.insert("path".into(), Value::String(path.to_string()));
+        put_if_some_string(&mut body, "user", opts.user);
+        put_if_some(
+            &mut body,
+            "use_signature_expiration",
+            opts.use_signature_expiration,
+        );
+        put_if_some(&mut body, "expires_in_seconds", opts.expires_in_seconds);
+        let payload = self
+            .control
+            .post(
+                &format!("/sandboxes/{}/files/{route}", self.sandbox_id),
+                Value::Object(body),
+            )
+            .await?;
+        Ok(file_url_info(payload.get("file_url").unwrap_or(&payload)))
     }
 }
 
@@ -491,6 +600,16 @@ fn snapshot_info(value: &Value) -> SnapshotInfo {
         status: string_value(value, &["status"]),
         size_bytes: u64_value(value, &["size_bytes", "sizeBytes"]),
         created_at: string_value(value, &["created_at", "createdAt"]),
+        expires_at: string_value(value, &["expires_at", "expiresAt"]),
+        raw: value.clone(),
+    }
+}
+
+fn file_url_info(value: &Value) -> FileUrlInfo {
+    FileUrlInfo {
+        method: string_value(value, &["method"]).unwrap_or_default(),
+        path: string_value(value, &["path"]).unwrap_or_default(),
+        url: string_value(value, &["url"]).unwrap_or_default(),
         expires_at: string_value(value, &["expires_at", "expiresAt"]),
         raw: value.clone(),
     }

@@ -3,6 +3,8 @@ import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS 
 import { DataPlaneClient, ControlClient } from './transport.js'
 import { NotFoundError, SandboxError, unsupported } from './errors.js'
 import { Filesystem } from './filesystem.js'
+import { Git } from './git.js'
+import { Pty } from './pty.js'
 
 export interface SandboxCreateOpts extends ConnectionOpts {
   /** Template slug to create. Defaults to "base". */
@@ -54,6 +56,20 @@ export interface SnapshotInfo {
   raw: Record<string, unknown>
 }
 
+export interface FileUrlInfo {
+  method: string
+  path: string
+  url: string
+  expiresAt?: string
+  raw: Record<string, unknown>
+}
+
+export interface SandboxUrlOpts extends ConnectionOpts {
+  user?: string
+  useSignatureExpiration?: number
+  expiresInSeconds?: number
+}
+
 export interface CreateSnapshotOpts extends ConnectionOpts {
   name?: string
   metadata?: Record<string, string>
@@ -90,9 +106,9 @@ export class Sandbox {
 
   files: Filesystem
   commands: Commands
+  pty: Pty
+  git: Git
   readonly sandboxId: string
-  readonly pty = { create: () => unsupported('sandbox.pty') }
-  readonly git = { clone: () => unsupported('sandbox.git') }
 
   private readonly config: ConnectionConfig
   private readonly control: ControlClient
@@ -117,6 +133,8 @@ export class Sandbox {
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
     this.commands = new Commands(dataPlane, this.config, this.envs)
+    this.pty = new Pty(dataPlane, this.config)
+    this.git = new Git(dataPlane)
   }
 
   static async create(opts?: SandboxCreateOpts): Promise<Sandbox>
@@ -189,6 +207,8 @@ export class Sandbox {
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
     this.commands = new Commands(dataPlane, this.config, this.envs)
+    this.pty = new Pty(dataPlane, this.config)
+    this.git = new Git(dataPlane)
     return this
   }
 
@@ -216,7 +236,7 @@ export class Sandbox {
   /** Create a Watasu checkpoint using snapshot naming. */
   static async createSnapshot(sandboxId: string, opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
     const control = new ControlClient(new ConnectionConfig(opts))
-    const payload = await control.post(`/sandboxes/${sandboxId}/checkpoints`, {
+    const payload = await control.post(`/sandboxes/${sandboxId}/snapshots`, {
       json: snapshotPayload(opts),
       requestTimeoutMs: opts.requestTimeoutMs,
     })
@@ -235,9 +255,18 @@ export class Sandbox {
     })
   }
 
-  /** Snapshot deletion is not backed by a Watasu checkpoint delete API yet. */
-  static deleteSnapshot(..._args: unknown[]): never {
-    unsupported('Sandbox.deleteSnapshot')
+  /** Delete a snapshot by id. Returns `false` when the snapshot does not exist. */
+  static async deleteSnapshot(snapshotId: string, opts: ConnectionOpts = {}): Promise<boolean> {
+    const control = new ControlClient(new ConnectionConfig(opts))
+    try {
+      await control.delete(`/sandbox_snapshots/${snapshotId}`, {
+        requestTimeoutMs: opts.requestTimeoutMs,
+      })
+      return true
+    } catch (error) {
+      if (error instanceof NotFoundError) return false
+      throw error
+    }
   }
 
   /** Destroy this sandbox. */
@@ -298,6 +327,11 @@ export class Sandbox {
     return Sandbox.createSnapshot(this.sandboxId, { ...this.configOptions(), ...opts })
   }
 
+  /** Delete a snapshot by id. */
+  async deleteSnapshot(snapshotId: string, opts: ConnectionOpts = {}): Promise<boolean> {
+    return Sandbox.deleteSnapshot(snapshotId, { ...this.configOptions(), ...opts })
+  }
+
   /** Watasu-native alias for `createSnapshot`. */
   async checkpoint(opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
     return this.createSnapshot(opts)
@@ -345,10 +379,45 @@ export class Sandbox {
     return `p${port}-${routeToken}.sandbox.${this.config.dataPlaneDomain}`
   }
 
+  /** Get a signed URL that accepts a POST upload for a sandbox file path. */
+  async uploadUrl(path: string, opts: SandboxUrlOpts = {}): Promise<string> {
+    const fileUrl = await this.fileUrl('/upload_url', path, opts)
+    return fileUrl.url
+  }
+
+  /** Get a signed URL that accepts a GET download for a sandbox file path. */
+  async downloadUrl(path: string, opts: SandboxUrlOpts = {}): Promise<string> {
+    const fileUrl = await this.fileUrl('/download_url', path, opts)
+    return fileUrl.url
+  }
+
+  /** Get signed upload URL metadata for a sandbox file path. */
+  async uploadUrlInfo(path: string, opts: SandboxUrlOpts = {}): Promise<FileUrlInfo> {
+    return this.fileUrl('/upload_url', path, opts)
+  }
+
+  /** Get signed download URL metadata for a sandbox file path. */
+  async downloadUrlInfo(path: string, opts: SandboxUrlOpts = {}): Promise<FileUrlInfo> {
+    return this.fileUrl('/download_url', path, opts)
+  }
+
   updateNetwork(..._args: unknown[]): never { unsupported('Sandbox.updateNetwork') }
   pause(): never { unsupported('Sandbox.pause') }
   betaPause(): never { unsupported('Sandbox.betaPause') }
   resume(): never { unsupported('Sandbox.resume') }
+
+  private async fileUrl(route: '/upload_url' | '/download_url', path: string, opts: SandboxUrlOpts): Promise<FileUrlInfo> {
+    const payload = await this.control.post(`/sandboxes/${this.sandboxId}/files${route}`, {
+      json: compactRecord({
+        path,
+        user: opts.user,
+        use_signature_expiration: opts.useSignatureExpiration,
+        expires_in_seconds: opts.expiresInSeconds,
+      }),
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    return fileUrlInfo(record(payload.file_url ?? payload))
+  }
 
   private configOptions(): ConnectionOpts {
     return {
@@ -369,6 +438,20 @@ function dataPlaneFromSession(session: unknown, config: ConnectionConfig): DataP
     throw new SandboxError('sandbox session did not include data_plane_url and token')
   }
   return new DataPlaneClient(url, token, config)
+}
+
+function fileUrlInfo(payload: Record<string, unknown>): FileUrlInfo {
+  return {
+    method: String(payload.method ?? ''),
+    path: String(payload.path ?? ''),
+    url: String(payload.url ?? ''),
+    expiresAt: typeof payload.expires_at === 'string' ? payload.expires_at : typeof payload.expiresAt === 'string' ? payload.expiresAt : undefined,
+    raw: payload,
+  }
+}
+
+function compactRecord(payload: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined))
 }
 
 function sessionOperationRequestTimeout(config: ConnectionConfig, opts: ConnectionOpts): number {

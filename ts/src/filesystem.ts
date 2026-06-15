@@ -1,5 +1,6 @@
 import { DataPlaneClient, withQuery } from './transport.js'
-import { FileNotFoundError, unsupported } from './errors.js'
+import { FileNotFoundError } from './errors.js'
+import { ProcessFrame, ProcessSocket } from './processSocket.js'
 
 export enum FileType {
   /** Regular file. */
@@ -24,6 +25,70 @@ export interface EntryInfo {
 }
 
 export type WriteInfo = EntryInfo
+
+export interface FilesystemEvent {
+  type: 'create' | 'write' | 'modify' | 'remove' | 'delete' | 'rename' | string
+  path: string
+  entry?: EntryInfo
+  raw: Record<string, unknown>
+}
+
+export interface WatchOpts {
+  recursive?: boolean
+  includeEntry?: boolean
+  requestTimeoutMs?: number
+  onExit?: (error?: Error) => void | Promise<void>
+}
+
+/** Live filesystem watcher. Call `stop()` to close the local watch stream. */
+export class WatchHandle {
+  private readonly done: Promise<void>
+
+  constructor(
+    private readonly socket: ProcessSocket,
+    events: AsyncIterable<ProcessFrame>,
+    onEvent: (event: FilesystemEvent) => void | Promise<void>,
+    onExit?: (error?: Error) => void | Promise<void>
+  ) {
+    this.done = this.pump(events, onEvent, onExit)
+  }
+
+  /** Stop watching the directory. */
+  stop(): void {
+    this.socket.close()
+  }
+
+  /** Alias for `stop`. */
+  close(): void {
+    this.stop()
+  }
+
+  /** Resolves when the watcher stream exits. */
+  wait(): Promise<void> {
+    return this.done
+  }
+
+  private async pump(
+    events: AsyncIterable<ProcessFrame>,
+    onEvent: (event: FilesystemEvent) => void | Promise<void>,
+    onExit?: (error?: Error) => void | Promise<void>
+  ): Promise<void> {
+    let error: Error | undefined
+    try {
+      for await (const frame of events) {
+        if (frame.type !== 'events' || !Array.isArray(frame.events)) continue
+        for (const item of frame.events) {
+          await onEvent(filesystemEvent(item))
+        }
+      }
+    } catch (caught) {
+      error = caught instanceof Error ? caught : new Error(String(caught))
+      throw error
+    } finally {
+      await onExit?.(error)
+    }
+  }
+}
 
 /** Filesystem helper for a sandbox data-plane session. */
 export class Filesystem {
@@ -95,8 +160,19 @@ export class Filesystem {
     return true
   }
 
-  watchDir(): never {
-    unsupported('sandbox.files.watchDir')
+  /** Start watching a directory for filesystem events. */
+  async watchDir(
+    path: string,
+    onEvent: (event: FilesystemEvent) => void | Promise<void>,
+    opts: WatchOpts = {}
+  ): Promise<WatchHandle> {
+    const socket = await new ProcessSocket(
+      this.dataPlane.baseUrl,
+      this.dataPlane.token,
+      withQuery('/runtime/v1/files/watch', { path, recursive: opts.recursive ?? false, include_entry: opts.includeEntry }),
+      opts.requestTimeoutMs
+    ).connect()
+    return new WatchHandle(socket, socket, onEvent, opts.onExit)
   }
 }
 
@@ -122,4 +198,20 @@ function numberValue(value: unknown): number | undefined {
 function recordOfStrings(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== 'object') return undefined
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)]))
+}
+
+function filesystemEvent(value: unknown): FilesystemEvent {
+  const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    type: normalizeEventType(String(item.type ?? 'modify')),
+    path: String(item.path ?? ''),
+    entry: item.file && typeof item.file === 'object' ? entryInfo(item.file) : undefined,
+    raw: item,
+  }
+}
+
+function normalizeEventType(value: string): FilesystemEvent['type'] {
+  if (value === 'delete') return 'remove'
+  if (value === 'modify') return 'write'
+  return value
 }

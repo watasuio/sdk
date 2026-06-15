@@ -15,13 +15,17 @@ from watasu.exceptions import (
     SandboxException,
 )
 from watasu.sandbox.sandbox_api import (
+    FileUrlInfo,
     SandboxInfo,
+    file_url_info_from_api,
     sandbox_info_from_api,
     sandbox_metrics_from_api,
     snapshot_info_from_api,
 )
 from watasu.sandbox_sync.commands.command import Commands
+from watasu.sandbox_sync.commands.pty import Pty
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
+from watasu.sandbox_sync.git import Git
 from watasu.sandbox_sync.paginator import SandboxPaginator, SnapshotPaginator
 from watasu.stubs import unsupported
 
@@ -63,11 +67,11 @@ class Sandbox:
 
     @property
     def pty(self):
-        unsupported("sandbox.pty")
+        return self._pty
 
     @property
     def git(self):
-        unsupported("sandbox.git")
+        return self._git
 
     def __init__(
         self,
@@ -131,6 +135,8 @@ class Sandbox:
         self._commands = Commands(
             self._require_data_plane(), connection_config, self._envs
         )
+        self._pty = Pty(self._require_data_plane(), connection_config)
+        self._git = Git(self._require_data_plane())
 
     @classmethod
     def create(
@@ -210,6 +216,8 @@ class Sandbox:
         self._commands = Commands(
             self._require_data_plane(), self.connection_config, self._envs
         )
+        self._pty = Pty(self._require_data_plane(), self.connection_config)
+        self._git = Git(self._require_data_plane())
         return self
 
     @classmethod
@@ -355,7 +363,7 @@ class Sandbox:
             }
         )
         payload = self._control.post(
-            f"/sandboxes/{self.sandbox_id}/checkpoints",
+            f"/sandboxes/{self.sandbox_id}/snapshots",
             json=body,
             resource="sandbox",
             request_timeout=opts.get("request_timeout"),
@@ -386,7 +394,7 @@ class Sandbox:
             }
         )
         payload = control.post(
-            f"/sandboxes/{sandbox_id}/checkpoints",
+            f"/sandboxes/{sandbox_id}/snapshots",
             json=body,
             resource="sandbox",
             request_timeout=opts.get("request_timeout"),
@@ -425,6 +433,35 @@ class Sandbox:
         return SnapshotPaginator([snapshot_info_from_api(item) for item in checkpoints])
 
     list_snapshots = _DualMethod(_list_snapshots_instance, _list_snapshots_class)
+
+    def _delete_snapshot_instance(self, snapshot_id: str, **opts: ApiParams) -> bool:
+        """Delete a snapshot by id."""
+        try:
+            self._control.delete(
+                f"/sandbox_snapshots/{snapshot_id}",
+                resource="sandbox",
+                request_timeout=opts.get("request_timeout"),
+            )
+            return True
+        except NotFoundException:
+            return False
+
+    @classmethod
+    def _delete_snapshot_class(cls, snapshot_id: str, **opts: ApiParams) -> bool:
+        """Delete a snapshot by id. Returns ``False`` when not found."""
+        config = ConnectionConfig(**opts)
+        control = ControlClient(config)
+        try:
+            control.delete(
+                f"/sandbox_snapshots/{snapshot_id}",
+                resource="sandbox",
+                request_timeout=opts.get("request_timeout"),
+            )
+            return True
+        except NotFoundException:
+            return False
+
+    delete_snapshot = _DualMethod(_delete_snapshot_instance, _delete_snapshot_class)
 
     def restore(
         self,
@@ -474,6 +511,48 @@ class Sandbox:
             return f"p{port}-{route_token}.sandbox.{self.connection_config.data_plane_domain}"
         return _host_only(host_or_url)
 
+    def upload_url(
+        self,
+        path: str,
+        user: Optional[str] = None,
+        use_signature_expiration: Optional[int] = None,
+        expires_in_seconds: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> str:
+        """Get a signed URL for uploading a file with a POST request."""
+        return self.upload_url_info(
+            path,
+            user=user,
+            use_signature_expiration=use_signature_expiration,
+            expires_in_seconds=expires_in_seconds,
+            request_timeout=request_timeout,
+        ).url
+
+    def download_url(
+        self,
+        path: str,
+        user: Optional[str] = None,
+        use_signature_expiration: Optional[int] = None,
+        expires_in_seconds: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> str:
+        """Get a signed URL for downloading a file with a GET request."""
+        return self.download_url_info(
+            path,
+            user=user,
+            use_signature_expiration=use_signature_expiration,
+            expires_in_seconds=expires_in_seconds,
+            request_timeout=request_timeout,
+        ).url
+
+    def upload_url_info(self, path: str, **opts) -> FileUrlInfo:
+        """Get signed upload URL metadata for a sandbox file path."""
+        return self._file_url_info("upload_url", path, **opts)
+
+    def download_url_info(self, path: str, **opts) -> FileUrlInfo:
+        """Get signed download URL metadata for a sandbox file path."""
+        return self._file_url_info("download_url", path, **opts)
+
     def update_network(self, *args, **kwargs):
         unsupported("Sandbox.update_network")
 
@@ -484,9 +563,6 @@ class Sandbox:
 
     def resume(self, *args, **kwargs) -> bool:
         unsupported("Sandbox.resume")
-
-    def delete_snapshot(self, *args, **kwargs):
-        unsupported("Sandbox.delete_snapshot")
 
     def __enter__(self):
         """Enter a context manager without changing sandbox state."""
@@ -513,6 +589,23 @@ class Sandbox:
         if self._data_plane is None:
             raise SandboxException("sandbox data plane is not connected")
         return self._data_plane
+
+    def _file_url_info(self, route: str, path: str, **opts) -> FileUrlInfo:
+        body = _compact(
+            {
+                "path": path,
+                "user": opts.get("user"),
+                "use_signature_expiration": opts.get("use_signature_expiration"),
+                "expires_in_seconds": opts.get("expires_in_seconds"),
+            }
+        )
+        payload = self._control.post(
+            f"/sandboxes/{self.sandbox_id}/files/{route}",
+            json=body,
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        return file_url_info_from_api(payload.get("file_url") or payload)
 
 
 def _reject_unsupported_opts(opts: Dict, keys: Iterable[str]) -> None:

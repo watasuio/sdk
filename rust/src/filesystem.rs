@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::error::{Error, Result};
+use crate::process_socket::ProcessSocket;
 use crate::transport::DataPlaneClient;
 
 /// File type returned by sandbox filesystem metadata.
@@ -33,6 +34,61 @@ pub struct EntryInfo {
 
 /// Metadata returned by write operations.
 pub type WriteInfo = EntryInfo;
+
+/// Filesystem event returned by a watch stream.
+#[derive(Clone, Debug, Default)]
+pub struct FilesystemEvent {
+    /// Event type such as `create`, `write`, `remove`, or `rename`.
+    pub event_type: String,
+    /// Absolute sandbox path.
+    pub path: String,
+    /// Basename of the changed path.
+    pub name: String,
+    /// Entry metadata when the runtime can still stat the changed path.
+    pub entry: Option<EntryInfo>,
+    /// Full raw event payload.
+    pub raw: Value,
+}
+
+/// Options for `Filesystem::watch_dir`.
+#[derive(Clone, Debug, Default)]
+pub struct WatchOptions {
+    /// Whether to watch recursively.
+    pub recursive: bool,
+    /// Whether to include entry metadata when available.
+    pub include_entry: bool,
+}
+
+/// Live filesystem watch stream.
+pub struct WatchHandle {
+    socket: ProcessSocket,
+}
+
+impl WatchHandle {
+    /// Read the next batch of filesystem events.
+    pub async fn next_events(&mut self) -> Result<Option<Vec<FilesystemEvent>>> {
+        while let Some(frame) = self.socket.next_frame().await? {
+            if frame.get("type").and_then(Value::as_str) != Some("events") {
+                continue;
+            }
+            let events = frame
+                .get("events")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(filesystem_event)
+                .collect();
+            return Ok(Some(events));
+        }
+        Ok(None)
+    }
+
+    /// Stop watching the directory.
+    pub async fn stop(&mut self) -> Result<()> {
+        self.socket.close().await
+    }
+}
 
 /// Filesystem helper for a sandbox data-plane session.
 #[derive(Clone)]
@@ -145,6 +201,23 @@ impl Filesystem {
             .await?;
         Ok(true)
     }
+
+    /// Start watching a directory for filesystem events.
+    pub async fn watch_dir(&self, path: &str, opts: WatchOptions) -> Result<WatchHandle> {
+        let query = format!(
+            "path={}&recursive={}&include_entry={}",
+            urlencoding(path),
+            opts.recursive,
+            opts.include_entry
+        );
+        let socket = ProcessSocket::connect(
+            &self.data_plane.base_url,
+            &self.data_plane.token,
+            &format!("/runtime/v1/files/watch?{query}"),
+        )
+        .await?;
+        Ok(WatchHandle { socket })
+    }
 }
 
 fn entry_info(value: &Value) -> EntryInfo {
@@ -178,6 +251,37 @@ fn file_type(value: &str) -> FileType {
         "dir" | "directory" => FileType::Dir,
         "symlink" => FileType::Symlink,
         other => FileType::Other(other.to_string()),
+    }
+}
+
+fn filesystem_event(value: Value) -> FilesystemEvent {
+    let path = value
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let event_type = match value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("modify")
+    {
+        "delete" => "remove",
+        "modify" => "write",
+        other => other,
+    }
+    .to_string();
+    let entry = value.get("file").map(entry_info);
+    FilesystemEvent {
+        name: path
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_string(),
+        path,
+        event_type,
+        entry,
+        raw: value,
     }
 }
 

@@ -19,10 +19,33 @@ export type {
   SandboxConnectOpts,
   SandboxInfo,
   SandboxMetrics,
+  SandboxUrlOpts,
   SnapshotInfo,
+  FileUrlInfo,
 } from './sandbox.js'
 export { CommandExitError, CommandHandle, Commands } from './commands.js'
 export type { CommandResult, CommandStartOpts, ProcessInfo } from './commands.js'
-export { FileType, Filesystem } from './filesystem.js'
-export type { EntryInfo, WriteInfo } from './filesystem.js'
-export { ProcessSocket, base64DecodeText, base64Encode } from './processSocket.js'
+export { FileType, Filesystem, WatchHandle } from './filesystem.js'
+export type { EntryInfo, FilesystemEvent, WatchOpts, WriteInfo } from './filesystem.js'
+export { Git } from './git.js'
+export type {
+  GitAddOpts,
+  GitAuthOpts,
+  GitBranches,
+  GitBranchOpts,
+  GitCloneOpts,
+  GitCommandResult,
+  GitConfigOpts,
+  GitConfigureUserOpts,
+  GitCredentialOpts,
+  GitCommitOpts,
+  GitFileStatus,
+  GitPullOpts,
+  GitPushOpts,
+  GitRemoteAddOpts,
+  GitRequestOpts,
+  GitStatus,
+} from './git.js'
+export { Pty } from './pty.js'
+export type { PtyConnectOpts, PtyCreateOpts, PtySize } from './pty.js'
+export { ProcessSocket, base64DecodeBytes, base64DecodeText, base64Encode } from './processSocket.js'

@@ -30,7 +30,9 @@ mod commands;
 mod config;
 mod error;
 mod filesystem;
+mod git;
 mod process_socket;
+mod pty;
 mod sandbox;
 mod transport;
 
@@ -40,8 +42,15 @@ pub use commands::{
 pub use config::{ConnectionConfig, ConnectionOptions, KEEPALIVE_PING_INTERVAL_SECS};
 pub use error::{Error, Result};
 pub use filesystem::{EntryInfo, FileType, Filesystem, WriteInfo};
+pub use filesystem::{FilesystemEvent, WatchHandle, WatchOptions};
+pub use git::{
+    Git, GitAddOptions, GitBranches, GitCloneOptions, GitCommandResult, GitCommitOptions,
+    GitConfigOptions, GitConfigureUserOptions, GitCredentialOptions, GitDeleteBranchOptions,
+    GitFileStatus, GitRemoteAddOptions, GitRemoteOperationOptions, GitRequestOptions, GitStatus,
+};
 pub use process_socket::{decode_runtime_data, encode_runtime_data, ProcessSocket};
+pub use pty::{Pty, PtyCreateOptions, PtySize};
 pub use sandbox::{
-    CreateOptions, CreateSnapshotOptions, RestoreOptions, Sandbox, SandboxInfo, SandboxMetrics,
-    SnapshotInfo,
+    CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, RestoreOptions, Sandbox,
+    SandboxInfo, SandboxMetrics, SnapshotInfo,
 };
