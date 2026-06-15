@@ -209,3 +209,63 @@ test('sandbox isRunning reflects control-plane state', async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+test('sandbox metrics and snapshots use supported control-plane routes', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      if (String(url).endsWith('/metrics')) {
+        return new Response(
+          JSON.stringify({ metrics: { sandbox_id: '1', state: 'ready', backend: 'firecracker' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (String(url).endsWith('/checkpoints') && init.method === 'POST') {
+        return new Response(
+          JSON.stringify({ sandbox_checkpoint: { id: 9, sandbox_id: '1', name: 'ready', status: 'pending' } }),
+          { status: 202, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (String(url).endsWith('/checkpoints')) {
+        return new Response(
+          JSON.stringify({ sandbox_checkpoints: [{ id: 9, sandbox_id: '1', name: 'ready', status: 'ready' }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (String(url).endsWith('/restore')) {
+        return new Response(
+          JSON.stringify({ sandbox: { id: 'restored', state: 'restoring', template_id: 'base' } }),
+          { status: 202, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected request ${url}`)
+    }
+
+    const sbx = new Sandbox({
+      sandboxId: '1',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+      sandbox: { route_token: 'route-token' },
+    })
+
+    const metrics = await sbx.getMetrics()
+    const snapshot = await sbx.createSnapshot({ name: 'ready', metadata: { reason: 'test' } })
+    const snapshots = await sbx.listSnapshots().nextItems()
+    const restored = await sbx.restore({ snapshotId: snapshot.snapshotId, timeoutMs: 120_000 })
+
+    assert.equal(metrics[0].backend, 'firecracker')
+    assert.equal(snapshot.snapshotId, '9')
+    assert.equal(snapshots[0].status, 'ready')
+    assert.equal(restored.sandboxId, 'restored')
+    assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
+      ['GET', 'https://api.watasu.io/v1/sandboxes/1/metrics', undefined],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/1/checkpoints', { name: 'ready', metadata: { reason: 'test' } }],
+      ['GET', 'https://api.watasu.io/v1/sandboxes/1/checkpoints', undefined],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/1/restore', { checkpoint_id: '9', timeout_seconds: 120 }],
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

@@ -33,6 +33,56 @@ export interface SandboxInfo {
   endAt?: string
 }
 
+export interface SandboxMetrics {
+  sandboxId?: string
+  state?: string
+  node?: string
+  backend?: string
+  cpuCount?: number
+  memoryMb?: number
+  raw: Record<string, unknown>
+}
+
+export interface SnapshotInfo {
+  snapshotId: string
+  sandboxId?: string
+  name?: string
+  status?: string
+  sizeBytes?: number
+  createdAt?: string
+  expiresAt?: string
+  raw: Record<string, unknown>
+}
+
+export interface CreateSnapshotOpts extends ConnectionOpts {
+  name?: string
+  metadata?: Record<string, string>
+  expiresAt?: string
+  quiesceMode?: string
+}
+
+export interface RestoreSnapshotOpts extends ConnectionOpts {
+  checkpointId?: string | number
+  snapshotId?: string | number
+  timeout?: number
+  timeoutMs?: number
+}
+
+export class SnapshotPaginator {
+  private consumed = false
+  hasNext = true
+  nextToken: string | undefined
+
+  constructor(private readonly loadItems: () => Promise<SnapshotInfo[]>) {}
+
+  async nextItems(): Promise<SnapshotInfo[]> {
+    if (this.consumed) throw new SandboxError('No more snapshots to fetch')
+    this.consumed = true
+    this.hasNext = false
+    return this.loadItems()
+  }
+}
+
 /** Running Watasu sandbox with ready `files` and `commands` helpers. */
 export class Sandbox {
   /** Default template slug used when create is called without a template. */
@@ -149,6 +199,47 @@ export class Sandbox {
     return true
   }
 
+  /** Fetch sandbox metrics by id. */
+  static async getMetrics(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxMetrics[]> {
+    const control = new ControlClient(new ConnectionConfig(opts))
+    const payload = await control.get(`/sandboxes/${sandboxId}/metrics`, {
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    return metricsList(payload.metrics ?? payload)
+  }
+
+  /** Deprecated alias for `getInfo`. */
+  static async getFullInfo(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxInfo> {
+    return this.getInfo(sandboxId, opts)
+  }
+
+  /** Create a Watasu checkpoint using snapshot naming. */
+  static async createSnapshot(sandboxId: string, opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
+    const control = new ControlClient(new ConnectionConfig(opts))
+    const payload = await control.post(`/sandboxes/${sandboxId}/checkpoints`, {
+      json: snapshotPayload(opts),
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    return snapshotInfo(record(payload.sandbox_checkpoint ?? payload.snapshot ?? payload))
+  }
+
+  /** List checkpoints for one sandbox using snapshot naming. */
+  static listSnapshots(sandboxId: string, opts: ConnectionOpts = {}): SnapshotPaginator {
+    return new SnapshotPaginator(async () => {
+      const control = new ControlClient(new ConnectionConfig(opts))
+      const payload = await control.get(`/sandboxes/${sandboxId}/checkpoints`, {
+        requestTimeoutMs: opts.requestTimeoutMs,
+      })
+      const snapshots = Array.isArray(payload.sandbox_checkpoints) ? payload.sandbox_checkpoints : []
+      return snapshots.map((item) => snapshotInfo(record(item)))
+    })
+  }
+
+  /** Snapshot deletion is not backed by a Watasu checkpoint delete API yet. */
+  static deleteSnapshot(..._args: unknown[]): never {
+    unsupported('Sandbox.deleteSnapshot')
+  }
+
   /** Destroy this sandbox. */
   async kill(): Promise<boolean> {
     await this.control.delete(`/sandboxes/${this.sandboxId}`)
@@ -197,6 +288,45 @@ export class Sandbox {
     return sandboxInfo(record(payload.sandbox ?? payload))
   }
 
+  /** Fetch latest sandbox metrics. */
+  async getMetrics(opts: ConnectionOpts = {}): Promise<SandboxMetrics[]> {
+    return Sandbox.getMetrics(this.sandboxId, { ...this.configOptions(), ...opts })
+  }
+
+  /** Create a Watasu checkpoint using snapshot naming. */
+  async createSnapshot(opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
+    return Sandbox.createSnapshot(this.sandboxId, { ...this.configOptions(), ...opts })
+  }
+
+  /** Watasu-native alias for `createSnapshot`. */
+  async checkpoint(opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
+    return this.createSnapshot(opts)
+  }
+
+  /** List checkpoints for this sandbox using snapshot naming. */
+  listSnapshots(opts: ConnectionOpts = {}): SnapshotPaginator {
+    return Sandbox.listSnapshots(this.sandboxId, { ...this.configOptions(), ...opts })
+  }
+
+  /** Restore a checkpoint into a new sandbox and return its control-plane info. */
+  async restore(opts: RestoreSnapshotOpts | string | number = {}): Promise<SandboxInfo> {
+    const restoreOpts = typeof opts === 'string' || typeof opts === 'number'
+      ? { checkpointId: opts }
+      : opts
+    const checkpointId = restoreOpts.checkpointId ?? restoreOpts.snapshotId
+    if (checkpointId === undefined) throw new SandboxError('checkpointId or snapshotId is required')
+
+    const payload: Record<string, unknown> = { checkpoint_id: checkpointId }
+    if (restoreOpts.timeout !== undefined) payload.timeout_seconds = restoreOpts.timeout
+    if (restoreOpts.timeoutMs !== undefined) payload.timeout_seconds = Math.ceil(restoreOpts.timeoutMs / 1000)
+
+    const response = await this.control.post(`/sandboxes/${this.sandboxId}/restore`, {
+      json: payload,
+      requestTimeoutMs: restoreOpts.requestTimeoutMs,
+    })
+    return sandboxInfo(record(response.sandbox ?? response))
+  }
+
   /** List sandboxes visible to the configured API key. */
   static async list(opts: ConnectionOpts & { team?: string } = {}): Promise<SandboxInfo[]> {
     const control = new ControlClient(new ConnectionConfig(opts))
@@ -215,11 +345,19 @@ export class Sandbox {
     return `p${port}-${routeToken}.sandbox.${this.config.dataPlaneDomain}`
   }
 
+  updateNetwork(..._args: unknown[]): never { unsupported('Sandbox.updateNetwork') }
   pause(): never { unsupported('Sandbox.pause') }
+  betaPause(): never { unsupported('Sandbox.betaPause') }
   resume(): never { unsupported('Sandbox.resume') }
-  createSnapshot(): never { unsupported('Sandbox.createSnapshot') }
-  checkpoint(): never { unsupported('Sandbox.checkpoint') }
-  restore(): never { unsupported('Sandbox.restore') }
+
+  private configOptions(): ConnectionOpts {
+    return {
+      apiKey: this.config.apiKey,
+      apiUrl: this.config.apiUrl,
+      dataPlaneDomain: this.config.dataPlaneDomain,
+      requestTimeoutMs: this.config.requestTimeoutMs,
+    }
+  }
 }
 
 function dataPlaneFromSession(session: unknown, config: ConnectionConfig): DataPlaneClient {
@@ -252,6 +390,57 @@ function sandboxInfo(payload: Record<string, unknown>): SandboxInfo {
       ? payload.end_at
       : typeof payload.deadline_at === 'string' ? payload.deadline_at : undefined,
   }
+}
+
+function metricsList(value: unknown): SandboxMetrics[] {
+  if (Array.isArray(value)) return value.map((item) => metricsInfo(record(item)))
+  return [metricsInfo(record(value))]
+}
+
+function metricsInfo(value: Record<string, unknown>): SandboxMetrics {
+  return {
+    sandboxId: stringValue(value.sandbox_id ?? value.sandboxId),
+    state: stringValue(value.state),
+    node: stringValue(value.node),
+    backend: stringValue(value.backend),
+    cpuCount: numberValue(value.cpu_count ?? value.cpuCount),
+    memoryMb: numberValue(value.memory_mb ?? value.memoryMb),
+    raw: value,
+  }
+}
+
+function snapshotPayload(opts: CreateSnapshotOpts): Record<string, unknown> {
+  const payload: Record<string, unknown> = {}
+  putIfPresent(payload, 'name', opts.name)
+  putIfPresent(payload, 'metadata', opts.metadata)
+  putIfPresent(payload, 'expires_at', opts.expiresAt)
+  putIfPresent(payload, 'quiesce_mode', opts.quiesceMode)
+  return payload
+}
+
+function snapshotInfo(value: Record<string, unknown>): SnapshotInfo {
+  const id = value.snapshot_id ?? value.snapshotId ?? value.checkpoint_id ?? value.checkpointId ?? value.id
+  if (id === undefined) throw new SandboxError('snapshot response did not include id')
+  return {
+    snapshotId: String(id),
+    sandboxId: stringValue(value.sandbox_id ?? value.sandboxId),
+    name: stringValue(value.name),
+    status: stringValue(value.status),
+    sizeBytes: numberValue(value.size_bytes ?? value.sizeBytes),
+    createdAt: stringValue(value.created_at ?? value.createdAt),
+    expiresAt: stringValue(value.expires_at ?? value.expiresAt),
+    raw: value,
+  }
+}
+
+function stringValue(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  return undefined
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined
 }
 
 function templateSlug(value: unknown): string | undefined {

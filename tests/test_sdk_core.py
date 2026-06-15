@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
-from watasu import CommandExitException, CommandResult, ConnectionConfig, Sandbox
+from watasu import (
+    AsyncSandbox,
+    CommandExitException,
+    CommandResult,
+    ConnectionConfig,
+    Sandbox,
+)
 from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.filesystem.filesystem import FileType
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
@@ -350,3 +357,197 @@ def test_sandbox_create_requires_session_from_api(monkeypatch):
 
     with pytest.raises(Exception, match="sandbox session is required"):
         Sandbox.create(api_key="key", template="base:82")
+
+
+def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
+    calls = []
+
+    class Control:
+        def get(self, path, **kwargs):
+            calls.append(("get", path, kwargs))
+            if path.endswith("/metrics"):
+                return {
+                    "metrics": {
+                        "sandbox_id": "123",
+                        "state": "ready",
+                        "backend": "firecracker",
+                    }
+                }
+            if path.endswith("/checkpoints"):
+                return {
+                    "sandbox_checkpoints": [
+                        {
+                            "id": 9,
+                            "sandbox_id": "123",
+                            "name": "ready",
+                            "status": "ready",
+                        }
+                    ]
+                }
+            raise AssertionError(f"unexpected GET {path}")
+
+        def post(self, path, **kwargs):
+            calls.append(("post", path, kwargs))
+            if path.endswith("/checkpoints"):
+                return {
+                    "sandbox_checkpoint": {
+                        "id": 9,
+                        "sandbox_id": "123",
+                        "name": "ready",
+                        "status": "pending",
+                    }
+                }
+            if path.endswith("/restore"):
+                return {
+                    "sandbox": {
+                        "id": "restored",
+                        "state": "restoring",
+                        "template_id": "base",
+                    }
+                }
+            raise AssertionError(f"unexpected POST {path}")
+
+    sbx = Sandbox(
+        "123",
+        connection_config=ConnectionConfig(api_key="key"),
+        control=Control(),
+        session={
+            "data_plane_url": "https://route.sandbox.watasuhost.com",
+            "token": "data",
+        },
+        sandbox={},
+    )
+
+    metrics = sbx.get_metrics()
+    snapshot = sbx.create_snapshot(name="ready", metadata={"reason": "test"})
+    snapshots = sbx.list_snapshots().list_items()
+    restored = sbx.restore(snapshot_id=snapshot.snapshot_id, timeout=120)
+
+    assert metrics[0].backend == "firecracker"
+    assert snapshot.snapshot_id == "9"
+    assert snapshots[0].status == "ready"
+    assert restored.sandbox_id == "restored"
+    assert calls == [
+        (
+            "get",
+            "/sandboxes/123/metrics",
+            {"resource": "sandbox", "request_timeout": None},
+        ),
+        (
+            "post",
+            "/sandboxes/123/checkpoints",
+            {
+                "json": {"name": "ready", "metadata": {"reason": "test"}},
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
+        ),
+        (
+            "get",
+            "/sandboxes/123/checkpoints",
+            {"resource": "sandbox", "request_timeout": None},
+        ),
+        (
+            "post",
+            "/sandboxes/123/restore",
+            {
+                "json": {"checkpoint_id": "9", "timeout_seconds": 120},
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
+        ),
+    ]
+
+
+def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            pass
+
+        def post(self, path, **kwargs):
+            calls.append(("post", path, kwargs))
+            if path == "/sandboxes":
+                return {
+                    "sandbox": {"id": "async-123"},
+                    "session": {
+                        "data_plane_url": "https://route.sandbox.watasuhost.com",
+                        "token": "data",
+                    },
+                }
+            if path.endswith("/checkpoints"):
+                return {
+                    "sandbox_checkpoint": {
+                        "id": 10,
+                        "sandbox_id": "async-123",
+                        "status": "ready",
+                    }
+                }
+            raise AssertionError(f"unexpected POST {path}")
+
+        def get(self, path, **kwargs):
+            calls.append(("get", path, kwargs))
+            if path.endswith("/metrics"):
+                return {"metrics": {"sandbox_id": "async-123", "cpu_count": 0}}
+            if path.endswith("/checkpoints"):
+                return {
+                    "sandbox_checkpoints": [
+                        {"id": 10, "sandbox_id": "async-123", "status": "ready"}
+                    ]
+                }
+            raise AssertionError(f"unexpected GET {path}")
+
+        def delete(self, path, **kwargs):
+            calls.append(("delete", path, kwargs))
+            return {}
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    async def scenario():
+        async with await AsyncSandbox.create(api_key="key") as sbx:
+            metrics = await sbx.get_metrics()
+            snapshot = await sbx.create_snapshot()
+            snapshots = await sbx.list_snapshots().list_items()
+            return sbx.sandbox_id, metrics, snapshot, snapshots
+
+    sandbox_id, metrics, snapshot, snapshots = asyncio.run(scenario())
+
+    assert sandbox_id == "async-123"
+    assert metrics[0].cpu_count == 0
+    assert snapshot.snapshot_id == "10"
+    assert snapshots[0].snapshot_id == "10"
+    assert calls == [
+        (
+            "post",
+            "/sandboxes",
+            {
+                "json": {
+                    "template_id": "base",
+                    "timeout": 300,
+                    "metadata": {},
+                    "env_vars": {},
+                    "secure": True,
+                    "allow_internet_access": True,
+                },
+                "resource": "sandbox",
+                "request_timeout": 150,
+            },
+        ),
+        (
+            "get",
+            "/sandboxes/async-123/metrics",
+            {"resource": "sandbox", "request_timeout": None},
+        ),
+        (
+            "post",
+            "/sandboxes/async-123/checkpoints",
+            {"json": {}, "resource": "sandbox", "request_timeout": None},
+        ),
+        (
+            "get",
+            "/sandboxes/async-123/checkpoints",
+            {"resource": "sandbox", "request_timeout": None},
+        ),
+        ("delete", "/sandboxes/async-123", {"resource": "sandbox"}),
+    ]

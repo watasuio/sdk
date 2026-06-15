@@ -41,4 +41,7 @@ pub use config::{ConnectionConfig, ConnectionOptions, KEEPALIVE_PING_INTERVAL_SE
 pub use error::{Error, Result};
 pub use filesystem::{EntryInfo, FileType, Filesystem, WriteInfo};
 pub use process_socket::{decode_runtime_data, encode_runtime_data, ProcessSocket};
-pub use sandbox::{CreateOptions, Sandbox, SandboxInfo};
+pub use sandbox::{
+    CreateOptions, CreateSnapshotOptions, RestoreOptions, Sandbox, SandboxInfo, SandboxMetrics,
+    SnapshotInfo,
+};

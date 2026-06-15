@@ -14,10 +14,15 @@ from watasu.exceptions import (
     NotFoundException,
     SandboxException,
 )
-from watasu.sandbox.sandbox_api import SandboxInfo, sandbox_info_from_api
+from watasu.sandbox.sandbox_api import (
+    SandboxInfo,
+    sandbox_info_from_api,
+    sandbox_metrics_from_api,
+    snapshot_info_from_api,
+)
 from watasu.sandbox_sync.commands.command import Commands
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
-from watasu.sandbox_sync.paginator import SandboxPaginator
+from watasu.sandbox_sync.paginator import SandboxPaginator, SnapshotPaginator
 from watasu.stubs import unsupported
 
 
@@ -303,6 +308,150 @@ class Sandbox:
 
     get_info = _DualMethod(_get_info_instance, _get_info_class)
 
+    def _get_metrics_instance(self, **opts: ApiParams):
+        """Fetch latest sandbox metrics."""
+        payload = self._control.get(
+            f"/sandboxes/{self.sandbox_id}/metrics",
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        metrics = payload.get("metrics", payload)
+        if isinstance(metrics, list):
+            return [sandbox_metrics_from_api(item or {}) for item in metrics]
+        return [sandbox_metrics_from_api(metrics or {})]
+
+    @classmethod
+    def _get_metrics_class(cls, sandbox_id: str, **opts: ApiParams):
+        """Fetch sandbox metrics by id."""
+        config = ConnectionConfig(**opts)
+        control = ControlClient(config)
+        payload = control.get(
+            f"/sandboxes/{sandbox_id}/metrics",
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        metrics = payload.get("metrics", payload)
+        if isinstance(metrics, list):
+            return [sandbox_metrics_from_api(item or {}) for item in metrics]
+        return [sandbox_metrics_from_api(metrics or {})]
+
+    get_metrics = _DualMethod(_get_metrics_instance, _get_metrics_class)
+
+    def _create_snapshot_instance(
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        expires_at: Optional[str] = None,
+        quiesce_mode: Optional[str] = None,
+        **opts: ApiParams,
+    ):
+        """Create a Watasu checkpoint using snapshot naming."""
+        body = _compact(
+            {
+                "name": name,
+                "metadata": metadata,
+                "expires_at": expires_at,
+                "quiesce_mode": quiesce_mode,
+            }
+        )
+        payload = self._control.post(
+            f"/sandboxes/{self.sandbox_id}/checkpoints",
+            json=body,
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        return snapshot_info_from_api(
+            payload.get("sandbox_checkpoint") or payload.get("snapshot") or payload
+        )
+
+    @classmethod
+    def _create_snapshot_class(
+        cls,
+        sandbox_id: str,
+        name: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        expires_at: Optional[str] = None,
+        quiesce_mode: Optional[str] = None,
+        **opts: ApiParams,
+    ):
+        """Create a Watasu checkpoint by sandbox id."""
+        config = ConnectionConfig(**opts)
+        control = ControlClient(config)
+        body = _compact(
+            {
+                "name": name,
+                "metadata": metadata,
+                "expires_at": expires_at,
+                "quiesce_mode": quiesce_mode,
+            }
+        )
+        payload = control.post(
+            f"/sandboxes/{sandbox_id}/checkpoints",
+            json=body,
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        return snapshot_info_from_api(
+            payload.get("sandbox_checkpoint") or payload.get("snapshot") or payload
+        )
+
+    create_snapshot = _DualMethod(_create_snapshot_instance, _create_snapshot_class)
+
+    def checkpoint(self, *args, **kwargs):
+        """Watasu-native alias for ``create_snapshot``."""
+        return self.create_snapshot(*args, **kwargs)
+
+    def _list_snapshots_instance(self, **opts: ApiParams):
+        """List checkpoints for this sandbox using snapshot naming."""
+        payload = self._control.get(
+            f"/sandboxes/{self.sandbox_id}/checkpoints",
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        checkpoints = payload.get("sandbox_checkpoints") or []
+        return SnapshotPaginator([snapshot_info_from_api(item) for item in checkpoints])
+
+    @classmethod
+    def _list_snapshots_class(cls, sandbox_id: str, **opts: ApiParams):
+        """List checkpoints for a sandbox by id."""
+        config = ConnectionConfig(**opts)
+        control = ControlClient(config)
+        payload = control.get(
+            f"/sandboxes/{sandbox_id}/checkpoints",
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        checkpoints = payload.get("sandbox_checkpoints") or []
+        return SnapshotPaginator([snapshot_info_from_api(item) for item in checkpoints])
+
+    list_snapshots = _DualMethod(_list_snapshots_instance, _list_snapshots_class)
+
+    def restore(
+        self,
+        checkpoint_id=None,
+        *,
+        snapshot_id=None,
+        timeout: Optional[int] = None,
+        timeout_seconds: Optional[int] = None,
+        **opts: ApiParams,
+    ) -> SandboxInfo:
+        """Restore a checkpoint into a new sandbox and return its metadata."""
+        selected_checkpoint_id = checkpoint_id if checkpoint_id is not None else snapshot_id
+        if selected_checkpoint_id is None:
+            raise InvalidArgumentException("checkpoint_id or snapshot_id is required")
+        body = {"checkpoint_id": selected_checkpoint_id}
+        if timeout_seconds is not None:
+            body["timeout_seconds"] = timeout_seconds
+        elif timeout is not None:
+            body["timeout_seconds"] = timeout
+        payload = self._control.post(
+            f"/sandboxes/{self.sandbox_id}/restore",
+            json=body,
+            resource="sandbox",
+            request_timeout=opts.get("request_timeout"),
+        )
+        return sandbox_info_from_api(payload.get("sandbox") or payload)
+
     @staticmethod
     def list(**opts: ApiParams) -> SandboxPaginator[SandboxInfo]:
         """List sandboxes visible to the configured API token."""
@@ -325,6 +474,9 @@ class Sandbox:
             return f"p{port}-{route_token}.sandbox.{self.connection_config.data_plane_domain}"
         return _host_only(host_or_url)
 
+    def update_network(self, *args, **kwargs):
+        unsupported("Sandbox.update_network")
+
     def pause(self, *args, **kwargs) -> bool:
         unsupported("Sandbox.pause")
 
@@ -333,14 +485,8 @@ class Sandbox:
     def resume(self, *args, **kwargs) -> bool:
         unsupported("Sandbox.resume")
 
-    def create_snapshot(self, *args, **kwargs):
-        unsupported("Sandbox.create_snapshot")
-
-    def checkpoint(self, *args, **kwargs):
-        unsupported("Sandbox.checkpoint")
-
-    def restore(self, *args, **kwargs):
-        unsupported("Sandbox.restore")
+    def delete_snapshot(self, *args, **kwargs):
+        unsupported("Sandbox.delete_snapshot")
 
     def __enter__(self):
         """Enter a context manager without changing sandbox state."""
@@ -373,6 +519,10 @@ def _reject_unsupported_opts(opts: Dict, keys: Iterable[str]) -> None:
     for key in keys:
         if key in opts and opts[key] is not None:
             unsupported(key)
+
+
+def _compact(payload: Dict) -> Dict:
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 def _session_operation_request_timeout(config: ConnectionConfig, opts: Dict) -> float:

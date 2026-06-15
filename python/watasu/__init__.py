@@ -65,13 +65,12 @@ from .sandbox.sandbox_api import (
     SnapshotInfo,
     get_signature,
 )
-from .sandbox_async.main import AsyncSandbox
+from .sandbox_async.main import AsyncSandbox, AsyncSnapshotPaginator
 from .sandbox_sync.commands.command_handle import CommandHandle
 from .sandbox_sync.filesystem.watch_handle import WatchHandle
 from .sandbox_sync.main import Sandbox
 from .sandbox_sync.paginator import SandboxPaginator, SnapshotPaginator
 from .stubs import (
-    AsyncSnapshotPaginator,
     AsyncTemplate,
     AsyncVolume,
     AsyncWatchHandle,

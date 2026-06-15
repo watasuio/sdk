@@ -37,6 +37,10 @@ class SandboxNetworkInfo:
 
 @dataclass
 class SandboxMetrics:
+    sandbox_id: Optional[str] = None
+    state: Optional[str] = None
+    node: Optional[str] = None
+    backend: Optional[str] = None
     cpu_count: Optional[int] = None
     memory_mb: Optional[int] = None
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -45,6 +49,12 @@ class SandboxMetrics:
 @dataclass
 class SnapshotInfo:
     snapshot_id: str
+    sandbox_id: Optional[str] = None
+    name: Optional[str] = None
+    status: Optional[str] = None
+    size_bytes: Optional[int] = None
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -84,6 +94,60 @@ def sandbox_info_from_api(payload: Dict[str, Any]) -> SandboxInfo:
         end_at=payload.get("end_at") or payload.get("deadline_at"),
         raw=payload,
     )
+
+
+def sandbox_metrics_from_api(payload: Dict[str, Any]) -> SandboxMetrics:
+    return SandboxMetrics(
+        sandbox_id=_string(_first(payload, "sandbox_id", "sandboxId")),
+        state=_string(payload.get("state")),
+        node=_string(payload.get("node")),
+        backend=_string(payload.get("backend")),
+        cpu_count=_int(_first(payload, "cpu_count", "cpuCount")),
+        memory_mb=_int(_first(payload, "memory_mb", "memoryMb")),
+        raw=payload,
+    )
+
+
+def snapshot_info_from_api(payload: Dict[str, Any]) -> SnapshotInfo:
+    snapshot_id = (
+        payload.get("snapshot_id")
+        or payload.get("snapshotId")
+        or payload.get("checkpoint_id")
+        or payload.get("checkpointId")
+        or payload.get("id")
+    )
+    return SnapshotInfo(
+        snapshot_id=str(snapshot_id or ""),
+        sandbox_id=_string(_first(payload, "sandbox_id", "sandboxId")),
+        name=_string(payload.get("name")),
+        status=_string(payload.get("status")),
+        size_bytes=_int(_first(payload, "size_bytes", "sizeBytes")),
+        created_at=_string(_first(payload, "created_at", "createdAt")),
+        expires_at=_string(_first(payload, "expires_at", "expiresAt")),
+        raw=payload,
+    )
+
+
+def _first(payload: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload:
+            return payload[key]
+    return None
+
+
+def _string(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_signature(*_args: Any, **_kwargs: Any) -> str:

@@ -76,6 +76,68 @@ pub struct SandboxInfo {
     pub end_at: Option<String>,
 }
 
+/// Runtime metrics returned for a sandbox.
+#[derive(Clone, Debug, Default)]
+pub struct SandboxMetrics {
+    /// Sandbox id.
+    pub sandbox_id: Option<String>,
+    /// Current sandbox lifecycle state.
+    pub state: Option<String>,
+    /// Runtime node name.
+    pub node: Option<String>,
+    /// Runtime backend name.
+    pub backend: Option<String>,
+    /// vCPU count, when returned by the API.
+    pub cpu_count: Option<u64>,
+    /// Memory in MiB, when returned by the API.
+    pub memory_mb: Option<u64>,
+    /// Full raw metrics payload.
+    pub raw: Value,
+}
+
+/// Watasu checkpoint metadata exposed with snapshot naming.
+#[derive(Clone, Debug, Default)]
+pub struct SnapshotInfo {
+    /// Snapshot/checkpoint id.
+    pub snapshot_id: String,
+    /// Source sandbox id.
+    pub sandbox_id: Option<String>,
+    /// Snapshot/checkpoint name.
+    pub name: Option<String>,
+    /// Snapshot/checkpoint status.
+    pub status: Option<String>,
+    /// Snapshot/checkpoint size in bytes.
+    pub size_bytes: Option<u64>,
+    /// Creation timestamp.
+    pub created_at: Option<String>,
+    /// Expiration timestamp.
+    pub expires_at: Option<String>,
+    /// Full raw snapshot payload.
+    pub raw: Value,
+}
+
+/// Options for creating a Watasu checkpoint.
+#[derive(Clone, Debug, Default)]
+pub struct CreateSnapshotOptions {
+    /// Optional checkpoint name.
+    pub name: Option<String>,
+    /// Optional metadata stored with the checkpoint.
+    pub metadata: serde_json::Map<String, Value>,
+    /// Optional expiration timestamp.
+    pub expires_at: Option<String>,
+    /// Optional quiesce mode.
+    pub quiesce_mode: Option<String>,
+}
+
+/// Options for restoring a checkpoint.
+#[derive(Clone, Debug)]
+pub struct RestoreOptions {
+    /// Checkpoint/snapshot id to restore.
+    pub checkpoint_id: String,
+    /// Optional restored sandbox lifetime in seconds.
+    pub timeout_seconds: Option<u64>,
+}
+
 /// Running Watasu sandbox with ready `commands` and `files` helpers.
 pub struct Sandbox {
     /// Sandbox id.
@@ -151,6 +213,79 @@ impl Sandbox {
             .delete(&format!("/sandboxes/{}", self.sandbox_id))
             .await?;
         Ok(true)
+    }
+
+    /// Fetch sandbox metrics by id.
+    pub async fn get_metrics_by_id(
+        sandbox_id: impl ToString,
+        connection: ConnectionOptions,
+    ) -> Result<Vec<SandboxMetrics>> {
+        let sandbox_id = sandbox_id.to_string();
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        let payload = control
+            .get(&format!("/sandboxes/{sandbox_id}/metrics"))
+            .await?;
+        Ok(metrics_list(payload.get("metrics").unwrap_or(&payload)))
+    }
+
+    /// Fetch latest sandbox metrics.
+    pub async fn get_metrics(&self) -> Result<Vec<SandboxMetrics>> {
+        let payload = self
+            .control
+            .get(&format!("/sandboxes/{}/metrics", self.sandbox_id))
+            .await?;
+        Ok(metrics_list(payload.get("metrics").unwrap_or(&payload)))
+    }
+
+    /// Create a Watasu checkpoint using snapshot naming.
+    pub async fn create_snapshot(&self, opts: CreateSnapshotOptions) -> Result<SnapshotInfo> {
+        let response = self
+            .control
+            .post(
+                &format!("/sandboxes/{}/checkpoints", self.sandbox_id),
+                snapshot_payload(opts),
+            )
+            .await?;
+        Ok(snapshot_info(
+            response
+                .get("sandbox_checkpoint")
+                .or_else(|| response.get("snapshot"))
+                .unwrap_or(&response),
+        ))
+    }
+
+    /// List checkpoints for this sandbox using snapshot naming.
+    pub async fn list_snapshots(&self) -> Result<Vec<SnapshotInfo>> {
+        let payload = self
+            .control
+            .get(&format!("/sandboxes/{}/checkpoints", self.sandbox_id))
+            .await?;
+        Ok(payload
+            .get("sandbox_checkpoints")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| snapshot_info(&value))
+            .collect())
+    }
+
+    /// Restore a checkpoint into a new sandbox and return its control-plane metadata.
+    pub async fn restore(&self, opts: RestoreOptions) -> Result<SandboxInfo> {
+        let mut body = serde_json::Map::new();
+        body.insert("checkpoint_id".into(), Value::String(opts.checkpoint_id));
+        if let Some(timeout_seconds) = opts.timeout_seconds {
+            body.insert("timeout_seconds".into(), Value::from(timeout_seconds));
+        }
+        let payload = self
+            .control
+            .post(
+                &format!("/sandboxes/{}/restore", self.sandbox_id),
+                Value::Object(body),
+            )
+            .await?;
+        Ok(sandbox_info(payload.get("sandbox").unwrap_or(&payload)))
     }
 
     /// Set this sandbox's lifetime in seconds.
@@ -301,6 +436,83 @@ fn sandbox_info(value: &Value) -> SandboxInfo {
     }
 }
 
+fn metrics_list(value: &Value) -> Vec<SandboxMetrics> {
+    if let Some(items) = value.as_array() {
+        items.iter().map(metrics_info).collect()
+    } else {
+        vec![metrics_info(value)]
+    }
+}
+
+fn metrics_info(value: &Value) -> SandboxMetrics {
+    SandboxMetrics {
+        sandbox_id: string_value(value, &["sandbox_id", "sandboxId"]),
+        state: string_value(value, &["state"]),
+        node: string_value(value, &["node"]),
+        backend: string_value(value, &["backend"]),
+        cpu_count: u64_value(value, &["cpu_count", "cpuCount"]),
+        memory_mb: u64_value(value, &["memory_mb", "memoryMb"]),
+        raw: value.clone(),
+    }
+}
+
+fn snapshot_payload(opts: CreateSnapshotOptions) -> Value {
+    let mut body = serde_json::Map::new();
+    if let Some(name) = opts.name {
+        body.insert("name".into(), Value::String(name));
+    }
+    if !opts.metadata.is_empty() {
+        body.insert("metadata".into(), Value::Object(opts.metadata));
+    }
+    if let Some(expires_at) = opts.expires_at {
+        body.insert("expires_at".into(), Value::String(expires_at));
+    }
+    if let Some(quiesce_mode) = opts.quiesce_mode {
+        body.insert("quiesce_mode".into(), Value::String(quiesce_mode));
+    }
+    Value::Object(body)
+}
+
+fn snapshot_info(value: &Value) -> SnapshotInfo {
+    SnapshotInfo {
+        snapshot_id: string_value(
+            value,
+            &[
+                "snapshot_id",
+                "snapshotId",
+                "checkpoint_id",
+                "checkpointId",
+                "id",
+            ],
+        )
+        .unwrap_or_default(),
+        sandbox_id: string_value(value, &["sandbox_id", "sandboxId"]),
+        name: string_value(value, &["name"]),
+        status: string_value(value, &["status"]),
+        size_bytes: u64_value(value, &["size_bytes", "sizeBytes"]),
+        created_at: string_value(value, &["created_at", "createdAt"]),
+        expires_at: string_value(value, &["expires_at", "expiresAt"]),
+        raw: value.clone(),
+    }
+}
+
+fn string_value(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .or_else(|| value.as_u64().map(|number| number.to_string()))
+        })
+}
+
+fn u64_value(value: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(Value::as_u64)
+}
+
 fn put_if_some(map: &mut serde_json::Map<String, Value>, key: &str, value: Option<u64>) {
     if let Some(value) = value {
         map.insert(key.to_string(), Value::from(value));
@@ -327,11 +539,40 @@ fn host_only(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
+
+    use super::{metrics_list, snapshot_info};
 
     #[test]
     fn runtime_base64_helpers_match_protocol() {
         assert_eq!(decode_runtime_data("NAo="), "4\n");
         assert_eq!(encode_runtime_data("hi\n"), "aGkK");
+    }
+
+    #[test]
+    fn maps_metrics_payload() {
+        let metrics =
+            metrics_list(&json!({"sandbox_id": 42, "state": "ready", "backend": "firecracker"}));
+
+        assert_eq!(metrics[0].sandbox_id.as_deref(), Some("42"));
+        assert_eq!(metrics[0].state.as_deref(), Some("ready"));
+        assert_eq!(metrics[0].backend.as_deref(), Some("firecracker"));
+    }
+
+    #[test]
+    fn maps_checkpoint_payload_as_snapshot() {
+        let snapshot = snapshot_info(&json!({
+            "id": 7,
+            "sandbox_id": 42,
+            "name": "ready",
+            "status": "pending",
+            "size_bytes": 123
+        }));
+
+        assert_eq!(snapshot.snapshot_id, "7");
+        assert_eq!(snapshot.sandbox_id.as_deref(), Some("42"));
+        assert_eq!(snapshot.size_bytes, Some(123));
     }
 }

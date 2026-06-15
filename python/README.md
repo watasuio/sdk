@@ -36,6 +36,21 @@ with Sandbox.create() as sbx:
 
 Leaving the context manager calls `kill()`.
 
+## Metrics And Snapshots
+
+```python
+from watasu import Sandbox
+
+with Sandbox.create() as sbx:
+    metrics = sbx.get_metrics()
+    snapshot = sbx.create_snapshot(name="ready")
+    snapshots = sbx.list_snapshots().list_items()
+    restored = sbx.restore(snapshot_id=snapshot.snapshot_id)
+```
+
+Watasu snapshots are backed by sandbox checkpoints. Use the returned
+`snapshot_id` when restoring from a checkpoint.
+
 ## Async API
 
 ```python
@@ -43,9 +58,14 @@ from watasu import AsyncSandbox
 
 
 async def main() -> None:
-    sbx = await AsyncSandbox.create()
-    await sbx.kill()
+    async with await AsyncSandbox.create() as sbx:
+        result = await sbx.commands.run("echo hello")
+        print(result.stdout)
+
+        metrics = await sbx.get_metrics()
+        snapshot = await sbx.create_snapshot(name="ready")
+        snapshots = await sbx.list_snapshots().list_items()
 ```
 
-Unsupported compatibility surfaces raise explicit not-implemented errors instead
-of silently falling back to client-side polling.
+Unsupported surfaces raise explicit not-implemented errors instead of silently
+falling back to client-side polling.
