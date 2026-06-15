@@ -14,6 +14,7 @@ import {
   ProcessManager,
   ProcessOutput,
   ProcessSocket,
+  Pty,
   Sandbox,
   SandboxError,
   SandboxPaginator,
@@ -137,6 +138,26 @@ test('command handle can close stdin without disconnecting', async () => {
   assert.equal(commands.supportsStdinClose, true)
   assert.equal(closeCount, 1)
   assert.deepEqual(sent, [{ type: 'close_stdin' }])
+})
+
+test('pty kill forwards per-call request options', async () => {
+  const controller = new AbortController()
+  const calls = []
+  const pty = new Pty({
+    postJson(path, opts) {
+      calls.push([path, opts])
+      return Promise.resolve({})
+    },
+  }, new ConnectionConfig({ apiKey: 'key' }))
+
+  assert.equal(await pty.kill(123, { requestTimeoutMs: 5, signal: controller.signal }), true)
+  assert.deepEqual(calls, [
+    ['/runtime/v1/process/123/signal', {
+      json: { signal: 'SIGKILL' },
+      requestTimeoutMs: 5,
+      signal: controller.signal,
+    }],
+  ])
 })
 
 test('sandbox construction requires a session', () => {

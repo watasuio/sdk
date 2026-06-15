@@ -1,5 +1,5 @@
 import { CommandHandle, CommandStartOpts } from './commands.js'
-import { ConnectionConfig } from './connectionConfig.js'
+import { ConnectionConfig, type ConnectionOpts } from './connectionConfig.js'
 import { ProcessFrame, ProcessSocket } from './processSocket.js'
 import { DataPlaneClient } from './transport.js'
 import { SandboxError } from './errors.js'
@@ -98,9 +98,11 @@ export class Pty {
   }
 
   /** Kill a running PTY. */
-  async kill(pid: number | string): Promise<boolean> {
+  async kill(pid: number | string, opts: Pick<ConnectionOpts, 'requestTimeoutMs' | 'signal'> = {}): Promise<boolean> {
     await this.dataPlane.postJson(`/runtime/v1/process/${pid}/signal`, {
       json: { signal: 'SIGKILL' },
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return true
   }
