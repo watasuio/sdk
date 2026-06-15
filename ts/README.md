@@ -217,7 +217,10 @@ instructions into Watasu's package-spec builder.
 import { Sandbox } from '@watasu/sdk'
 
 const sbx = await Sandbox.create()
-const metrics = await sbx.getMetrics()
+const metrics = await sbx.getMetrics({
+  start: new Date(Date.now() - 5 * 60_000),
+  end: new Date(),
+})
 const snapshot = await sbx.createSnapshot({ name: 'ready' })
 const snapshots = await sbx.listSnapshots().nextItems()
 const allSnapshots = await Sandbox.listSnapshots({ limit: 100 }).nextItems()

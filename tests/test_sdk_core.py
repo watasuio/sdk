@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import datetime
 import json
 
 import pytest
@@ -1515,7 +1516,10 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
         sandbox={},
     )
 
-    metrics = sbx.get_metrics()
+    metrics = sbx.get_metrics(
+        start=datetime.datetime(2025, 11, 4, 12, 40, tzinfo=datetime.timezone.utc),
+        end=datetime.datetime(2025, 11, 4, 12, 41, tzinfo=datetime.timezone.utc),
+    )
     snapshot = sbx.create_snapshot(name="ready", metadata={"reason": "test"})
     snapshots = sbx.list_snapshots().list_items()
     restored = sbx.restore(snapshot_id=snapshot.snapshot_id, timeout=120)
@@ -1534,7 +1538,11 @@ def test_sandbox_metrics_and_snapshots_use_control_plane_routes():
         (
             "get",
             "/sandboxes/123/metrics",
-            {"resource": "sandbox", "request_timeout": None},
+            {
+                "params": [("start", "1762260000"), ("end", "1762260060")],
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
         ),
         (
             "post",
@@ -1686,7 +1694,14 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
 
     async def scenario():
         async with await AsyncSandbox.create(api_key="key") as sbx:
-            metrics = await sbx.get_metrics()
+            metrics = await sbx.get_metrics(
+                start=datetime.datetime(
+                    2025, 11, 4, 12, 40, tzinfo=datetime.timezone.utc
+                ),
+                end=datetime.datetime(
+                    2025, 11, 4, 12, 41, tzinfo=datetime.timezone.utc
+                ),
+            )
             snapshot = await sbx.create_snapshot()
             snapshots = await sbx.list_snapshots().list_items()
             await sbx.update_network(
@@ -1726,7 +1741,11 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
         (
             "get",
             "/sandboxes/async-123/metrics",
-            {"resource": "sandbox", "request_timeout": None},
+            {
+                "params": [("start", "1762260000"), ("end", "1762260060")],
+                "resource": "sandbox",
+                "request_timeout": None,
+            },
         ),
         (
             "post",

@@ -870,7 +870,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
   try {
     globalThis.fetch = async (url, init = {}) => {
       requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
-      if (String(url).endsWith('/metrics')) {
+      if (new URL(String(url)).pathname.endsWith('/metrics')) {
         return new Response(
           JSON.stringify({ metrics: { sandbox_id: '1', state: 'ready', backend: 'firecracker' } }),
           { status: 200, headers: { 'content-type': 'application/json' } }
@@ -924,7 +924,10 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
       sandbox: { route_token: 'route-token' },
     })
 
-    const metrics = await sbx.getMetrics()
+    const metrics = await sbx.getMetrics({
+      start: new Date('2025-11-04T12:40:00Z'),
+      end: new Date('2025-11-04T12:41:00Z'),
+    })
     const snapshot = await sbx.createSnapshot({ name: 'ready', metadata: { reason: 'test' } })
     const snapshots = await sbx.listSnapshots().nextItems()
     const restored = await sbx.restore({ snapshotId: snapshot.snapshotId, timeoutMs: 120_000 })
@@ -948,7 +951,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     assert.equal(mcpToken, 'gateway-token')
     assert.equal(cachedMcpToken, 'gateway-token')
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
-      ['GET', 'https://api.watasu.io/v1/sandboxes/1/metrics', undefined],
+      ['GET', 'https://api.watasu.io/v1/sandboxes/1/metrics?start=1762260000&end=1762260060', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/snapshots', { name: 'ready', metadata: { reason: 'test' } }],
       ['GET', 'https://api.watasu.io/v1/sandbox_snapshots?sandbox_id=1', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/restore', { checkpoint_id: '9', timeout_seconds: 120 }],

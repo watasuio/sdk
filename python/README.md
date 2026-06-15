@@ -238,10 +238,16 @@ into Watasu's package-spec builder.
 ## Metrics And Snapshots
 
 ```python
+import datetime
+
 from watasu import Sandbox
 
 with Sandbox.create() as sbx:
-    metrics = sbx.get_metrics()
+    metrics = sbx.get_metrics(
+        start=datetime.datetime.now(datetime.timezone.utc)
+        - datetime.timedelta(minutes=5),
+        end=datetime.datetime.now(datetime.timezone.utc),
+    )
     snapshot = sbx.create_snapshot(name="ready")
     snapshots = sbx.list_snapshots().list_items()
     all_snapshots = Sandbox.list_snapshots(limit=100).next_items()
@@ -255,6 +261,8 @@ Watasu snapshots are backed by sandbox checkpoints. Use the returned
 ## Async API
 
 ```python
+import datetime
+
 from watasu import AsyncSandbox
 
 
@@ -263,7 +271,11 @@ async def main() -> None:
         result = await sbx.commands.run("echo hello")
         print(result.stdout)
 
-        metrics = await sbx.get_metrics()
+        metrics = await sbx.get_metrics(
+            start=datetime.datetime.now(datetime.timezone.utc)
+            - datetime.timedelta(minutes=5),
+            end=datetime.datetime.now(datetime.timezone.utc),
+        )
         snapshot = await sbx.create_snapshot(name="ready")
         snapshots = await sbx.list_snapshots().list_items()
         all_snapshots = await AsyncSandbox.list_snapshots(limit=100).list_items()

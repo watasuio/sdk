@@ -1,6 +1,6 @@
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
-import { DataPlaneClient, ControlClient } from './transport.js'
+import { DataPlaneClient, ControlClient, withQuery } from './transport.js'
 import { ConflictError, FileNotFoundError, NotFoundError, SandboxError, unsupported } from './errors.js'
 import { Filesystem } from './filesystem.js'
 import { Git } from './git.js'
@@ -93,6 +93,13 @@ export interface SandboxMetrics {
   cpuCount?: number
   memoryMb?: number
   raw: Record<string, unknown>
+}
+
+export interface SandboxMetricsOpts extends ConnectionOpts {
+  /** Start time for the metrics. Defaults to the sandbox start time. */
+  start?: Date
+  /** End time for the metrics. Defaults to the current time. */
+  end?: Date
 }
 
 export interface SnapshotInfo {
@@ -394,9 +401,9 @@ export class Sandbox {
   }
 
   /** Fetch sandbox metrics by id. */
-  static async getMetrics(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxMetrics[]> {
+  static async getMetrics(sandboxId: string, opts: SandboxMetricsOpts = {}): Promise<SandboxMetrics[]> {
     const control = new ControlClient(new ConnectionConfig(opts))
-    const payload = await control.get(`/sandboxes/${sandboxId}/metrics`, {
+    const payload = await control.get(metricsPath(sandboxId, opts), {
       requestTimeoutMs: opts.requestTimeoutMs,
     })
     return metricsList(payload.metrics ?? payload)
@@ -504,7 +511,7 @@ export class Sandbox {
   }
 
   /** Fetch latest sandbox metrics. */
-  async getMetrics(opts: ConnectionOpts = {}): Promise<SandboxMetrics[]> {
+  async getMetrics(opts: SandboxMetricsOpts = {}): Promise<SandboxMetrics[]> {
     return Sandbox.getMetrics(this.sandboxId, { ...this.configOptions(), ...opts })
   }
 
@@ -722,6 +729,17 @@ function snapshotListPath(opts: SnapshotListOpts, nextToken: string | undefined)
 
   const query = params.toString()
   return query ? `/sandbox_snapshots?${query}` : '/sandbox_snapshots'
+}
+
+function metricsPath(sandboxId: string, opts: SandboxMetricsOpts): string {
+  return withQuery(`/sandboxes/${sandboxId}/metrics`, {
+    start: dateTimestampSeconds(opts.start),
+    end: dateTimestampSeconds(opts.end),
+  })
+}
+
+function dateTimestampSeconds(value: Date | undefined): number | undefined {
+  return value === undefined ? undefined : Math.round(value.getTime() / 1000)
 }
 
 function fileUrlInfo(payload: Record<string, unknown>): FileUrlInfo {

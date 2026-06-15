@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import inspect
 from typing import Callable, Dict, List, Optional, Union
 
@@ -641,16 +642,27 @@ class AsyncSandbox:
 
     get_info = _AsyncDualMethod(_get_info_instance, _get_info_class)
 
-    async def _get_metrics_instance(self, **opts: ApiParams) -> List[SandboxMetrics]:
+    async def _get_metrics_instance(
+        self,
+        start: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        **opts: ApiParams,
+    ) -> List[SandboxMetrics]:
         """Fetch latest sandbox metrics."""
-        return await asyncio.to_thread(self._sync.get_metrics, **opts)
+        return await asyncio.to_thread(self._sync.get_metrics, start=start, end=end, **opts)
 
     @classmethod
     async def _get_metrics_class(
-        cls, sandbox_id: str, **opts: ApiParams
+        cls,
+        sandbox_id: str,
+        start: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        **opts: ApiParams,
     ) -> List[SandboxMetrics]:
         """Fetch sandbox metrics by id."""
-        return await asyncio.to_thread(Sandbox.get_metrics, sandbox_id, **opts)
+        return await asyncio.to_thread(
+            Sandbox.get_metrics, sandbox_id, start=start, end=end, **opts
+        )
 
     get_metrics = _AsyncDualMethod(_get_metrics_instance, _get_metrics_class)
 

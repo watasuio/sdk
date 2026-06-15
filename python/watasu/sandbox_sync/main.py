@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from watasu._transport.control import ControlClient
@@ -414,10 +415,16 @@ class Sandbox(SandboxBase):
 
     get_info = _DualMethod(_get_info_instance, _get_info_class)
 
-    def _get_metrics_instance(self, **opts: ApiParams):
+    def _get_metrics_instance(
+        self,
+        start: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        **opts: ApiParams,
+    ):
         """Fetch latest sandbox metrics."""
         payload = self._control.get(
             f"/sandboxes/{self.sandbox_id}/metrics",
+            params=_metrics_params(start=start, end=end),
             resource="sandbox",
             request_timeout=opts.get("request_timeout"),
         )
@@ -427,12 +434,19 @@ class Sandbox(SandboxBase):
         return [sandbox_metrics_from_api(metrics or {})]
 
     @classmethod
-    def _get_metrics_class(cls, sandbox_id: str, **opts: ApiParams):
+    def _get_metrics_class(
+        cls,
+        sandbox_id: str,
+        start: Optional[datetime.datetime] = None,
+        end: Optional[datetime.datetime] = None,
+        **opts: ApiParams,
+    ):
         """Fetch sandbox metrics by id."""
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         payload = control.get(
             f"/sandboxes/{sandbox_id}/metrics",
+            params=_metrics_params(start=start, end=end),
             resource="sandbox",
             request_timeout=opts.get("request_timeout"),
         )
@@ -898,6 +912,25 @@ def _list_query_values(value: Any) -> List[str]:
             values.extend(_list_query_values(item))
         return values
     return [str(value)]
+
+
+def _metrics_params(
+    *,
+    start: Optional[Any],
+    end: Optional[Any],
+) -> List[Tuple[str, str]]:
+    params = []
+    if start is not None:
+        params.append(("start", str(_metrics_timestamp(start))))
+    if end is not None:
+        params.append(("end", str(_metrics_timestamp(end))))
+    return params
+
+
+def _metrics_timestamp(value: Any) -> Any:
+    if isinstance(value, datetime.datetime):
+        return int(value.timestamp())
+    return value
 
 
 def _compact(payload: Dict) -> Dict:
