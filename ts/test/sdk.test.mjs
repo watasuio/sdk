@@ -384,7 +384,7 @@ test('sandbox create uses root snake_case API payload', async () => {
   }
 })
 
-test('sandbox create with mcp starts gateway and caches token', async () => {
+test('sandbox create with mcp sends config to API without SDK-side bootstrap', async () => {
   const originalFetch = globalThis.fetch
   const originalRun = Commands.prototype.run
   const requests = []
@@ -413,19 +413,14 @@ test('sandbox create with mcp starts gateway and caches token', async () => {
     assert.equal(sbx.sandboxId, 'mcp-created')
     assert.equal(requests.length, 1)
     assert.deepEqual(requests[0].body, {
-      template_id: 'mcp-gateway',
       timeout: 300,
       metadata: {},
       env_vars: {},
       secure: true,
       allow_internet_access: true,
+      mcp: { server: "it's-fine", config: { enabled: true } },
     })
-    assert.equal(commands.length, 1)
-    assert.equal(commands[0].opts.user, 'root')
-    assert.match(commands[0].cmd, /^mcp-gateway --config /)
-    assert.match(commands[0].cmd, /it'\\''s-fine/)
-    assert.match(commands[0].opts.envs.GATEWAY_ACCESS_TOKEN, /^[0-9a-f-]{36}$/)
-    assert.equal(await sbx.getMcpToken(), commands[0].opts.envs.GATEWAY_ACCESS_TOKEN)
+    assert.deepEqual(commands, [])
   } finally {
     Commands.prototype.run = originalRun
     globalThis.fetch = originalFetch

@@ -31,6 +31,23 @@ await sbx.betaPause()
 await sbx.resume({ timeoutMs: 300_000 })
 ```
 
+## MCP Gateway
+
+```ts
+const sbx = await Sandbox.create({
+  mcp: {
+    github: {
+      command: 'github-mcp-server',
+      args: ['stdio'],
+      env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN },
+    },
+  },
+})
+
+console.log(sbx.getMcpUrl())
+console.log(await sbx.getMcpToken())
+```
+
 ## Listing Sandboxes
 
 ```ts

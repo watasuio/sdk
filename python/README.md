@@ -41,6 +41,26 @@ with Sandbox.create() as sbx:
 
 Leaving the context manager calls `kill()`.
 
+## MCP Gateway
+
+```python
+import os
+
+from watasu import Sandbox
+
+with Sandbox.create(
+    mcp={
+        "github": {
+            "command": "github-mcp-server",
+            "args": ["stdio"],
+            "env": {"GITHUB_TOKEN": os.environ["GITHUB_TOKEN"]},
+        }
+    }
+) as sbx:
+    print(sbx.get_mcp_url())
+    print(sbx.get_mcp_token())
+```
+
 ## Listing Sandboxes
 
 ```python

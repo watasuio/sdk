@@ -663,7 +663,7 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
 
 
-def test_sandbox_create_with_mcp_starts_gateway_and_caches_token(monkeypatch):
+def test_sandbox_create_with_mcp_sends_config_to_api_without_sdk_bootstrap(monkeypatch):
     captured = {}
     commands = []
 
@@ -705,21 +705,14 @@ def test_sandbox_create_with_mcp_starts_gateway_and_caches_token(monkeypatch):
     assert sbx.sandbox_id == "mcp-created"
     assert captured["path"] == "/sandboxes"
     assert captured["kwargs"]["json"] == {
-        "template_id": "mcp-gateway",
         "timeout": 300,
         "metadata": {},
         "env_vars": {},
         "secure": True,
         "allow_internet_access": True,
+        "mcp": {"server": "it's-fine", "config": {"enabled": True}},
     }
-    assert len(commands) == 1
-    cmd, kwargs = commands[0]
-    assert cmd.startswith("mcp-gateway --config ")
-    assert "'\"'\"'" in cmd
-    assert kwargs["user"] == "root"
-    token = kwargs["envs"]["GATEWAY_ACCESS_TOKEN"]
-    assert len(token) == 36
-    assert sbx.get_mcp_token() == token
+    assert commands == []
 
 
 def test_python_sandbox_main_compatibility_imports():

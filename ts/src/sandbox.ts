@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto'
-
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
 import { DataPlaneClient, ControlClient } from './transport.js'
@@ -267,20 +265,21 @@ export class Sandbox {
     const sandboxOpts = typeof templateOrOpts === 'string' ? opts : templateOrOpts ?? {}
     const template = typeof templateOrOpts === 'string'
       ? templateOrOpts
-      : templateOrOpts?.template ?? (sandboxOpts.mcp !== undefined ? Sandbox.defaultMcpTemplate : Sandbox.defaultTemplate)
+      : templateOrOpts?.template ?? (sandboxOpts.mcp === undefined ? Sandbox.defaultTemplate : undefined)
 
     if (sandboxOpts.volumeMounts !== undefined) unsupported('volumeMounts')
 
     const config = new ConnectionConfig(sandboxOpts)
     const control = new ControlClient(config)
     const sandboxPayload: Record<string, unknown> = {
-      template_id: template,
       timeout: Math.ceil((sandboxOpts.timeoutMs ?? 300_000) / 1000),
       metadata: sandboxOpts.metadata ?? {},
       env_vars: sandboxOpts.envs ?? {},
       secure: sandboxOpts.secure ?? true,
       allow_internet_access: sandboxOpts.allowInternetAccess ?? true,
     }
+    putIfPresent(sandboxPayload, 'template_id', template)
+    putIfPresent(sandboxPayload, 'mcp', sandboxOpts.mcp)
     Object.assign(sandboxPayload, networkUpdatePayload(sandboxOpts.network))
     putIfPresent(sandboxPayload, 'team', sandboxOpts.team)
 
@@ -299,7 +298,6 @@ export class Sandbox {
       sandbox,
       envs: sandboxOpts.envs,
     })
-    if (sandboxOpts.mcp !== undefined) await sandboxInstance.startMcpGateway(sandboxOpts.mcp)
     return sandboxInstance
   }
 
@@ -574,21 +572,6 @@ export class Sandbox {
     }
   }
 
-  private async startMcpGateway(config: unknown): Promise<void> {
-    const token = randomUUID()
-    this.mcpToken = token
-    try {
-      const result = await this.commands.run(`mcp-gateway --config ${shellQuote(JSON.stringify(config))}`, {
-        user: 'root',
-        envs: { GATEWAY_ACCESS_TOKEN: token },
-      })
-      if (result.exitCode !== 0) throw new SandboxError(`Failed to start MCP gateway: ${result.stderr}`)
-    } catch (error) {
-      this.mcpToken = undefined
-      throw error
-    }
-  }
-
   /** Return a protocol string for a secure or insecure sandbox URL. */
   getProtocol(baseProtocol = 'http', secure = true): string {
     return `${baseProtocol}${secure ? 's' : ''}`
@@ -797,10 +780,6 @@ function templateSlug(value: unknown): string | undefined {
 
 function putIfPresent(target: Record<string, unknown>, key: string, value: unknown): void {
   if (value !== undefined && value !== null) target[key] = value
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 function networkUpdatePayload(network: SandboxNetworkUpdate | undefined): Record<string, unknown> {

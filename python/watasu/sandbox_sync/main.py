@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-import shlex
-import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from watasu._transport.control import ControlClient
@@ -186,19 +183,22 @@ class Sandbox(SandboxBase):
         _reject_unsupported_opts(opts, ["volume_mounts"])
         if lifecycle is not None:
             unsupported("lifecycle pause/resume")
-        if not template and mcp is not None:
-            template = cls.default_mcp_template
 
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         sandbox_params = {
-            "template_id": template or cls.default_template,
             "timeout": timeout or 300,
             "metadata": metadata or {},
             "env_vars": envs or {},
             "secure": secure,
             "allow_internet_access": allow_internet_access,
         }
+        if template is not None:
+            sandbox_params["template_id"] = template
+        elif mcp is None:
+            sandbox_params["template_id"] = cls.default_template
+        if mcp is not None:
+            sandbox_params["mcp"] = mcp
         sandbox_params.update(_network_payload(network))
         for key in ("team",):
             if key in opts:
@@ -222,8 +222,6 @@ class Sandbox(SandboxBase):
             sandbox=sandbox,
             envs=envs,
         )
-        if mcp is not None:
-            _start_mcp_gateway(created, mcp)
         return created
 
     beta_create = create
@@ -881,22 +879,6 @@ def _session_operation_request_timeout(config: ConnectionConfig, opts: Dict) -> 
     if opts.get("request_timeout") is not None:
         return float(opts["request_timeout"])
     return max(config.request_timeout, SESSION_OPERATION_REQUEST_TIMEOUT_SEC)
-
-
-def _start_mcp_gateway(sandbox: Sandbox, config: Dict[str, Any]) -> None:
-    token = str(uuid.uuid4())
-    sandbox._mcp_token = token
-    try:
-        result = sandbox.commands.run(
-            f"mcp-gateway --config {shlex.quote(json.dumps(config))}",
-            user="root",
-            envs={"GATEWAY_ACCESS_TOKEN": token},
-        )
-        if result.exit_code != 0:
-            raise SandboxException(f"Failed to start MCP gateway: {result.stderr}")
-    except Exception:
-        sandbox._mcp_token = None
-        raise
 
 
 _NETWORK_KEY_ALIASES = {
