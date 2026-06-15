@@ -1,7 +1,7 @@
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
 import { DataPlaneClient, ControlClient } from './transport.js'
-import { SandboxError, unsupported } from './errors.js'
+import { NotFoundError, SandboxError, unsupported } from './errors.js'
 import { Filesystem } from './filesystem.js'
 
 export interface SandboxCreateOpts extends ConnectionOpts {
@@ -162,6 +162,20 @@ export class Sandbox {
     return true
   }
 
+  /** Check if this sandbox is in a runtime-active lifecycle state. */
+  async isRunning(opts: Pick<ConnectionOpts, 'requestTimeoutMs'> = {}): Promise<boolean> {
+    try {
+      const payload = await this.control.get(`/sandboxes/${this.sandboxId}`, {
+        requestTimeoutMs: opts.requestTimeoutMs,
+      })
+      const item = record(payload.sandbox ?? payload)
+      return ['creating', 'ready', 'checkpointing', 'restoring', 'stopping'].includes(String(item.state ?? ''))
+    } catch (error) {
+      if (error instanceof NotFoundError) return false
+      throw error
+    }
+  }
+
   /** Set a sandbox's lifetime by id. */
   static async setTimeout(sandboxId: string, timeoutMs: number, opts: ConnectionOpts = {}): Promise<void> {
     const control = new ControlClient(new ConnectionConfig(opts))
@@ -199,12 +213,11 @@ export class Sandbox {
   }
 
   /** Return the public hostname for an exposed sandbox port. */
-  async getHost(port: number): Promise<string> {
-    const payload = await this.control.get(`/sandboxes/${this.sandboxId}/ports/${port}`)
-    const portInfo = record(payload.sandbox_port ?? payload.port ?? payload)
-    const value = portInfo.host ?? portInfo.url
-    if (typeof value === 'string') return hostOnly(value)
-    const routeToken = this.sandbox.route_token
+  getHost(port: number): string {
+    const routeToken =
+      this.sandbox.route_token ??
+      this.sandbox.routeToken ??
+      routeTokenFromDataPlaneUrl(this.dataPlane.baseUrl, this.config.dataPlaneDomain)
     if (typeof routeToken !== 'string') throw new SandboxError('port response did not include host or url')
     return `p${port}-${routeToken}.sandbox.${this.config.dataPlaneDomain}`
   }
@@ -259,4 +272,12 @@ function recordOfStrings(value: unknown): Record<string, string> {
 function hostOnly(value: string): string {
   if (value.includes('://')) return new URL(value).host
   return value.split('/')[0]
+}
+
+function routeTokenFromDataPlaneUrl(value: string, dataPlaneDomain: string): string | undefined {
+  const host = hostOnly(value)
+  const suffix = `.sandbox.${dataPlaneDomain}`
+  if (!host.endsWith(suffix)) return undefined
+  const token = host.slice(0, -suffix.length)
+  return token || undefined
 }

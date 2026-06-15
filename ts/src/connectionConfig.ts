@@ -10,6 +10,7 @@ export const SESSION_OPERATION_REQUEST_TIMEOUT_MS = 150_000
 /** Connection options accepted by Watasu SDK entrypoints. */
 export interface ConnectionOpts {
   apiKey?: string
+  accessToken?: string
   domain?: string
   apiUrl?: string
   dataPlaneDomain?: string
@@ -30,7 +31,12 @@ export class ConnectionConfig {
 
   constructor(opts: ConnectionOpts = {}) {
     const env = typeof process !== 'undefined' ? process.env : {}
-    this.apiKey = opts.apiKey ?? env.WATASU_API_KEY
+    this.apiKey =
+      opts.apiKey ??
+      opts.accessToken ??
+      env.WATASU_API_KEY ??
+      env.E2B_API_KEY ??
+      env.E2B_ACCESS_TOKEN
     this.domain = opts.domain ?? env.WATASU_DOMAIN ?? 'watasu.io'
     this.apiUrl =
       opts.apiUrl ?? env.WATASU_API_URL ?? `https://api.${this.domain}/v1`

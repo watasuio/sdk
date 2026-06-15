@@ -9,7 +9,7 @@ from watasu.connection_config import (
     ApiParams,
     ConnectionConfig,
 )
-from watasu.exceptions import InvalidArgumentException, SandboxException
+from watasu.exceptions import InvalidArgumentException, NotFoundException, SandboxException
 from watasu.sandbox.sandbox_api import SandboxInfo, sandbox_info_from_api
 from watasu.sandbox_sync.commands.command import Commands
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
@@ -62,14 +62,46 @@ class Sandbox:
 
     def __init__(
         self,
-        sandbox_id: str,
+        sandbox_id: Optional[str] = None,
         *,
-        connection_config: ConnectionConfig,
+        connection_config: Optional[ConnectionConfig] = None,
         control: Optional[ControlClient] = None,
         session: Optional[Dict] = None,
         sandbox: Optional[Dict] = None,
         envs: Optional[Dict[str, str]] = None,
+        template: Optional[str] = None,
+        timeout: Optional[int] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        secure: bool = True,
+        allow_internet_access: bool = True,
+        network=None,
+        lifecycle=None,
+        **opts: ApiParams,
     ) -> None:
+        if connection_config is None and control is None and session is None and sandbox is None:
+            if sandbox_id is not None and template is None:
+                created = self.connect(sandbox_id, timeout=timeout, **opts)
+            else:
+                created = self.create(
+                    template=template,
+                    timeout=timeout,
+                    metadata=metadata,
+                    envs=envs,
+                    secure=secure,
+                    allow_internet_access=allow_internet_access,
+                    network=network,
+                    lifecycle=lifecycle,
+                    **opts,
+                )
+
+            self.__dict__.update(created.__dict__)
+            return
+
+        if sandbox_id is None:
+            raise InvalidArgumentException("sandbox_id is required for internal sandbox construction")
+        if connection_config is None:
+            raise InvalidArgumentException("connection_config is required for internal sandbox construction")
+
         self._sandbox_id = str(sandbox_id)
         self.connection_config = connection_config
         self._control = control or ControlClient(connection_config)
@@ -181,6 +213,20 @@ class Sandbox:
         )
 
     connect = _DualMethod(_connect_instance, _connect_class)
+
+    def is_running(self, request_timeout: Optional[float] = None) -> bool:
+        """Return whether this sandbox is in a runtime-active lifecycle state."""
+        try:
+            payload = self._control.get(
+                f"/sandboxes/{self.sandbox_id}",
+                request_timeout=request_timeout,
+                resource="sandbox",
+            )
+        except NotFoundException:
+            return False
+
+        sandbox = payload.get("sandbox") or payload
+        return sandbox.get("state") in {"creating", "ready", "checkpointing", "restoring", "stopping"}
 
     def _kill_instance(self, **opts: ApiParams) -> bool:
         """Destroy this sandbox."""

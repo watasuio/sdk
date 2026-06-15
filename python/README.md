@@ -15,15 +15,26 @@ Set `WATASU_API_KEY` before using the SDK.
 ```python
 from watasu import Sandbox
 
-sbx = Sandbox.create()
+sbx = Sandbox()
 sbx.files.write("/home/user/a.py", "print(2 + 2)")
 result = sbx.commands.run("python /home/user/a.py")
 print(result.stdout)
 sbx.kill()
 ```
 
-`Sandbox.create` and `Sandbox.connect` return only after the Watasu API supplies
-a usable data-plane session. The SDK does not poll sandbox readiness.
+`Sandbox()`, `Sandbox.create`, and `Sandbox.connect` return only after the Watasu
+API supplies a usable data-plane session. The SDK does not poll sandbox
+readiness.
+
+```python
+from watasu import Sandbox
+
+with Sandbox.create() as sbx:
+    result = sbx.commands.run("echo hello")
+    print(result.stdout)
+```
+
+Leaving the context manager calls `kill()`.
 
 ## Async API
 

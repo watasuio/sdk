@@ -19,6 +19,7 @@ const sbx = await Sandbox.create()
 await sbx.files.write('/home/user/a.js', 'console.log(2 + 2)')
 const result = await sbx.commands.run('node /home/user/a.js')
 console.log(result.stdout)
+console.log(await sbx.isRunning())
 await sbx.kill()
 ```
 

@@ -21,6 +21,16 @@ def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
     assert config.auth_headers["Authorization"] == "Bearer key"
 
 
+def test_connection_config_accepts_e2b_api_key_alias(monkeypatch):
+    monkeypatch.delenv("WATASU_API_KEY", raising=False)
+    monkeypatch.setenv("E2B_API_KEY", "e2b-key")
+
+    config = ConnectionConfig()
+
+    assert config.api_key == "e2b-key"
+    assert config.auth_headers["Authorization"] == "Bearer e2b-key"
+
+
 def test_command_handle_raises_on_non_zero_exit():
     frames = iter(
         [
@@ -193,6 +203,84 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["kwargs"]["json"]["sandbox"]["template"] == "base"
     assert captured["kwargs"]["json"]["sandbox"]["template_version_id"] == 82
     assert captured["kwargs"]["json"]["sandbox"]["team"] == "bridgeapp"
+
+
+def test_sandbox_constructor_creates_like_e2b(monkeypatch):
+    captured = {}
+
+    class FakeControl:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def post(self, path, **kwargs):
+            captured["path"] = path
+            captured["kwargs"] = kwargs
+            return {
+                "sandbox": {"id": "new-sandbox"},
+                "session": {
+                    "data_plane_url": "https://route.sandbox.watasuhost.com",
+                    "token": "data",
+                },
+            }
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    sbx = Sandbox(api_key="key", metadata={"purpose": "compat"})
+
+    assert sbx.sandbox_id == "new-sandbox"
+    assert captured["path"] == "/sandboxes"
+    assert captured["kwargs"]["json"]["sandbox"]["template"] == "base"
+    assert captured["kwargs"]["json"]["sandbox"]["metadata"] == {"purpose": "compat"}
+
+
+def test_sandbox_context_manager_kills_on_exit(monkeypatch):
+    killed = []
+
+    def fake_kill(self, **kwargs):
+        killed.append((self.sandbox_id, kwargs))
+        return True
+
+    monkeypatch.setattr(Sandbox, "kill", fake_kill)
+    sbx = Sandbox(
+        "123",
+        connection_config=ConnectionConfig(api_key="key"),
+        session={"data_plane_url": "https://route.sandbox.watasuhost.com", "token": "data"},
+        sandbox={},
+    )
+
+    with sbx as active:
+        assert active is sbx
+
+    assert killed == [("123", {})]
+
+
+def test_sandbox_is_running_uses_control_state():
+    class Control:
+        def __init__(self, state):
+            self.state = state
+
+        def get(self, path, **kwargs):
+            return {"sandbox": {"id": "123", "state": self.state}}
+
+    for state in ("creating", "ready", "checkpointing", "restoring", "stopping"):
+        sbx = Sandbox(
+            "123",
+            connection_config=ConnectionConfig(api_key="key"),
+            control=Control(state),
+            session={"data_plane_url": "https://route.sandbox.watasuhost.com", "token": "data"},
+            sandbox={},
+        )
+        assert sbx.is_running() is True
+
+    for state in ("stopped", "destroyed", "failed", "lost", "expired"):
+        sbx = Sandbox(
+            "123",
+            connection_config=ConnectionConfig(api_key="key"),
+            control=Control(state),
+            session={"data_plane_url": "https://route.sandbox.watasuhost.com", "token": "data"},
+            sandbox={},
+        )
+        assert sbx.is_running() is False
 
 
 def test_sandbox_create_requires_session_from_api(monkeypatch):

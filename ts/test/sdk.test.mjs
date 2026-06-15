@@ -19,6 +19,11 @@ test('connection config defaults to Watasu hosts', () => {
   assert.equal(config.authHeaders.Authorization, 'Bearer key')
 })
 
+test('connection config accepts E2B auth aliases', () => {
+  const config = new ConnectionConfig({ accessToken: 'alias-key' })
+  assert.equal(config.authHeaders.Authorization, 'Bearer alias-key')
+})
+
 test('stream frame helpers match runtime base64 protocol', () => {
   assert.equal(base64DecodeText('NAo='), '4\n')
   assert.equal(base64Encode(new TextEncoder().encode('hi\n')), 'aGkK')
@@ -68,4 +73,67 @@ test('sandbox construction requires a session', () => {
       }),
     /sandbox session is required/
   )
+})
+
+test('sandbox getHost is sync and E2B-shaped', () => {
+  const sbx = new Sandbox({
+    sandboxId: '1',
+    connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+    session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+    sandbox: { route_token: 'route-token' },
+  })
+
+  assert.equal(sbx.getHost(3000), 'p3000-route-token.sandbox.watasuhost.com')
+})
+
+test('sandbox getHost accepts camel-case route token', () => {
+  const sbx = new Sandbox({
+    sandboxId: '1',
+    connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+    session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+    sandbox: { routeToken: 'camel-token' },
+  })
+
+  assert.equal(sbx.getHost(3000), 'p3000-camel-token.sandbox.watasuhost.com')
+})
+
+test('sandbox getHost derives route token from data-plane URL', () => {
+  const sbx = new Sandbox({
+    sandboxId: '1',
+    connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+    session: { data_plane_url: 'https://derived-token.sandbox.watasuhost.com', token: 'data' },
+    sandbox: {},
+  })
+
+  assert.equal(sbx.getHost(3000), 'p3000-derived-token.sandbox.watasuhost.com')
+})
+
+test('sandbox isRunning reflects control-plane state', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ sandbox: { id: '1', state: 'ready' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+
+    const sbx = new Sandbox({
+      sandboxId: '1',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+      sandbox: { route_token: 'route-token' },
+    })
+
+    assert.equal(await sbx.isRunning(), true)
+
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: 'not_found' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      })
+
+    assert.equal(await sbx.isRunning(), false)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

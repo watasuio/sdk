@@ -13,6 +13,7 @@ SESSION_OPERATION_REQUEST_TIMEOUT_SEC = 150
 
 class ApiParams(TypedDict, total=False):
     api_key: Optional[str]
+    access_token: Optional[str]
     domain: Optional[str]
     request_timeout: Optional[float]
     headers: Optional[Dict[str, str]]
@@ -42,6 +43,7 @@ class ConnectionConfig:
     def __init__(
         self,
         api_key: Optional[str] = None,
+        access_token: Optional[str] = None,
         domain: Optional[str] = None,
         request_timeout: Optional[float] = None,
         headers: Optional[Dict[str, str]] = None,
@@ -50,7 +52,13 @@ class ConnectionConfig:
         data_plane_domain: Optional[str] = None,
         **_: Any,
     ) -> None:
-        self.api_key = api_key or os.environ.get("WATASU_API_KEY")
+        self.api_key = (
+            api_key
+            or access_token
+            or os.environ.get("WATASU_API_KEY")
+            or os.environ.get("E2B_API_KEY")
+            or os.environ.get("E2B_ACCESS_TOKEN")
+        )
         self.domain = domain or os.environ.get("WATASU_DOMAIN") or "watasu.io"
         self.data_plane_domain = (
             data_plane_domain
@@ -79,6 +87,7 @@ class ConnectionConfig:
         """Return constructor kwargs that preserve this config with optional overrides."""
         params = {
             "api_key": self.api_key,
+            "access_token": self.api_key,
             "domain": self.domain,
             "request_timeout": self.request_timeout,
             "headers": dict(self.headers),
