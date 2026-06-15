@@ -1,4 +1,4 @@
-//! Watasu Rust SDK.
+//! Rust SDK for Watasu.
 //!
 //! The crate exposes a small async API for creating sandboxes, running
 //! commands, and reading/writing files. `Sandbox::create` and

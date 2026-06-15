@@ -1,4 +1,4 @@
-"""Python SDK for Watasu sandboxes.
+"""Python SDK for Watasu.
 
 The public sync surface talks to Watasu REST and WebSocket runtime endpoints.
 """

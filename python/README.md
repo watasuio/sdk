@@ -1,0 +1,40 @@
+# Watasu Python SDK
+
+Python SDK for Watasu.
+
+## Install
+
+```bash
+pip install watasu
+```
+
+Set `WATASU_API_KEY` before using the SDK.
+
+## Usage
+
+```python
+from watasu import Sandbox
+
+sbx = Sandbox.create()
+sbx.files.write("/home/user/a.py", "print(2 + 2)")
+result = sbx.commands.run("python /home/user/a.py")
+print(result.stdout)
+sbx.kill()
+```
+
+`Sandbox.create` and `Sandbox.connect` return only after the Watasu API supplies
+a usable data-plane session. The SDK does not poll sandbox readiness.
+
+## Async API
+
+```python
+from watasu import AsyncSandbox
+
+
+async def main() -> None:
+    sbx = await AsyncSandbox.create()
+    await sbx.kill()
+```
+
+Unsupported compatibility surfaces raise explicit not-implemented errors instead
+of silently falling back to client-side polling.
