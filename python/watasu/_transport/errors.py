@@ -4,6 +4,7 @@ from typing import Any, Mapping, Optional
 
 from watasu.exceptions import (
     AuthenticationException,
+    ConflictException,
     FileNotFoundException,
     InvalidArgumentException,
     NotEnoughSpaceException,
@@ -44,12 +45,14 @@ def map_http_error(
         if resource == "sandbox":
             return SandboxNotFoundException(message)
         return NotFoundException(message)
+    if status_code == 409:
+        return ConflictException(message)
     if status_code in {408, 504}:
         return TimeoutException(message)
     if status_code == 429:
         return RateLimitException(message)
     if status_code == 507:
         return NotEnoughSpaceException(message)
-    if status_code in {400, 409, 413, 422}:
+    if status_code in {400, 413, 422}:
         return InvalidArgumentException(message)
     return SandboxException(message)

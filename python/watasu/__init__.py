@@ -8,6 +8,7 @@ from .connection_config import ApiParams, ConnectionConfig, ProxyTypes, Username
 from .exceptions import (
     AuthenticationException,
     BuildException,
+    ConflictException,
     FileNotFoundException,
     FileUploadException,
     GitAuthException,
@@ -130,6 +131,7 @@ __all__ = [
     "CommandHandle",
     "CommandResult",
     "ConnectionConfig",
+    "ConflictException",
     "CopyItem",
     "EntryInfo",
     "FileUrlInfo",

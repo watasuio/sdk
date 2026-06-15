@@ -276,7 +276,7 @@ test('sandbox connect and setTimeout use root timeout payloads', async () => {
   try {
     globalThis.fetch = async (url, init = {}) => {
       requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
-      if (String(url).endsWith('/connect')) {
+      if (String(url).endsWith('/resume')) {
         return new Response(
           JSON.stringify({
             sandbox: { id: 'existing' },
@@ -296,9 +296,77 @@ test('sandbox connect and setTimeout use root timeout payloads', async () => {
 
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
       ['GET', 'https://api.watasu.io/v1/sandboxes/existing', undefined],
-      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/connect', { timeout: 90 }],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/resume', { timeout: 90 }],
       ['POST', 'https://api.watasu.io/v1/sandboxes/existing/timeout', { timeout: 180 }],
     ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('sandbox pause and resume use lifecycle compatibility routes', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      if (String(url).endsWith('/pause')) {
+        return new Response(JSON.stringify({ sandbox: { id: 'existing', state: 'stopped' } }), {
+          status: 202,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (String(url).endsWith('/resume')) {
+        return new Response(
+          JSON.stringify({
+            sandbox: { id: 'existing', state: 'ready' },
+            session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (String(url).endsWith('/sandboxes/existing')) {
+        return new Response(JSON.stringify({ sandbox: { id: 'existing' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new Error(`unexpected request ${url}`)
+    }
+
+    const sbx = new Sandbox({
+      sandboxId: 'existing',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+      sandbox: { route_token: 'route-token' },
+    })
+
+    assert.equal(await sbx.betaPause(), true)
+    assert.equal(await sbx.pause(), true)
+    assert.equal(await Sandbox.pause('existing', { apiKey: 'key' }), true)
+    assert.equal(await sbx.resume({ timeoutMs: 120_000 }), true)
+
+    assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
+      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/pause', undefined],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/pause', undefined],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/pause', undefined],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/resume', { timeout: 120 }],
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('sandbox pause returns false for already paused conflicts', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: 'sandbox_already_paused' }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      })
+
+    assert.equal(await Sandbox.betaPause('existing', { apiKey: 'key' }), false)
   } finally {
     globalThis.fetch = originalFetch
   }

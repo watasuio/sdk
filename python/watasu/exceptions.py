@@ -18,6 +18,10 @@ class NotFoundException(SandboxException):
     """Raised when a resource is not found."""
 
 
+class ConflictException(SandboxException):
+    """Raised when the requested operation conflicts with current resource state."""
+
+
 class FileNotFoundException(NotFoundException):
     """Raised when a file or directory is not found inside a sandbox."""
 

@@ -10,6 +10,7 @@ from watasu.connection_config import (
     ConnectionConfig,
 )
 from watasu.exceptions import (
+    ConflictException,
     InvalidArgumentException,
     NotFoundException,
     SandboxException,
@@ -207,7 +208,7 @@ class Sandbox:
     ) -> "Sandbox":
         """Reconnect this sandbox and refresh its data-plane session."""
         response = self._control.post(
-            f"/sandboxes/{self.sandbox_id}/connect",
+            f"/sandboxes/{self.sandbox_id}/resume",
             json={"timeout": timeout} if timeout else {},
             resource="sandbox",
             request_timeout=_session_operation_request_timeout(
@@ -234,7 +235,7 @@ class Sandbox:
         control = ControlClient(config)
         info_response = control.get(f"/sandboxes/{sandbox_id}", resource="sandbox")
         response = control.post(
-            f"/sandboxes/{sandbox_id}/connect",
+            f"/sandboxes/{sandbox_id}/resume",
             json={"timeout": timeout} if timeout else {},
             resource="sandbox",
             request_timeout=_session_operation_request_timeout(config, opts),
@@ -290,6 +291,41 @@ class Sandbox:
     def close(self) -> None:
         """Close the local SDK attachment without destroying the sandbox."""
         return None
+
+    def _beta_pause_instance(self, **opts: ApiParams) -> bool:
+        """Pause this sandbox. Returns ``False`` if it is already paused."""
+        return self._beta_pause_class(
+            self.sandbox_id, **self.connection_config.get_api_params(**opts)
+        )
+
+    @classmethod
+    def _beta_pause_class(cls, sandbox_id: str, **opts: ApiParams) -> bool:
+        config = ConnectionConfig(**opts)
+        control = ControlClient(config)
+        try:
+            control.post(f"/sandboxes/{sandbox_id}/pause", resource="sandbox")
+            return True
+        except ConflictException:
+            return False
+
+    beta_pause = _DualMethod(_beta_pause_instance, _beta_pause_class)
+    pause = beta_pause
+
+    def _resume_instance(
+        self, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> bool:
+        """Resume this sandbox and refresh its data-plane session."""
+        self._connect_instance(timeout=timeout, **opts)
+        return True
+
+    @classmethod
+    def _resume_class(
+        cls, sandbox_id: str, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> bool:
+        cls._connect_class(sandbox_id, timeout=timeout, **opts)
+        return True
+
+    resume = _DualMethod(_resume_instance, _resume_class)
 
     def _set_timeout_instance(self, timeout: int, **opts: ApiParams) -> None:
         """Set this sandbox's remaining lifetime in seconds."""
@@ -565,14 +601,6 @@ class Sandbox:
 
     def update_network(self, *args, **kwargs):
         unsupported("Sandbox.update_network")
-
-    def pause(self, *args, **kwargs) -> bool:
-        unsupported("Sandbox.pause")
-
-    beta_pause = pause
-
-    def resume(self, *args, **kwargs) -> bool:
-        unsupported("Sandbox.resume")
 
     def __enter__(self):
         """Enter a context manager without changing sandbox state."""

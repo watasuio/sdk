@@ -26,6 +26,11 @@ await sbx.kill()
 `Sandbox.create` and `Sandbox.connect` return only after the Watasu API supplies
 a usable data-plane session. The SDK does not poll sandbox readiness.
 
+```ts
+await sbx.betaPause()
+await sbx.resume({ timeoutMs: 300_000 })
+```
+
 ## Git, Watch, PTY, And Signed File URLs
 
 ```ts

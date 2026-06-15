@@ -10,6 +10,7 @@ from watasu import (
     CommandExitException,
     CommandResult,
     ConnectionConfig,
+    ConflictException,
     Sandbox,
 )
 from watasu._transport.process_ws import ProcessSocket
@@ -621,7 +622,7 @@ def test_sandbox_aliases_match_connection_lifecycle_shape(monkeypatch):
     assert sbx.close() is None
     assert calls[1] == (
         "post",
-        "/sandboxes/existing/connect",
+        "/sandboxes/existing/resume",
         {"json": {"timeout": 600}, "resource": "sandbox", "request_timeout": 150},
     )
 
@@ -639,7 +640,7 @@ def test_sandbox_connect_and_timeout_use_root_snake_case_payloads(monkeypatch):
 
         def post(self, path, **kwargs):
             calls.append(("post", path, kwargs))
-            if path.endswith("/connect"):
+            if path.endswith("/resume"):
                 return {
                     "sandbox": {"id": "existing"},
                     "session": {
@@ -656,7 +657,7 @@ def test_sandbox_connect_and_timeout_use_root_snake_case_payloads(monkeypatch):
 
     assert calls[1] == (
         "post",
-        "/sandboxes/existing/connect",
+        "/sandboxes/existing/resume",
         {"json": {"timeout": 600}, "resource": "sandbox", "request_timeout": 150},
     )
     assert calls[2] == (
@@ -664,6 +665,66 @@ def test_sandbox_connect_and_timeout_use_root_snake_case_payloads(monkeypatch):
         "/sandboxes/existing/timeout",
         {"json": {"timeout": 900}, "resource": "sandbox"},
     )
+
+
+def test_sandbox_pause_and_resume_use_lifecycle_routes(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            pass
+
+        def get(self, path, **kwargs):
+            calls.append(("get", path, kwargs))
+            return {"sandbox": {"id": "existing"}}
+
+        def post(self, path, **kwargs):
+            calls.append(("post", path, kwargs))
+            if path.endswith("/pause"):
+                return {"sandbox": {"id": "existing", "state": "stopped"}}
+            if path.endswith("/resume"):
+                return {
+                    "sandbox": {"id": "existing", "state": "ready"},
+                    "session": {
+                        "data_plane_url": "https://route.sandbox.watasuhost.com",
+                        "token": "data",
+                    },
+                }
+            raise AssertionError(f"unexpected POST {path}")
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    sbx = Sandbox.connect("existing", api_key="key")
+    calls.clear()
+
+    assert sbx.beta_pause() is True
+    assert sbx.pause() is True
+    assert Sandbox.pause("existing", api_key="key") is True
+    assert sbx.resume(timeout=1_200) is True
+
+    assert calls == [
+        ("post", "/sandboxes/existing/pause", {"resource": "sandbox"}),
+        ("post", "/sandboxes/existing/pause", {"resource": "sandbox"}),
+        ("post", "/sandboxes/existing/pause", {"resource": "sandbox"}),
+        (
+            "post",
+            "/sandboxes/existing/resume",
+            {"json": {"timeout": 1_200}, "resource": "sandbox", "request_timeout": 150},
+        ),
+    ]
+
+
+def test_sandbox_pause_returns_false_for_already_paused_conflict(monkeypatch):
+    class FakeControl:
+        def __init__(self, config):
+            pass
+
+        def post(self, path, **kwargs):
+            raise ConflictException("sandbox_already_paused")
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    assert Sandbox.beta_pause("existing", api_key="key") is False
 
 
 def test_sandbox_context_manager_kills_on_exit(monkeypatch):

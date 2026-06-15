@@ -181,6 +181,7 @@ pub struct Sandbox {
     config: ConnectionConfig,
     control: ControlClient,
     sandbox: Value,
+    envs: serde_json::Map<String, Value>,
 }
 
 impl Sandbox {
@@ -228,7 +229,7 @@ impl Sandbox {
         let info = control.get(&format!("/sandboxes/{sandbox_id}")).await?;
         let response = control
             .post(
-                &format!("/sandboxes/{sandbox_id}/connect"),
+                &format!("/sandboxes/{sandbox_id}/resume"),
                 serde_json::json!({}),
             )
             .await?;
@@ -237,6 +238,78 @@ impl Sandbox {
             sandbox.sandbox = info.get("sandbox").cloned().unwrap_or(Value::Null);
         }
         Ok(sandbox)
+    }
+
+    /// Resume a paused sandbox by id.
+    pub async fn resume_by_id(
+        sandbox_id: impl ToString,
+        connection: ConnectionOptions,
+    ) -> Result<bool> {
+        Self::connect(sandbox_id, connection).await?;
+        Ok(true)
+    }
+
+    /// Resume this sandbox and refresh its data-plane session.
+    pub async fn resume(&mut self) -> Result<bool> {
+        let response = self
+            .control
+            .post(
+                &format!("/sandboxes/{}/resume", self.sandbox_id),
+                serde_json::json!({}),
+            )
+            .await?;
+        self.refresh_from_response(response)?;
+        Ok(true)
+    }
+
+    /// Pause a sandbox by id. Returns `false` if it is already paused.
+    pub async fn beta_pause_by_id(
+        sandbox_id: impl ToString,
+        connection: ConnectionOptions,
+    ) -> Result<bool> {
+        let sandbox_id = sandbox_id.to_string();
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        match control
+            .post(
+                &format!("/sandboxes/{sandbox_id}/pause"),
+                serde_json::json!({}),
+            )
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(Error::Conflict(_)) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Pause this sandbox. Returns `false` if it is already paused.
+    pub async fn beta_pause(&self) -> Result<bool> {
+        match self
+            .control
+            .post(
+                &format!("/sandboxes/{}/pause", self.sandbox_id),
+                serde_json::json!({}),
+            )
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(Error::Conflict(_)) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Alias for `beta_pause_by_id`.
+    pub async fn pause_by_id(
+        sandbox_id: impl ToString,
+        connection: ConnectionOptions,
+    ) -> Result<bool> {
+        Self::beta_pause_by_id(sandbox_id, connection).await
+    }
+
+    /// Alias for `beta_pause`.
+    pub async fn pause(&self) -> Result<bool> {
+        self.beta_pause().await
     }
 
     /// Destroy this sandbox.
@@ -442,13 +515,28 @@ impl Sandbox {
         Ok(Self {
             sandbox_id,
             files: Filesystem::new(data_plane.clone()),
-            commands: Commands::new(data_plane.clone(), envs),
+            commands: Commands::new(data_plane.clone(), envs.clone()),
             pty: Pty::new(data_plane.clone()),
             git: Git::new(data_plane),
             config,
             control,
             sandbox,
+            envs,
         })
+    }
+
+    fn refresh_from_response(&mut self, response: Value) -> Result<()> {
+        let sandbox = response
+            .get("sandbox")
+            .cloned()
+            .unwrap_or_else(|| response.clone());
+        let data_plane = data_plane_from_session(response.get("session"), &self.config)?;
+        self.files = Filesystem::new(data_plane.clone());
+        self.commands = Commands::new(data_plane.clone(), self.envs.clone());
+        self.pty = Pty::new(data_plane.clone());
+        self.git = Git::new(data_plane);
+        self.sandbox = sandbox;
+        Ok(())
     }
 
     async fn file_url_info(

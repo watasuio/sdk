@@ -19,6 +19,13 @@ export class NotFoundError extends SandboxError {
   }
 }
 
+export class ConflictError extends SandboxError {
+  constructor(message = 'Conflict') {
+    super(message)
+    this.name = 'ConflictError'
+  }
+}
+
 export class TimeoutError extends SandboxError {
   constructor(message = 'Request timed out') {
     super(message)
@@ -87,6 +94,7 @@ export function errorFromResponse(status: number, payload: unknown): Error {
 
   if (status === 401 || status === 403) return new AuthenticationError(message)
   if (status === 404) return new NotFoundError(message)
+  if (status === 409) return new ConflictError(message)
   if (status === 408 || status === 504) return new TimeoutError(message)
   if (status === 422 || status === 400) return new InvalidArgumentError(message)
   if (status === 429) return new RateLimitError(message)

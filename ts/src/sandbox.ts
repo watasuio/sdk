@@ -1,7 +1,7 @@
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
 import { DataPlaneClient, ControlClient } from './transport.js'
-import { NotFoundError, SandboxError, unsupported } from './errors.js'
+import { ConflictError, NotFoundError, SandboxError, unsupported } from './errors.js'
 import { Filesystem } from './filesystem.js'
 import { Git } from './git.js'
 import { Pty } from './pty.js'
@@ -199,7 +199,7 @@ export class Sandbox {
     const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
     const info = await control.get(`/sandboxes/${sandboxId}`)
-    const response = await control.post(`/sandboxes/${sandboxId}/connect`, {
+    const response = await control.post(`/sandboxes/${sandboxId}/resume`, {
       json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
       requestTimeoutMs: sessionOperationRequestTimeout(config, opts),
     })
@@ -222,7 +222,7 @@ export class Sandbox {
 
   /** Refresh this sandbox's data-plane session in place. */
   async connect(opts: SandboxConnectOpts = {}): Promise<this> {
-    const response = await this.control.post(`/sandboxes/${this.sandboxId}/connect`, {
+    const response = await this.control.post(`/sandboxes/${this.sandboxId}/resume`, {
       json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
       requestTimeoutMs: sessionOperationRequestTimeout(this.config, opts),
     })
@@ -237,6 +237,31 @@ export class Sandbox {
     this.terminal = new TerminalManager(this.pty)
     this.git = new Git(dataPlane)
     return this
+  }
+
+  /** Resume a paused sandbox by id. */
+  static async resume(sandboxId: string, opts: SandboxConnectOpts = {}): Promise<boolean> {
+    await Sandbox.connect(sandboxId, opts)
+    return true
+  }
+
+  /** Pause a sandbox by id. Returns false when it was already paused. */
+  static async betaPause(sandboxId: string, opts: ConnectionOpts = {}): Promise<boolean> {
+    const control = new ControlClient(new ConnectionConfig(opts))
+    try {
+      await control.post(`/sandboxes/${sandboxId}/pause`, {
+        requestTimeoutMs: opts.requestTimeoutMs,
+      })
+      return true
+    } catch (error) {
+      if (error instanceof ConflictError) return false
+      throw error
+    }
+  }
+
+  /** Alias for `betaPause`. */
+  static async pause(sandboxId: string, opts: ConnectionOpts = {}): Promise<boolean> {
+    return this.betaPause(sandboxId, opts)
   }
 
   /** Destroy a sandbox by id. */
@@ -449,9 +474,22 @@ export class Sandbox {
   }
 
   updateNetwork(..._args: unknown[]): never { unsupported('Sandbox.updateNetwork') }
-  pause(): never { unsupported('Sandbox.pause') }
-  betaPause(): never { unsupported('Sandbox.betaPause') }
-  resume(): never { unsupported('Sandbox.resume') }
+
+  /** Pause this sandbox. Returns false when it was already paused. */
+  async betaPause(opts: ConnectionOpts = {}): Promise<boolean> {
+    return Sandbox.betaPause(this.sandboxId, { ...this.configOptions(), ...opts })
+  }
+
+  /** Alias for `betaPause`. */
+  async pause(opts: ConnectionOpts = {}): Promise<boolean> {
+    return this.betaPause(opts)
+  }
+
+  /** Resume this sandbox and refresh its data-plane session. */
+  async resume(opts: SandboxConnectOpts = {}): Promise<boolean> {
+    await this.connect(opts)
+    return true
+  }
 
   private async fileUrl(route: '/upload_url' | '/download_url', path: string, opts: SandboxUrlOpts): Promise<FileUrlInfo> {
     const payload = await this.control.post(`/sandboxes/${this.sandboxId}/files${route}`, {

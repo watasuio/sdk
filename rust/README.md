@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.8"
+watasu = "0.1.9"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -29,6 +29,14 @@ async fn main() -> watasu::Result<()> {
 
 `Sandbox::create` and `Sandbox::connect` return only after the Watasu API
 supplies a usable data-plane session. The crate does not poll sandbox readiness.
+
+```rust
+# async fn run(mut sbx: watasu::Sandbox) -> watasu::Result<()> {
+sbx.beta_pause().await?;
+sbx.resume().await?;
+# Ok(())
+# }
+```
 
 ## Git, Watch, PTY, And Signed File URLs
 

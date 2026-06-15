@@ -531,6 +531,35 @@ class AsyncSandbox:
         """Close the local SDK attachment without destroying the sandbox."""
         return None
 
+    async def _beta_pause_instance(self, **opts: ApiParams) -> bool:
+        """Pause this sandbox. Returns ``False`` if it is already paused."""
+        return await asyncio.to_thread(self._sync.beta_pause, **opts)
+
+    @classmethod
+    async def _beta_pause_class(cls, sandbox_id: str, **opts: ApiParams) -> bool:
+        """Pause a sandbox by id."""
+        return await asyncio.to_thread(Sandbox.beta_pause, sandbox_id, **opts)
+
+    beta_pause = _AsyncDualMethod(_beta_pause_instance, _beta_pause_class)
+    pause = beta_pause
+
+    async def _resume_instance(
+        self, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> bool:
+        """Resume this sandbox and refresh its data-plane session."""
+        await asyncio.to_thread(self._sync.resume, timeout=timeout, **opts)
+        self._set_sync(self._sync)
+        return True
+
+    @classmethod
+    async def _resume_class(
+        cls, sandbox_id: str, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> bool:
+        """Resume a sandbox by id."""
+        return await asyncio.to_thread(Sandbox.resume, sandbox_id, timeout=timeout, **opts)
+
+    resume = _AsyncDualMethod(_resume_instance, _resume_class)
+
     async def _set_timeout_instance(self, timeout: int, **opts: ApiParams) -> None:
         """Set this sandbox's remaining lifetime in seconds."""
         await asyncio.to_thread(self._sync.set_timeout, timeout, **opts)
@@ -644,14 +673,6 @@ class AsyncSandbox:
 
     async def update_network(self, *args, **kwargs):
         unsupported("Sandbox.update_network")
-
-    async def pause(self, *args, **kwargs) -> bool:
-        unsupported("Sandbox.pause")
-
-    beta_pause = pause
-
-    async def resume(self, *args, **kwargs) -> bool:
-        unsupported("Sandbox.resume")
 
     async def __aenter__(self):
         """Enter an async context manager without changing sandbox state."""

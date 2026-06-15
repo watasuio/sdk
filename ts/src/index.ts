@@ -1,6 +1,7 @@
 export {
   ApiError,
   AuthenticationError,
+  ConflictError,
   FileNotFoundError,
   InvalidArgumentError,
   NotEnoughSpaceError,

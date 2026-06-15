@@ -27,6 +27,11 @@ API supplies a usable data-plane session. The SDK does not poll sandbox
 readiness.
 
 ```python
+sbx.beta_pause()
+sbx.resume(timeout=300)
+```
+
+```python
 from watasu import Sandbox
 
 with Sandbox.create() as sbx:
