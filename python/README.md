@@ -155,6 +155,14 @@ Template.assign_tags("python-ci:stable", ["prod"])
 print(Template.exists("python-ci"))
 ```
 
+The same builder classes are also available from the sync and async template
+namespaces:
+
+```python
+from watasu.template_sync import Template
+from watasu.template_async import AsyncTemplate
+```
+
 Template names resolve server-side. `python-ci` starts the latest ready build;
 `python-ci:stable` starts the tagged build.
 

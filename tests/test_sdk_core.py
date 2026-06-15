@@ -8,6 +8,7 @@ import pytest
 from watasu import (
     ALL_TRAFFIC,
     AsyncSandbox,
+    AsyncTemplate,
     BuildException,
     CommandExitException,
     CommandResult,
@@ -28,6 +29,10 @@ from watasu.sandbox_sync.filesystem.filesystem import Filesystem
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
 from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
 from watasu.sandbox_sync.git import Git
+from watasu.template_async import AsyncTemplate as TemplateAsyncExport
+from watasu.template_async.main import AsyncTemplate as TemplateAsyncMain
+from watasu.template_sync import Template as TemplateSyncExport
+from watasu.template_sync.main import Template as TemplateSyncMain
 
 
 def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
@@ -47,6 +52,13 @@ def test_connection_config_accepts_access_token_alias(monkeypatch):
 
     assert config.api_key == "alias-key"
     assert config.auth_headers["Authorization"] == "Bearer alias-key"
+
+
+def test_template_sync_and_async_import_paths_match_top_level_exports():
+    assert TemplateSyncExport is Template
+    assert TemplateSyncMain is Template
+    assert TemplateAsyncExport is AsyncTemplate
+    assert TemplateAsyncMain is AsyncTemplate
 
 
 def test_command_handle_raises_on_non_zero_exit():
