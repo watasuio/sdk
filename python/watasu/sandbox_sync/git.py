@@ -118,6 +118,8 @@ class Git:
         password: Optional[str] = None,
         dangerously_store_credentials: bool = False,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -137,6 +139,8 @@ class Git:
                 if dangerously_store_credentials
                 else None,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -149,6 +153,8 @@ class Git:
         host: Optional[str] = None,
         protocol: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -161,6 +167,8 @@ class Git:
                 "host": host,
                 "protocol": protocol,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -173,6 +181,8 @@ class Git:
         scope: Optional[str] = None,
         path: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -185,6 +195,8 @@ class Git:
                 "scope": scope,
                 "path": path,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -220,13 +232,21 @@ class Git:
         self,
         path: str,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitStatus:
         """Return parsed repository status for ``path``."""
         result = self._run(
             "/runtime/v1/git/status",
-            {"path": path, "env_vars": envs, "timeout_seconds": _timeout_seconds(timeout)},
+            {
+                "path": path,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
             request_timeout,
         )
         return _parse_status(result)
@@ -235,13 +255,21 @@ class Git:
         self,
         path: str,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitBranches:
         """Return branches and the current branch for ``path``."""
         result = self._run(
             "/runtime/v1/git/branches",
-            {"path": path, "env_vars": envs, "timeout_seconds": _timeout_seconds(timeout)},
+            {
+                "path": path,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
             request_timeout,
         )
         return GitBranches(
@@ -256,13 +284,22 @@ class Git:
         path: str,
         branch: str,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
         """Create and check out a new branch."""
         return self._run(
             "/runtime/v1/git/create_branch",
-            {"path": path, "branch": branch, "env_vars": envs, "timeout_seconds": _timeout_seconds(timeout)},
+            {
+                "path": path,
+                "branch": branch,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
             request_timeout,
         )
 
@@ -272,6 +309,8 @@ class Git:
         branch: str,
         force: bool = False,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -283,6 +322,8 @@ class Git:
                 "branch": branch,
                 "force": force if force else None,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -292,14 +333,25 @@ class Git:
         self,
         path: str,
         files: Optional[List[str]] = None,
+        all: bool = True,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
         """Stage files. Defaults to all files."""
         return self._run(
             "/runtime/v1/git/add",
-            {"path": path, "files": files, "env_vars": envs, "timeout_seconds": _timeout_seconds(timeout)},
+            {
+                "path": path,
+                "files": files,
+                "all": all,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
             request_timeout,
         )
 
@@ -311,6 +363,8 @@ class Git:
         author_email: Optional[str] = None,
         allow_empty: bool = False,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -324,6 +378,8 @@ class Git:
                 "author_email": author_email,
                 "allow_empty": allow_empty if allow_empty else None,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -395,6 +451,8 @@ class Git:
         username: Optional[str] = None,
         password: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -408,6 +466,8 @@ class Git:
                 "username": username,
                 "password": password,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -418,10 +478,12 @@ class Git:
         path: str,
         branch: Optional[str] = None,
         remote: Optional[str] = None,
-        set_upstream: bool = False,
+        set_upstream: bool = True,
         username: Optional[str] = None,
         password: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -436,6 +498,8 @@ class Git:
                 "username": username,
                 "password": password,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -446,13 +510,22 @@ class Git:
         path: str,
         ref: str,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
         """Check out an arbitrary ref in a repository."""
         return self._run(
             "/runtime/v1/git/checkout",
-            {"path": path, "ref": ref, "env_vars": envs, "timeout_seconds": _timeout_seconds(timeout)},
+            {
+                "path": path,
+                "ref": ref,
+                "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
+                "timeout_seconds": _timeout_seconds(timeout),
+            },
             request_timeout,
         )
 
@@ -468,6 +541,8 @@ class Git:
         fetch: bool = False,
         overwrite: bool = False,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -481,6 +556,8 @@ class Git:
                 "fetch": fetch if fetch else None,
                 "overwrite": overwrite if overwrite else None,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -518,6 +595,8 @@ class Git:
         scope: Optional[str] = None,
         path: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> GitCommandResult:
@@ -530,6 +609,8 @@ class Git:
                 "scope": scope,
                 "path": path,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,
@@ -541,6 +622,8 @@ class Git:
         scope: Optional[str] = None,
         path: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> str:
@@ -552,6 +635,8 @@ class Git:
                 "scope": scope,
                 "path": path,
                 "env_vars": envs,
+                "user": user,
+                "cwd": cwd,
                 "timeout_seconds": _timeout_seconds(timeout),
             },
             request_timeout,

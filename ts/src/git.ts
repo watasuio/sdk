@@ -20,6 +20,8 @@ export interface GitAuthOpts {
   username?: string
   password?: string
   envs?: Record<string, string>
+  user?: string
+  cwd?: string
   timeout?: number
   timeoutMs?: number
   requestTimeoutMs?: number
@@ -68,6 +70,7 @@ export interface GitBranchOpts extends GitRequestOpts {
 
 export interface GitAddOpts extends GitRequestOpts {
   files?: string[]
+  all?: boolean
 }
 
 export interface GitCommitOpts extends GitRequestOpts {
@@ -212,7 +215,7 @@ export class Git {
 
   /** Stage files. Defaults to all files. */
   async add(path: string, opts: GitAddOpts = {}): Promise<GitCommandResult> {
-    return this.run('/runtime/v1/git/add', { path, files: opts.files, ...gitOpts(opts) }, opts)
+    return this.run('/runtime/v1/git/add', { path, files: opts.files, all: opts.all, ...gitOpts(opts) }, opts)
   }
 
   /** Commit staged files. */
@@ -261,7 +264,7 @@ export class Git {
       path,
       ...gitOpts(opts),
       ...pick(opts, ['remote', 'branch', 'username', 'password']),
-      set_upstream: opts.setUpstream,
+      set_upstream: opts.setUpstream ?? true,
     }, opts)
   }
 
@@ -328,6 +331,8 @@ export class Git {
 function gitOpts(opts: GitRequestOpts): Record<string, unknown> {
   return {
     env_vars: opts.envs,
+    user: opts.user,
+    cwd: opts.cwd,
     timeout_seconds: opts.timeout ?? (opts.timeoutMs === undefined ? undefined : Math.ceil(opts.timeoutMs / 1000)),
   }
 }

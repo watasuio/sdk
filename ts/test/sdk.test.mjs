@@ -1101,20 +1101,20 @@ test('git helper uses data-plane git routes', async () => {
       sandbox: { route_token: 'route-token' },
     })
 
-    const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, timeoutMs: 10_000 })
+    const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, user: 'sandbox', cwd: '/workspace', timeoutMs: 10_000 })
     await sbx.git.dangerouslyAuthenticate({ username: 'user', password: 'token', host: 'git.example.com', protocol: 'https', timeout: 5 })
     await sbx.git.configureUser('Watasu Test', 'test@watasu.local', { scope: 'local', path: '/workspace/repo' })
     await sbx.git.init('/workspace/repo', { initialBranch: 'main' })
-    const status = await sbx.git.status('/workspace/repo')
+    const status = await sbx.git.status('/workspace/repo', { user: 'sandbox', cwd: '/workspace' })
     const branches = await sbx.git.branches('/workspace/repo')
     await sbx.git.createBranch('/workspace/repo', 'feature/test')
     await sbx.git.deleteBranch('/workspace/repo', 'feature/test', { force: true })
-    await sbx.git.add('/workspace/repo', { files: ['README.md'] })
+    await sbx.git.add('/workspace/repo', { files: ['README.md'], all: true, user: 'sandbox', cwd: '/workspace/repo' })
     await sbx.git.commit('/workspace/repo', 'change', { authorName: 'Watasu Test', authorEmail: 'test@watasu.local', allowEmpty: true })
     await sbx.git.reset('/workspace/repo', { mode: 'hard', target: 'HEAD', paths: ['README.md'] })
     await sbx.git.restore('/workspace/repo', { paths: ['README.md'], staged: true })
     await sbx.git.pull('/workspace/repo', { remote: 'origin', branch: 'main', username: 'user', password: 'token' })
-    await sbx.git.push('/workspace/repo', { remote: 'origin', branch: 'main', setUpstream: true, username: 'user', password: 'token' })
+    await sbx.git.push('/workspace/repo', { remote: 'origin', branch: 'main', username: 'user', password: 'token' })
     await sbx.git.checkout('/workspace/repo', 'main')
     await sbx.git.checkoutBranch('/workspace/repo', 'main')
     await sbx.git.remoteAdd('/workspace/repo', 'origin', 'https://git.example/repo.git', { fetch: true, overwrite: true })
@@ -1132,15 +1132,15 @@ test('git helper uses data-plane git routes', async () => {
     assert.equal(remoteUrl, 'https://git.example/repo.git')
     assert.equal(configValue, 'false')
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
-      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/clone', { url: 'https://git.example/repo.git', timeout_seconds: 10, path: '/workspace/repo', branch: 'main', depth: 1 }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/clone', { url: 'https://git.example/repo.git', user: 'sandbox', cwd: '/workspace', timeout_seconds: 10, path: '/workspace/repo', branch: 'main', depth: 1 }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/dangerously_authenticate', { timeout_seconds: 5, username: 'user', password: 'token', host: 'git.example.com', protocol: 'https' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/configure_user', { name: 'Watasu Test', email: 'test@watasu.local', scope: 'local', path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/init', { path: '/workspace/repo', initial_branch: 'main' }],
-      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/status', { path: '/workspace/repo' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/status', { path: '/workspace/repo', user: 'sandbox', cwd: '/workspace' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/branches', { path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/create_branch', { path: '/workspace/repo', branch: 'feature/test' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/delete_branch', { path: '/workspace/repo', branch: 'feature/test', force: true }],
-      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/add', { path: '/workspace/repo', files: ['README.md'] }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/add', { path: '/workspace/repo', files: ['README.md'], all: true, user: 'sandbox', cwd: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/commit', { path: '/workspace/repo', message: 'change', author_name: 'Watasu Test', author_email: 'test@watasu.local', allow_empty: true }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/reset', { path: '/workspace/repo', mode: 'hard', target: 'HEAD', paths: ['README.md'] }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/restore', { path: '/workspace/repo', paths: ['README.md'], staged: true }],

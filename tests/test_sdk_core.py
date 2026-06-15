@@ -332,16 +332,18 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
         path="/workspace/repo",
         branch="main",
         depth=1,
+        user="sandbox",
+        cwd="/workspace",
         timeout=10,
     )
     git.dangerously_authenticate("user", "token", host="git.example.com", protocol="https", timeout=5)
     git.configure_user("Watasu Test", "test@watasu.local", scope="local", path="/workspace/repo")
     git.init("/workspace/repo", initial_branch="main")
-    status = git.status("/workspace/repo")
+    status = git.status("/workspace/repo", user="sandbox", cwd="/workspace")
     branches = git.branches("/workspace/repo")
     git.create_branch("/workspace/repo", "feature/test")
     git.delete_branch("/workspace/repo", "feature/test", force=True)
-    git.add("/workspace/repo", files=["README.md"])
+    git.add("/workspace/repo", files=["README.md"], all=True, user="sandbox", cwd="/workspace/repo")
     git.commit(
         "/workspace/repo",
         "change",
@@ -356,7 +358,6 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
         "/workspace/repo",
         remote="origin",
         branch="main",
-        set_upstream=True,
         username="user",
         password="token",
     )
@@ -391,6 +392,8 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
                     "path": "/workspace/repo",
                     "branch": "main",
                     "depth": 1,
+                    "user": "sandbox",
+                    "cwd": "/workspace",
                     "timeout_seconds": 10,
                 },
                 "request_timeout": None,
@@ -431,7 +434,7 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
         (
             "/runtime/v1/git/status",
             {
-                "json": {"path": "/workspace/repo"},
+                "json": {"path": "/workspace/repo", "user": "sandbox", "cwd": "/workspace"},
                 "request_timeout": None,
             },
         ),
@@ -459,7 +462,13 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
         (
             "/runtime/v1/git/add",
             {
-                "json": {"path": "/workspace/repo", "files": ["README.md"]},
+                "json": {
+                    "path": "/workspace/repo",
+                    "files": ["README.md"],
+                    "all": True,
+                    "user": "sandbox",
+                    "cwd": "/workspace/repo",
+                },
                 "request_timeout": None,
             },
         ),
