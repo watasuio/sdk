@@ -98,6 +98,22 @@ with Sandbox.create() as sbx:
     watcher.stop()
 ```
 
+## Network Policy
+
+```python
+with Sandbox.create(
+    network={
+        "allow_out": ["pypi.org:443"],
+        "deny_out": ["169.254.169.254"],
+    }
+) as sbx:
+    sbx.update_network(
+        allow_internet_access=False,
+        allow_package_registry_access=True,
+        allow_out=["pypi.org:443", "registry.npmjs.org:443"],
+    )
+```
+
 ## Metrics And Snapshots
 
 ```python

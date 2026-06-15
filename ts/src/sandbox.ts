@@ -17,10 +17,28 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   envs?: Record<string, string>
   secure?: boolean
   allowInternetAccess?: boolean
+  network?: SandboxNetworkUpdate
   team?: string
   mcp?: unknown
   volumeMounts?: unknown
 }
+
+export type SandboxNetworkSelector = string | string[]
+
+export interface SandboxNetworkUpdate {
+  allowOut?: SandboxNetworkSelector
+  denyOut?: SandboxNetworkSelector
+  allowInternetAccess?: boolean
+  allowPackageRegistryAccess?: boolean
+  allowPublicTraffic?: boolean
+  egressProfile?: string
+  egressProfiles?: string[]
+  networkClass?: string
+  rules?: unknown
+  maskRequestHost?: string
+}
+
+export interface SandboxNetworkUpdateOpts extends ConnectionOpts {}
 
 export interface SandboxConnectOpts extends ConnectionOpts {
   /** Optional new sandbox lifetime in milliseconds. */
@@ -175,6 +193,7 @@ export class Sandbox {
       secure: sandboxOpts.secure ?? true,
       allow_internet_access: sandboxOpts.allowInternetAccess ?? true,
     }
+    Object.assign(sandboxPayload, networkUpdatePayload(sandboxOpts.network))
     putIfPresent(sandboxPayload, 'team', sandboxOpts.team)
 
     const response = await control.post('/sandboxes', {
@@ -473,7 +492,14 @@ export class Sandbox {
     return this.fileUrl('/download_url', path, opts)
   }
 
-  updateNetwork(..._args: unknown[]): never { unsupported('Sandbox.updateNetwork') }
+  /** Atomically replace this sandbox's network egress policy. */
+  async updateNetwork(network: SandboxNetworkUpdate, opts: SandboxNetworkUpdateOpts = {}): Promise<void> {
+    const response = await this.control.put(`/sandboxes/${this.sandboxId}/network`, {
+      json: networkUpdatePayload(network),
+      requestTimeoutMs: opts.requestTimeoutMs,
+    })
+    this.sandbox = record(response.sandbox ?? this.sandbox)
+  }
 
   /** Pause this sandbox. Returns false when it was already paused. */
   async betaPause(opts: ConnectionOpts = {}): Promise<boolean> {
@@ -618,6 +644,24 @@ function templateSlug(value: unknown): string | undefined {
 
 function putIfPresent(target: Record<string, unknown>, key: string, value: unknown): void {
   if (value !== undefined && value !== null) target[key] = value
+}
+
+function networkUpdatePayload(network: SandboxNetworkUpdate | undefined): Record<string, unknown> {
+  if (network === undefined) return {}
+  if (typeof network !== 'object' || network === null) unsupported('network callable rules')
+  if (network.rules !== undefined) unsupported('network rules')
+  if (network.maskRequestHost !== undefined) unsupported('network request host masking')
+
+  return compactRecord({
+    allow_out: network.allowOut,
+    deny_out: network.denyOut,
+    allow_internet_access: network.allowInternetAccess,
+    allow_package_registry_access: network.allowPackageRegistryAccess,
+    allow_public_traffic: network.allowPublicTraffic,
+    egress_profile: network.egressProfile,
+    egress_profiles: network.egressProfiles,
+    network_class: network.networkClass,
+  })
 }
 
 function record(value: unknown): Record<string, unknown> {

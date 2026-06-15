@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from watasu._transport.control import ControlClient
 from watasu._transport.data_plane import DataPlaneClient
@@ -165,8 +165,6 @@ class Sandbox:
         timeout. The returned object always has an active data-plane session.
         """
         _reject_unsupported_opts(opts, ["mcp", "volume_mounts"])
-        if network is not None:
-            unsupported("network callable rules")
         if lifecycle is not None:
             unsupported("lifecycle pause/resume")
 
@@ -180,6 +178,7 @@ class Sandbox:
             "secure": secure,
             "allow_internet_access": allow_internet_access,
         }
+        sandbox_params.update(_network_payload(network))
         for key in ("team",):
             if key in opts:
                 sandbox_params[key] = opts[key]
@@ -599,8 +598,22 @@ class Sandbox:
         """Get signed download URL metadata for a sandbox file path."""
         return self._file_url_info("download_url", path, **opts)
 
-    def update_network(self, *args, **kwargs):
-        unsupported("Sandbox.update_network")
+    def update_network(
+        self,
+        network: Optional[Dict[str, Any]] = None,
+        *,
+        request_timeout: Optional[float] = None,
+        **opts: Any,
+    ) -> None:
+        """Atomically replace this sandbox's network egress policy."""
+        response = self._control.put(
+            f"/sandboxes/{self.sandbox_id}/network",
+            json=_network_payload(network, opts),
+            resource="sandbox",
+            request_timeout=request_timeout,
+        )
+        self._sandbox = response.get("sandbox") or self._sandbox
+        return None
 
     def __enter__(self):
         """Enter a context manager without changing sandbox state."""
@@ -660,6 +673,51 @@ def _session_operation_request_timeout(config: ConnectionConfig, opts: Dict) -> 
     if opts.get("request_timeout") is not None:
         return float(opts["request_timeout"])
     return max(config.request_timeout, SESSION_OPERATION_REQUEST_TIMEOUT_SEC)
+
+
+_NETWORK_KEY_ALIASES = {
+    "allowOut": "allow_out",
+    "denyOut": "deny_out",
+    "allowInternetAccess": "allow_internet_access",
+    "allowPackageRegistryAccess": "allow_package_registry_access",
+    "allowPublicTraffic": "allow_public_traffic",
+    "egressProfile": "egress_profile",
+    "egressProfiles": "egress_profiles",
+    "networkClass": "network_class",
+}
+
+
+def _network_payload(
+    network: Optional[Dict[str, Any]] = None,
+    opts: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    if network is not None:
+        if not isinstance(network, dict):
+            unsupported("network callable rules")
+        payload.update(_normalize_network_keys(network))
+    if opts:
+        payload.update(_normalize_network_keys(opts))
+    _reject_unsupported_network(payload)
+    return payload
+
+
+def _normalize_network_keys(network: Dict[str, Any]) -> Dict[str, Any]:
+    normalized: Dict[str, Any] = {}
+    for key, value in network.items():
+        if value is not None:
+            normalized[_NETWORK_KEY_ALIASES.get(str(key), str(key))] = value
+    return normalized
+
+
+def _reject_unsupported_network(network: Dict[str, Any]) -> None:
+    if "rules" in network:
+        unsupported("network rules")
+    if "mask_request_host" in network or "maskRequestHost" in network:
+        unsupported("network request host masking")
+    for key in ("allow_out", "deny_out"):
+        if callable(network.get(key)):
+            unsupported("network callable selectors")
 
 
 def _host_only(value: str) -> str:

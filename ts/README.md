@@ -87,6 +87,23 @@ await terminal.kill()
 await sbx.kill()
 ```
 
+## Network Policy
+
+```ts
+const sbx = await Sandbox.create({
+  network: {
+    allowOut: ['pypi.org:443'],
+    denyOut: ['169.254.169.254'],
+  },
+})
+
+await sbx.updateNetwork({
+  allowInternetAccess: false,
+  allowPackageRegistryAccess: true,
+  allowOut: ['pypi.org:443', 'registry.npmjs.org:443'],
+})
+```
+
 ## Metrics And Snapshots
 
 ```ts

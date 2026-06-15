@@ -16,7 +16,6 @@ from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
 from watasu.sandbox_sync.git import GitCommandResult, GitStatus
 from watasu.sandbox_sync.main import Sandbox
 from watasu.sandbox_sync.paginator import SandboxPaginator
-from watasu.stubs import unsupported
 
 
 class _AsyncDualMethod:
@@ -684,7 +683,8 @@ class AsyncSandbox:
         return await asyncio.to_thread(self._sync.download_url_info, *args, **kwargs)
 
     async def update_network(self, *args, **kwargs):
-        unsupported("Sandbox.update_network")
+        """Atomically replace this sandbox's network egress policy."""
+        return await asyncio.to_thread(self._sync.update_network, *args, **kwargs)
 
     async def __aenter__(self):
         """Enter an async context manager without changing sandbox state."""

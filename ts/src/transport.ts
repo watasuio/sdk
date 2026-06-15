@@ -14,6 +14,10 @@ export class ControlClient {
     return this.request(path, { ...opts, method: 'POST' })
   }
 
+  put(path: string, opts: RequestOpts = {}) {
+    return this.request(path, { ...opts, method: 'PUT' })
+  }
+
   patch(path: string, opts: RequestOpts = {}) {
     return this.request(path, { ...opts, method: 'PATCH' })
   }

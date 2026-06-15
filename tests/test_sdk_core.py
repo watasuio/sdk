@@ -609,6 +609,11 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
         team="bridgeapp",
         template="base:82",
         envs={"HELLO": "world"},
+        network={
+            "allowOut": ["pypi.org:443"],
+            "denyOut": ["10.0.0.0/8"],
+            "allowPackageRegistryAccess": True,
+        },
     )
 
     assert sbx.sandbox_id == "42"
@@ -616,6 +621,63 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["kwargs"]["json"]["template_id"] == "base:82"
     assert captured["kwargs"]["json"]["env_vars"] == {"HELLO": "world"}
     assert captured["kwargs"]["json"]["team"] == "bridgeapp"
+    assert captured["kwargs"]["json"]["allow_out"] == ["pypi.org:443"]
+    assert captured["kwargs"]["json"]["deny_out"] == ["10.0.0.0/8"]
+    assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
+
+
+def test_sandbox_update_network_uses_snake_case_payload(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def put(self, path, **kwargs):
+            calls.append(("put", path, kwargs))
+            return {
+                "sandbox": {
+                    "id": "network-sandbox",
+                    "network_policy": kwargs["json"],
+                }
+            }
+
+    sbx = Sandbox(
+        "network-sandbox",
+        connection_config=ConnectionConfig(api_key="key"),
+        control=FakeControl(),
+        session={
+            "data_plane_url": "https://route.sandbox.watasuhost.com",
+            "token": "data",
+        },
+    )
+
+    assert (
+        sbx.update_network(
+            {
+                "allowOut": ["registry.npmjs.org:443"],
+                "denyOut": ["10.0.0.0/8"],
+                "allowInternetAccess": False,
+            },
+            allow_package_registry_access=True,
+            request_timeout=3,
+        )
+        is None
+    )
+
+    assert calls == [
+        (
+            "put",
+            "/sandboxes/network-sandbox/network",
+            {
+                "json": {
+                    "allow_out": ["registry.npmjs.org:443"],
+                    "deny_out": ["10.0.0.0/8"],
+                    "allow_internet_access": False,
+                    "allow_package_registry_access": True,
+                },
+                "resource": "sandbox",
+                "request_timeout": 3,
+            },
+        )
+    ]
 
 
 def test_sandbox_constructor_creates_with_default_template(monkeypatch):

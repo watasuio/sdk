@@ -33,6 +33,8 @@ pub struct CreateOptions {
     pub memory_mb: Option<u64>,
     /// Runtime network class.
     pub network_class: Option<String>,
+    /// Runtime network policy.
+    pub network: Option<NetworkUpdateOptions>,
     /// Whether package registry egress should be allowed.
     pub allow_package_registry_access: Option<bool>,
     /// Raw exposed-port declarations for Watasu-specific callers.
@@ -53,6 +55,7 @@ impl Default for CreateOptions {
             cpu: None,
             memory_mb: None,
             network_class: None,
+            network: None,
             allow_package_registry_access: None,
             exposed_ports: None,
         }
@@ -133,6 +136,27 @@ pub struct FileUrlInfo {
     pub raw: Value,
 }
 
+/// Options for atomically replacing a sandbox network policy.
+#[derive(Clone, Debug, Default)]
+pub struct NetworkUpdateOptions {
+    /// Whether the sandbox may access the public internet.
+    pub allow_internet_access: Option<bool>,
+    /// Whether package registry egress should be allowed.
+    pub allow_package_registry_access: Option<bool>,
+    /// Whether public traffic to exposed sandbox URLs is allowed.
+    pub allow_public_traffic: Option<bool>,
+    /// Additional allowed outbound hosts or CIDRs, optionally with `:port`.
+    pub allow_out: Vec<String>,
+    /// Denied outbound hosts or CIDRs, optionally with `:port`.
+    pub deny_out: Vec<String>,
+    /// Single egress profile name.
+    pub egress_profile: Option<String>,
+    /// Egress profile names.
+    pub egress_profiles: Vec<String>,
+    /// Runtime network class.
+    pub network_class: Option<String>,
+}
+
 /// Options for signed file URL creation.
 #[derive(Clone, Debug, Default)]
 pub struct FileUrlOptions {
@@ -205,6 +229,9 @@ impl Sandbox {
         put_if_some(&mut sandbox, "cpu_count", opts.cpu);
         put_if_some(&mut sandbox, "memory_mb", opts.memory_mb);
         put_if_some_string(&mut sandbox, "network_class", opts.network_class);
+        if let Some(network) = opts.network {
+            merge_object(&mut sandbox, network_payload(network));
+        }
         put_if_some_bool(
             &mut sandbox,
             "allow_package_registry_access",
@@ -424,6 +451,21 @@ impl Sandbox {
     /// Get signed download URL metadata.
     pub async fn download_url_info(&self, path: &str, opts: FileUrlOptions) -> Result<FileUrlInfo> {
         self.file_url_info("download_url", path, opts).await
+    }
+
+    /// Atomically replace this sandbox's network egress policy.
+    pub async fn update_network(&mut self, opts: NetworkUpdateOptions) -> Result<()> {
+        let payload = self
+            .control
+            .put(
+                &format!("/sandboxes/{}/network", self.sandbox_id),
+                network_payload(opts),
+            )
+            .await?;
+        if let Some(sandbox) = payload.get("sandbox") {
+            self.sandbox = sandbox.clone();
+        }
+        Ok(())
     }
 
     /// Restore a checkpoint into a new sandbox and return its control-plane metadata.
@@ -670,6 +712,27 @@ fn snapshot_payload(opts: CreateSnapshotOptions) -> Value {
     Value::Object(body)
 }
 
+fn network_payload(opts: NetworkUpdateOptions) -> Value {
+    let mut body = serde_json::Map::new();
+    put_if_some_bool(
+        &mut body,
+        "allow_internet_access",
+        opts.allow_internet_access,
+    );
+    put_if_some_bool(
+        &mut body,
+        "allow_package_registry_access",
+        opts.allow_package_registry_access,
+    );
+    put_if_some_bool(&mut body, "allow_public_traffic", opts.allow_public_traffic);
+    put_if_some_string(&mut body, "egress_profile", opts.egress_profile);
+    put_if_some_string(&mut body, "network_class", opts.network_class);
+    put_if_non_empty_strings(&mut body, "allow_out", opts.allow_out);
+    put_if_non_empty_strings(&mut body, "deny_out", opts.deny_out);
+    put_if_non_empty_strings(&mut body, "egress_profiles", opts.egress_profiles);
+    Value::Object(body)
+}
+
 fn snapshot_info(value: &Value) -> SnapshotInfo {
     SnapshotInfo {
         snapshot_id: string_value(
@@ -738,6 +801,25 @@ fn put_if_some_bool(map: &mut serde_json::Map<String, Value>, key: &str, value: 
     }
 }
 
+fn put_if_non_empty_strings(
+    map: &mut serde_json::Map<String, Value>,
+    key: &str,
+    values: Vec<String>,
+) {
+    if !values.is_empty() {
+        map.insert(
+            key.to_string(),
+            Value::Array(values.into_iter().map(Value::String).collect()),
+        );
+    }
+}
+
+fn merge_object(target: &mut serde_json::Map<String, Value>, value: Value) {
+    if let Value::Object(entries) = value {
+        target.extend(entries);
+    }
+}
+
 fn host_only(value: &str) -> String {
     url::Url::parse(value)
         .map(|url| url.host_str().unwrap_or(value).to_string())
@@ -750,7 +832,7 @@ mod tests {
 
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
-    use super::{metrics_list, snapshot_info};
+    use super::{metrics_list, network_payload, snapshot_info, NetworkUpdateOptions};
 
     #[test]
     fn runtime_base64_helpers_match_protocol() {
@@ -781,5 +863,26 @@ mod tests {
         assert_eq!(snapshot.snapshot_id, "7");
         assert_eq!(snapshot.sandbox_id.as_deref(), Some("42"));
         assert_eq!(snapshot.size_bytes, Some(123));
+    }
+
+    #[test]
+    fn maps_network_update_payload_to_snake_case() {
+        let payload = network_payload(NetworkUpdateOptions {
+            allow_internet_access: Some(false),
+            allow_package_registry_access: Some(true),
+            allow_out: vec!["pypi.org:443".to_string()],
+            deny_out: vec!["10.0.0.0/8".to_string()],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            payload,
+            json!({
+                "allow_internet_access": false,
+                "allow_package_registry_access": true,
+                "allow_out": ["pypi.org:443"],
+                "deny_out": ["10.0.0.0/8"]
+            })
+        );
     }
 }

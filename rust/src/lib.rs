@@ -52,6 +52,6 @@ pub use git::{
 pub use process_socket::{decode_runtime_data, encode_runtime_data, ProcessSocket};
 pub use pty::{Pty, PtyCreateOptions, PtySize};
 pub use sandbox::{
-    CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, RestoreOptions, Sandbox,
-    SandboxInfo, SandboxMetrics, SnapshotInfo,
+    CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, NetworkUpdateOptions,
+    RestoreOptions, Sandbox, SandboxInfo, SandboxMetrics, SnapshotInfo,
 };

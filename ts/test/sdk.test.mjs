@@ -253,6 +253,11 @@ test('sandbox create uses root snake_case API payload', async () => {
       envs: { HELLO: 'world' },
       metadata: { purpose: 'compat' },
       team: 'bridgeapp',
+      network: {
+        allowOut: ['pypi.org:443'],
+        denyOut: ['10.0.0.0/8'],
+        allowPackageRegistryAccess: true,
+      },
     })
 
     assert.equal(sbx.sandboxId, 'created')
@@ -263,8 +268,58 @@ test('sandbox create uses root snake_case API payload', async () => {
       env_vars: { HELLO: 'world' },
       secure: true,
       allow_internet_access: true,
+      allow_out: ['pypi.org:443'],
+      deny_out: ['10.0.0.0/8'],
+      allow_package_registry_access: true,
       team: 'bridgeapp',
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('sandbox updateNetwork uses snake_case API payload', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      return new Response(
+        JSON.stringify({
+          sandbox: {
+            id: 'network-sandbox',
+            network_policy: requests.at(-1).body,
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const sbx = new Sandbox({
+      sandboxId: 'network-sandbox',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+    })
+
+    await sbx.updateNetwork({
+      allowOut: ['registry.npmjs.org:443'],
+      denyOut: ['10.0.0.0/8'],
+      allowInternetAccess: false,
+      allowPackageRegistryAccess: true,
+    })
+
+    assert.deepEqual(requests, [
+      {
+        url: 'https://api.watasu.io/v1/sandboxes/network-sandbox/network',
+        method: 'PUT',
+        body: {
+          allow_out: ['registry.npmjs.org:443'],
+          deny_out: ['10.0.0.0/8'],
+          allow_internet_access: false,
+          allow_package_registry_access: true,
+        },
+      },
+    ])
   } finally {
     globalThis.fetch = originalFetch
   }

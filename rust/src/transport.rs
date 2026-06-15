@@ -28,6 +28,10 @@ impl ControlClient {
         self.request(Method::POST, path, Some(body)).await
     }
 
+    pub(crate) async fn put(&self, path: &str, body: Value) -> Result<Value> {
+        self.request(Method::PUT, path, Some(body)).await
+    }
+
     pub(crate) async fn delete(&self, path: &str) -> Result<Value> {
         self.request(Method::DELETE, path, None).await
     }

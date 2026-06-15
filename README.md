@@ -16,4 +16,4 @@ only with a usable data-plane session. SDKs do not poll sandbox readiness.
 Supported sandbox helpers include streaming commands, PTY sessions, filesystem
 read/write/list/watch, Git clone/auth/status/branches/add/commit/pull/push/
 remotes/config, signed upload/download URLs, metrics, disk snapshots, snapshot
-restore, and snapshot delete.
+restore, snapshot delete, and live sandbox network-policy updates.

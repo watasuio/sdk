@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.10"
+watasu = "0.1.11"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -166,6 +166,24 @@ let download_url = sbx.download_url("/workspace/output.bin", Default::default())
 watcher.stop().await?;
 terminal.kill().await?;
 sbx.kill().await?;
+# Ok(())
+# }
+```
+
+## Network Policy
+
+```rust
+use watasu::{NetworkUpdateOptions, Sandbox};
+
+# async fn run(mut sbx: Sandbox) -> watasu::Result<()> {
+sbx.update_network(NetworkUpdateOptions {
+    allow_internet_access: Some(false),
+    allow_package_registry_access: Some(true),
+    allow_out: vec!["pypi.org:443".into(), "registry.npmjs.org:443".into()],
+    deny_out: vec!["169.254.169.254".into()],
+    ..Default::default()
+})
+.await?;
 # Ok(())
 # }
 ```
