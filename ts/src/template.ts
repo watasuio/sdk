@@ -71,6 +71,7 @@ export type CopyItem = Record<string, unknown>
 export type TemplateBuilder = TemplateBase
 export type TemplateFinal = TemplateBase
 export type TemplateFromImage = TemplateBase
+export type ReadyCommand = string | ReadyCmd
 
 interface BuildSpec {
   base?: string
@@ -89,6 +90,45 @@ interface BuildPayload {
   skip_cache: boolean
   build_spec: BuildSpec
   team?: string
+}
+
+/** Ready-check command wrapper accepted by template builders. */
+export class ReadyCmd {
+  constructor(private readonly cmd: string) {}
+
+  /** Return the shell command used as the ready check. */
+  getCmd(): string {
+    return this.cmd
+  }
+}
+
+/** Return a ready check that waits for a TCP port to listen. */
+export function waitForPort(port: number): ReadyCmd {
+  return new ReadyCmd(`ss -tuln | grep :${port}`)
+}
+
+/** Return a ready check that waits for a URL to return an HTTP status code. */
+export function waitForURL(url: string, statusCode = 200): ReadyCmd {
+  return new ReadyCmd(`curl -s -o /dev/null -w "%{http_code}" ${url} | grep -q "${statusCode}"`)
+}
+
+/** Alias for `waitForURL`. */
+export const waitForUrl = waitForURL
+
+/** Return a ready check that waits for a process name. */
+export function waitForProcess(processName: string): ReadyCmd {
+  return new ReadyCmd(`pgrep ${processName} > /dev/null`)
+}
+
+/** Return a ready check that waits for a file to exist. */
+export function waitForFile(filename: string): ReadyCmd {
+  return new ReadyCmd(`[ -f ${filename} ]`)
+}
+
+/** Return a ready check that waits for a fixed duration in milliseconds. */
+export function waitForTimeout(timeout: number): ReadyCmd {
+  const seconds = Math.max(1, Math.floor(timeout / 1000))
+  return new ReadyCmd(`sleep ${seconds}`)
 }
 
 /** Chainable template builder for Watasu package-spec template builds. */
@@ -363,14 +403,14 @@ export class TemplateBase {
     return this.runCmd(args.join(' '), { user: options.user })
   }
 
-  setStartCmd(startCommand: string, readyCommand: string): TemplateFinal {
+  setStartCmd(startCommand: string, readyCommand: ReadyCommand): TemplateFinal {
     this.startCmd = startCommand
-    this.readyCmd = readyCommand
+    this.readyCmd = readyCommandText(readyCommand)
     return this
   }
 
-  setReadyCmd(readyCommand: string): TemplateFinal {
-    this.readyCmd = readyCommand
+  setReadyCmd(readyCommand: ReadyCommand): TemplateFinal {
+    this.readyCmd = readyCommandText(readyCommand)
     return this
   }
 
@@ -416,6 +456,10 @@ export class TemplateBase {
     for (const command of this.setup) lines.push(`RUN ${command}`)
     return `${lines.join('\n')}\n`
   }
+}
+
+function readyCommandText(command: ReadyCommand): string {
+  return command instanceof ReadyCmd ? command.getCmd() : command
 }
 
 export interface TemplateFactory {

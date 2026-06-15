@@ -113,7 +113,7 @@ export class CommandHandle implements Partial<CommandResult> {
   }
 
   /** Detach the local stream without killing the process. */
-  disconnect(): void {
+  async disconnect(): Promise<void> {
     this.socket.close()
   }
 
@@ -163,6 +163,11 @@ export class Commands {
     private readonly sandboxEnvs: Record<string, string> = {}
   ) {}
 
+  /** Whether this runtime supports stdin EOF frames. */
+  get supportsStdinClose(): boolean {
+    return true
+  }
+
   /** List processes currently known by the sandbox runtime. */
   async list(opts: { requestTimeoutMs?: number } = {}): Promise<ProcessInfo[]> {
     const payload = await this.dataPlane.getJson('/runtime/v1/process', opts)
@@ -185,7 +190,7 @@ export class Commands {
     try {
       await handle.sendStdin(data)
     } finally {
-      handle.disconnect()
+      await handle.disconnect()
     }
   }
 
@@ -195,7 +200,7 @@ export class Commands {
     try {
       await handle.closeStdin()
     } finally {
-      handle.disconnect()
+      await handle.disconnect()
     }
   }
 

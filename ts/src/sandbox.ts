@@ -573,7 +573,7 @@ export class Sandbox {
   async close(): Promise<void> {}
 
   /** Get a signed URL that accepts a POST upload for a sandbox file path. */
-  async uploadUrl(path: string, opts: SandboxUrlOpts = {}): Promise<string> {
+  async uploadUrl(path = '', opts: SandboxUrlOpts = {}): Promise<string> {
     const fileUrl = await this.fileUrl('/upload_url', path, opts)
     return fileUrl.url
   }
@@ -585,7 +585,7 @@ export class Sandbox {
   }
 
   /** Get signed upload URL metadata for a sandbox file path. */
-  async uploadUrlInfo(path: string, opts: SandboxUrlOpts = {}): Promise<FileUrlInfo> {
+  async uploadUrlInfo(path = '', opts: SandboxUrlOpts = {}): Promise<FileUrlInfo> {
     return this.fileUrl('/upload_url', path, opts)
   }
 

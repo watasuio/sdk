@@ -78,7 +78,7 @@ export class Pty {
     try {
       await handle.sendStdin(data)
     } finally {
-      handle.disconnect()
+      await handle.disconnect()
     }
   }
 
@@ -93,7 +93,7 @@ export class Pty {
     try {
       await handle.resize(size)
     } finally {
-      handle.disconnect()
+      await handle.disconnect()
     }
   }
 

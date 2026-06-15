@@ -17,6 +17,7 @@ from watasu import (
     SandboxOpts,
     Template,
     TemplateBuildStatus,
+    wait_for_timeout,
 )
 from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.filesystem.filesystem import FileType
@@ -1597,6 +1598,11 @@ def test_template_builder_compatibility_serializers_and_mcp_helper():
 
     with pytest.raises(NotImplementedError, match="from_gcp_registry"):
         Template().from_gcp_registry("image", {"project_id": "test"})
+
+
+def test_ready_timeout_uses_milliseconds_with_minimum_one_second():
+    assert wait_for_timeout(500).get_cmd() == "sleep 1"
+    assert wait_for_timeout(2500).get_cmd() == "sleep 2"
 
 
 def test_template_alias_and_tag_helpers(monkeypatch):

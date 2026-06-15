@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  Commands,
   CommandExitError,
   CommandHandle,
   ConnectionConfig,
@@ -15,9 +16,15 @@ import {
   SandboxPaginator,
   SnapshotPaginator,
   WatchHandle,
+  ReadyCmd,
   Template,
   base64DecodeText,
   base64Encode,
+  waitForFile,
+  waitForPort,
+  waitForProcess,
+  waitForTimeout,
+  waitForURL,
 } from '../dist/index.js'
 
 test('connection config defaults to Watasu hosts', () => {
@@ -90,16 +97,23 @@ test('command handle treats pty frames as terminal output', async () => {
 
 test('command handle can close stdin without disconnecting', async () => {
   const sent = []
+  let closeCount = 0
   const socket = {
-    close() {},
+    close() {
+      closeCount += 1
+    },
     closeStdin() {
       sent.push({ type: 'close_stdin' })
     },
   }
-  const handle = new CommandHandle(123, socket, async () => true, (async function* () {})())
+  const handle = new CommandHandle(123, socket, async () => true, (async function* () { await new Promise(() => {}) })())
+  const commands = new Commands({}, new ConnectionConfig({ apiKey: 'key' }))
 
   await handle.closeStdin()
+  await handle.disconnect()
 
+  assert.equal(commands.supportsStdinClose, true)
+  assert.equal(closeCount, 1)
   assert.deepEqual(sent, [{ type: 'close_stdin' }])
 })
 
@@ -702,6 +716,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     const restored = await sbx.restore({ snapshotId: snapshot.snapshotId, timeoutMs: 120_000 })
     const deleted = await sbx.deleteSnapshot(snapshot.snapshotId)
     const uploadUrl = await sbx.uploadUrl('/tmp/a.txt', { useSignatureExpiration: 300 })
+    const rootUploadUrl = await sbx.uploadUrl()
     const downloadUrl = await sbx.downloadUrl('/tmp/a.txt')
     const mcpUrl = sbx.getMcpUrl()
     const mcpToken = await sbx.getMcpToken()
@@ -713,6 +728,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     assert.equal(restored.sandboxId, 'restored')
     assert.equal(deleted, true)
     assert.equal(uploadUrl, 'https://signed.example/tmp/a.txt')
+    assert.equal(rootUploadUrl, 'https://signed.example')
     assert.equal(downloadUrl, 'https://signed.example/tmp/a.txt')
     assert.equal(mcpUrl, 'https://p50005-route-token.sandbox.watasuhost.com/mcp')
     assert.equal(mcpToken, 'gateway-token')
@@ -724,6 +740,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/restore', { checkpoint_id: '9', timeout_seconds: 120 }],
       ['DELETE', 'https://api.watasu.io/v1/sandbox_snapshots/9', undefined],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/upload_url', { path: '/tmp/a.txt', use_signature_expiration: 300 }],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/upload_url', { path: '' }],
       ['POST', 'https://api.watasu.io/v1/sandboxes/1/files/download_url', { path: '/tmp/a.txt' }],
       ['GET', 'https://route.sandbox.watasuhost.com/runtime/v1/files?path=%2Fetc%2Fmcp-gateway%2F.token', undefined],
     ])
@@ -842,6 +859,21 @@ test('template builder sends snake_case build payloads and parses status', async
     assert.deepEqual(JSON.parse(await Template.toJSON(mcpTemplate)), {
       base: 'mcp-gateway',
       setup: ['mcp-gateway pull exa brave'],
+    })
+    assert.equal(waitForPort(8000).getCmd(), 'ss -tuln | grep :8000')
+    assert.equal(waitForURL('http://localhost:3000/health').getCmd(), 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health | grep -q "200"')
+    assert.equal(waitForProcess('server').getCmd(), 'pgrep server > /dev/null')
+    assert.equal(waitForFile('/tmp/ready').getCmd(), '[ -f /tmp/ready ]')
+    assert.equal(waitForTimeout(2500).getCmd(), 'sleep 2')
+    assert.equal(waitForTimeout(500).getCmd(), 'sleep 1')
+    assert.equal(new ReadyCmd('test -f /tmp/custom').getCmd(), 'test -f /tmp/custom')
+    assert.deepEqual(JSON.parse(await Template.toJSON(
+      Template()
+        .setStartCmd('npm start', waitForPort(3000))
+        .setReadyCmd(waitForTimeout(1000))
+    )), {
+      start_cmd: 'npm start',
+      ready_cmd: 'sleep 1',
     })
     assert.equal(Template.toDockerfile(template), [
       'FROM base',

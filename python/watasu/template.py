@@ -576,9 +576,10 @@ def wait_for_process(process_name: str) -> ReadyCmd:
     return ReadyCmd(f"pgrep -f {shlex.quote(process_name)} >/dev/null")
 
 
-def wait_for_timeout(seconds: Union[int, float]) -> ReadyCmd:
-    """Return a ready check that waits for a fixed duration."""
-    return ReadyCmd(f"sleep {float(seconds)}")
+def wait_for_timeout(timeout: Union[int, float]) -> ReadyCmd:
+    """Return a ready check that waits for a fixed duration in milliseconds."""
+    seconds = max(1, int(float(timeout) // 1000))
+    return ReadyCmd(f"sleep {seconds}")
 
 
 def wait_for_url(url: str, status_code: int = 200) -> ReadyCmd:
