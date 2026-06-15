@@ -253,6 +253,14 @@ export class TemplateBase {
     return this
   }
 
+  fromAWSRegistry(_image: string, _credentials: { accessKeyId: string; secretAccessKey: string; region: string }): TemplateBuilder {
+    unsupported('Template.fromAWSRegistry')
+  }
+
+  fromGCPRegistry(_image: string, _credentials: { serviceAccountJSON: object | string }): TemplateBuilder {
+    unsupported('Template.fromGCPRegistry')
+  }
+
   fromTemplate(template: string): TemplateBuilder {
     this.base = template
     return this
@@ -337,6 +345,13 @@ export class TemplateBase {
   aptInstall(packages: string | string[], _options: { noInstallRecommends?: boolean; fixMissing?: boolean } = {}): TemplateBuilder {
     this.addPackages('apt', arrayOfStrings(packages))
     return this
+  }
+
+  addMcpServer(servers: string | string[]): TemplateBuilder {
+    if (this.base !== 'mcp-gateway') {
+      throw new SandboxError('MCP servers can only be added to mcp-gateway template')
+    }
+    return this.runCmd(`mcp-gateway pull ${arrayOfStrings(servers).join(' ')}`, { user: 'root' })
   }
 
   gitClone(url: string, path?: string, options: { branch?: string; depth?: number; user?: string } = {}): TemplateBuilder {

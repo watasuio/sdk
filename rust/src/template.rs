@@ -35,6 +35,18 @@ impl TemplateBuilder {
         self
     }
 
+    /// Start from the Watasu base rootfs for Debian-shaped builder code.
+    pub fn from_debian_image(mut self, _variant: impl Into<String>) -> Self {
+        self.base.get_or_insert_with(|| "base".to_string());
+        self
+    }
+
+    /// Start from the Watasu base rootfs for Ubuntu-shaped builder code.
+    pub fn from_ubuntu_image(mut self, _variant: impl Into<String>) -> Self {
+        self.base.get_or_insert_with(|| "base".to_string());
+        self
+    }
+
     /// Start from a named Watasu template base.
     pub fn from_template(mut self, template: impl Into<String>) -> Self {
         self.base = Some(template.into());
@@ -53,6 +65,18 @@ impl TemplateBuilder {
         self
     }
 
+    /// Use the Watasu base rootfs for Bun package-spec builds.
+    pub fn from_bun_image(mut self, _variant: impl Into<String>) -> Self {
+        self.base.get_or_insert_with(|| "base".to_string());
+        self
+    }
+
+    /// Accept image-shaped builder code while using Watasu's package-spec base.
+    pub fn from_image(mut self, _image: impl Into<String>) -> Self {
+        self.base.get_or_insert_with(|| "base".to_string());
+        self
+    }
+
     /// Add apt packages to the template build.
     pub fn apt_install<I, S>(mut self, packages: I) -> Self
     where
@@ -60,6 +84,25 @@ impl TemplateBuilder {
         S: Into<String>,
     {
         self.add_packages("apt", packages);
+        self
+    }
+
+    /// Install MCP servers using an `mcp-gateway` template base.
+    pub fn add_mcp_server<I, S>(mut self, servers: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let servers = servers
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<String>>()
+            .join(" ");
+        let command = self.command_with_context(
+            format!("mcp-gateway pull {servers}"),
+            Some("root".to_string()),
+        );
+        self.setup.push(command);
         self
     }
 
@@ -147,6 +190,32 @@ impl TemplateBuilder {
             spec.insert("ready_cmd".to_string(), json!(ready_cmd));
         }
         Value::Object(spec)
+    }
+
+    /// Return the template package spec as formatted JSON.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&self.build_spec())
+            .expect("template build spec should always serialize")
+    }
+
+    /// Return a Dockerfile-shaped preview of the supported package spec.
+    pub fn to_dockerfile(&self) -> String {
+        let mut lines = vec![format!("FROM {}", self.base.as_deref().unwrap_or("base"))];
+        for package in self.packages.get("apt").into_iter().flatten() {
+            lines.push(format!(
+                "RUN apt-get update && apt-get install -y {package}"
+            ));
+        }
+        for package in self.packages.get("pip").into_iter().flatten() {
+            lines.push(format!("RUN python3 -m pip install {package}"));
+        }
+        for package in self.packages.get("npm").into_iter().flatten() {
+            lines.push(format!("RUN npm install -g {package}"));
+        }
+        for command in &self.setup {
+            lines.push(format!("RUN {command}"));
+        }
+        format!("{}\n", lines.join("\n"))
     }
 
     fn add_packages<I, S>(&mut self, manager: &str, packages: I)
@@ -589,6 +658,39 @@ mod tests {
                 "base": "base",
                 "packages": {"apt": ["git"], "pip": ["pytest"]},
                 "setup": ["cd '/workspace' && echo ready"],
+            })
+        );
+    }
+
+    #[test]
+    fn builder_serializes_json_dockerfile_and_mcp_helpers() {
+        let template = TemplateBuilder::new()
+            .from_python_image("3.12")
+            .apt_install(["git"])
+            .pip_install(["pytest"])
+            .run_cmd("echo ready");
+
+        assert_eq!(
+            serde_json::from_str::<Value>(&template.to_json()).unwrap(),
+            json!({
+                "base": "base",
+                "packages": {"apt": ["git"], "pip": ["pytest"]},
+                "setup": ["echo ready"],
+            })
+        );
+        assert_eq!(
+            template.to_dockerfile(),
+            "FROM base\nRUN apt-get update && apt-get install -y git\nRUN python3 -m pip install pytest\nRUN echo ready\n"
+        );
+
+        let mcp_template = TemplateBuilder::new()
+            .from_template("mcp-gateway")
+            .add_mcp_server(["exa", "brave"]);
+        assert_eq!(
+            mcp_template.build_spec(),
+            json!({
+                "base": "mcp-gateway",
+                "setup": ["mcp-gateway pull exa brave"],
             })
         );
     }

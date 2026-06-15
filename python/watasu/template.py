@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import shlex
 import time
 from dataclasses import dataclass, field
@@ -153,6 +154,24 @@ class TemplateBase:
         self._base = self._base or "base"
         return self
 
+    def from_aws_registry(
+        self,
+        image: str,
+        access_key_id: str,
+        secret_access_key: str,
+        region: str,
+    ) -> "TemplateBase":
+        """AWS registry template bases are not supported by Watasu package-spec builds yet."""
+        unsupported("Template.from_aws_registry")
+
+    def from_gcp_registry(
+        self,
+        image: str,
+        service_account_json: Union[str, Dict[str, Any]],
+    ) -> "TemplateBase":
+        """GCP registry template bases are not supported by Watasu package-spec builds yet."""
+        unsupported("Template.from_gcp_registry")
+
     def from_template(self, template: str) -> "TemplateBase":
         """Start this build from a named Watasu template base."""
         self._base = template
@@ -275,6 +294,12 @@ class TemplateBase:
         self._add_packages("apt", _string_list(packages))
         return self
 
+    def add_mcp_server(self, servers: Union[str, List[str]]) -> "TemplateBase":
+        """Install MCP servers in a template that starts from ``mcp-gateway``."""
+        if self._base != "mcp-gateway":
+            raise BuildException("MCP servers can only be added to mcp-gateway template")
+        return self.run_cmd(f"mcp-gateway pull {' '.join(_string_list(servers))}", user="root")
+
     def git_clone(
         self,
         url: str,
@@ -330,6 +355,27 @@ class TemplateBase:
         if self._ready_cmd:
             spec["ready_cmd"] = self._ready_cmd
         return spec
+
+    @staticmethod
+    def to_json(template: "TemplateBase") -> str:
+        """Return the template package spec as formatted JSON."""
+        return json.dumps(template.to_build_spec(), indent=2)
+
+    @staticmethod
+    def to_dockerfile(template: "TemplateBase") -> str:
+        """Return a Dockerfile-shaped preview of the supported package spec."""
+        spec = template.to_build_spec()
+        lines = [f"FROM {spec.get('base') or 'base'}"]
+        packages = spec.get("packages") or {}
+        for package in packages.get("apt", []):
+            lines.append(f"RUN apt-get update && apt-get install -y {package}")
+        for package in packages.get("pip", []):
+            lines.append(f"RUN python3 -m pip install {package}")
+        for package in packages.get("npm", []):
+            lines.append(f"RUN npm install -g {package}")
+        for command in spec.get("setup", []):
+            lines.append(f"RUN {command}")
+        return "\n".join(lines) + "\n"
 
     def _add_packages(self, manager: str, packages: List[str]) -> None:
         self._packages.setdefault(manager, []).extend(packages)

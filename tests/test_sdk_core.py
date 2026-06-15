@@ -7,6 +7,7 @@ import pytest
 
 from watasu import (
     AsyncSandbox,
+    BuildException,
     CommandExitException,
     CommandResult,
     ConnectionConfig,
@@ -1541,6 +1542,45 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch):
             {"logs_offset": 1},
         ),
     ]
+
+
+def test_template_builder_compatibility_serializers_and_mcp_helper():
+    template = (
+        Template()
+        .from_python_image("3.12")
+        .apt_install(["git"])
+        .pip_install(["pytest"])
+        .run_cmd("echo ready")
+    )
+
+    assert json.loads(Template.to_json(template)) == {
+        "base": "base",
+        "packages": {"apt": ["git"], "pip": ["pytest"]},
+        "setup": ["echo ready"],
+    }
+    assert Template.to_dockerfile(template) == (
+        "FROM base\n"
+        "RUN apt-get update && apt-get install -y git\n"
+        "RUN python3 -m pip install pytest\n"
+        "RUN echo ready\n"
+    )
+
+    mcp_template = Template().from_template("mcp-gateway").add_mcp_server(
+        ["exa", "brave"]
+    )
+    assert mcp_template.to_build_spec() == {
+        "base": "mcp-gateway",
+        "setup": ["mcp-gateway pull exa brave"],
+    }
+
+    with pytest.raises(BuildException, match="mcp-gateway"):
+        Template().add_mcp_server("exa")
+
+    with pytest.raises(NotImplementedError, match="from_aws_registry"):
+        Template().from_aws_registry("image", "key", "secret", "us-east-1")
+
+    with pytest.raises(NotImplementedError, match="from_gcp_registry"):
+        Template().from_gcp_registry("image", {"project_id": "test"})
 
 
 def test_template_alias_and_tag_helpers(monkeypatch):

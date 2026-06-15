@@ -733,6 +733,10 @@ test('template builder sends snake_case build payloads and parses status', async
       .setEnvs({ TOKEN: 'secret' })
       .runCmd('echo ready')
 
+    const mcpTemplate = Template()
+      .fromTemplate('mcp-gateway')
+      .addMcpServer(['exa', 'brave'])
+
     const build = await Template.buildInBackground(template, 'python-ci:stable', {
       apiKey: 'key',
       cpuCount: 4,
@@ -746,6 +750,26 @@ test('template builder sends snake_case build payloads and parses status', async
     assert.equal(build.templateId, '42')
     assert.equal(status.status, 'ready')
     assert.equal(status.logEntries[0].message, 'done')
+    assert.deepEqual(JSON.parse(await Template.toJSON(mcpTemplate)), {
+      base: 'mcp-gateway',
+      setup: ['mcp-gateway pull exa brave'],
+    })
+    assert.equal(Template.toDockerfile(template), [
+      'FROM base',
+      'RUN apt-get update && apt-get install -y git',
+      'RUN python3 -m pip install pytest',
+      'RUN echo ready',
+      '',
+    ].join('\n'))
+    assert.throws(() => Template().addMcpServer('exa'), /mcp-gateway/)
+    assert.throws(
+      () => Template().fromAWSRegistry('image', { accessKeyId: 'key', secretAccessKey: 'secret', region: 'us-east-1' }),
+      /not supported/
+    )
+    assert.throws(
+      () => Template().fromGCPRegistry('image', { serviceAccountJSON: {} }),
+      /not supported/
+    )
     assert.deepEqual(requests, [
       {
         url: 'https://api.watasu.io/v1/templates',
