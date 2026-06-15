@@ -74,7 +74,9 @@ class ProcessSocket:
                 try:
                     ws.ping("watasu-sdk")
                 except Exception as error:
-                    raise SandboxException(f"process websocket ping failed: {error}") from error
+                    raise SandboxException(
+                        f"process websocket ping failed: {error}"
+                    ) from error
                 next_ping = now + self.keepalive_interval
 
             socket_timeout = min(1.0, max(0.1, next_ping - now))
@@ -103,11 +105,15 @@ class ProcessSocket:
             try:
                 frame = json.loads(message)
             except json.JSONDecodeError as error:
-                raise SandboxException(f"process websocket returned invalid JSON: {message}") from error
+                raise SandboxException(
+                    f"process websocket returned invalid JSON: {message}"
+                ) from error
             if frame.get("type") in {"ready", "pong"}:
                 continue
             if frame.get("type") == "error":
-                raise SandboxException(frame.get("message") or frame.get("code") or "process error")
+                raise SandboxException(
+                    frame.get("message") or frame.get("code") or "process error"
+                )
             yield frame
 
     def _require_open(self):
@@ -132,7 +138,12 @@ class ProcessEventStream:
 
 
 class QueuedProcessEventStream:
-    def __init__(self, socket: ProcessSocket, first_frame: Dict[str, Any], frames: Iterable[Dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        socket: ProcessSocket,
+        first_frame: Dict[str, Any],
+        frames: Iterable[Dict[str, Any]],
+    ) -> None:
         self.socket = socket
         self._queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
         self._queue.put(first_frame)

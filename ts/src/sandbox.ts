@@ -13,13 +13,7 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   envs?: Record<string, string>
   secure?: boolean
   allowInternetAccess?: boolean
-  templateVersionId?: number | string
   team?: string
-  cpu?: number
-  memoryMb?: number
-  networkClass?: string
-  allowPackageRegistryAccess?: boolean
-  exposedPorts?: unknown[]
   mcp?: unknown
   volumeMounts?: unknown
 }
@@ -31,7 +25,8 @@ export interface SandboxConnectOpts extends ConnectionOpts {
 
 export interface SandboxInfo {
   sandboxId: string
-  templateVersionId?: number
+  templateId?: string
+  name?: string
   state?: string
   metadata: Record<string, string>
   startedAt?: string
@@ -51,6 +46,7 @@ export class Sandbox {
 
   private readonly config: ConnectionConfig
   private readonly control: ControlClient
+  private readonly envs: Record<string, string>
   private dataPlane: DataPlaneClient
   private sandbox: Record<string, unknown>
 
@@ -65,11 +61,12 @@ export class Sandbox {
     this.sandboxId = String(opts.sandboxId)
     this.config = opts.connectionConfig
     this.control = opts.control ?? new ControlClient(this.config)
+    this.envs = opts.envs ?? {}
     this.sandbox = opts.sandbox ?? {}
     const dataPlane = dataPlaneFromSession(opts.session, this.config)
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
-    this.commands = new Commands(dataPlane, this.config, opts.envs ?? {})
+    this.commands = new Commands(dataPlane, this.config, this.envs)
   }
 
   static async create(opts?: SandboxCreateOpts): Promise<Sandbox>
@@ -87,21 +84,17 @@ export class Sandbox {
     const config = new ConnectionConfig(sandboxOpts)
     const control = new ControlClient(config)
     const sandboxPayload: Record<string, unknown> = {
-      template,
-      timeout_seconds: Math.ceil((sandboxOpts.timeoutMs ?? 300_000) / 1000),
+      template_id: template,
+      timeout: Math.ceil((sandboxOpts.timeoutMs ?? 300_000) / 1000),
       metadata: sandboxOpts.metadata ?? {},
+      env_vars: sandboxOpts.envs ?? {},
+      secure: sandboxOpts.secure ?? true,
       allow_internet_access: sandboxOpts.allowInternetAccess ?? true,
     }
-    putIfPresent(sandboxPayload, 'template_version_id', sandboxOpts.templateVersionId)
     putIfPresent(sandboxPayload, 'team', sandboxOpts.team)
-    putIfPresent(sandboxPayload, 'cpu', sandboxOpts.cpu)
-    putIfPresent(sandboxPayload, 'memory_mb', sandboxOpts.memoryMb)
-    putIfPresent(sandboxPayload, 'network_class', sandboxOpts.networkClass)
-    putIfPresent(sandboxPayload, 'allow_package_registry_access', sandboxOpts.allowPackageRegistryAccess)
-    putIfPresent(sandboxPayload, 'exposed_ports', sandboxOpts.exposedPorts)
 
     const response = await control.post('/sandboxes', {
-      json: { sandbox: sandboxPayload },
+      json: sandboxPayload,
       requestTimeoutMs: sessionOperationRequestTimeout(config, sandboxOpts),
     })
     const sandbox = record(response.sandbox ?? response)
@@ -123,7 +116,7 @@ export class Sandbox {
     const control = new ControlClient(config)
     const info = await control.get(`/sandboxes/${sandboxId}`)
     const response = await control.post(`/sandboxes/${sandboxId}/connect`, {
-      json: { connect: opts.timeoutMs ? { timeout_seconds: Math.ceil(opts.timeoutMs / 1000) } : {} },
+      json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
       requestTimeoutMs: sessionOperationRequestTimeout(config, opts),
     })
     return new Sandbox({
@@ -138,14 +131,14 @@ export class Sandbox {
   /** Refresh this sandbox's data-plane session in place. */
   async connect(opts: SandboxConnectOpts = {}): Promise<this> {
     const response = await this.control.post(`/sandboxes/${this.sandboxId}/connect`, {
-      json: { connect: opts.timeoutMs ? { timeout_seconds: Math.ceil(opts.timeoutMs / 1000) } : {} },
+      json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
       requestTimeoutMs: sessionOperationRequestTimeout(this.config, opts),
     })
     this.sandbox = record(response.sandbox ?? this.sandbox)
     const dataPlane = dataPlaneFromSession(response.session, this.config)
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
-    this.commands = new Commands(dataPlane, this.config)
+    this.commands = new Commands(dataPlane, this.config, this.envs)
     return this
   }
 
@@ -179,15 +172,15 @@ export class Sandbox {
   /** Set a sandbox's lifetime by id. */
   static async setTimeout(sandboxId: string, timeoutMs: number, opts: ConnectionOpts = {}): Promise<void> {
     const control = new ControlClient(new ConnectionConfig(opts))
-    await control.patch(`/sandboxes/${sandboxId}`, {
-      json: { sandbox: { timeout_seconds: Math.ceil(timeoutMs / 1000) } },
+    await control.post(`/sandboxes/${sandboxId}/timeout`, {
+      json: { timeout: Math.ceil(timeoutMs / 1000) },
     })
   }
 
   /** Set this sandbox's lifetime. */
   async setTimeout(timeoutMs: number): Promise<void> {
-    await this.control.patch(`/sandboxes/${this.sandboxId}`, {
-      json: { sandbox: { timeout_seconds: Math.ceil(timeoutMs / 1000) } },
+    await this.control.post(`/sandboxes/${this.sandboxId}/timeout`, {
+      json: { timeout: Math.ceil(timeoutMs / 1000) },
     })
   }
 
@@ -248,12 +241,22 @@ function sessionOperationRequestTimeout(config: ConnectionConfig, opts: Connecti
 function sandboxInfo(payload: Record<string, unknown>): SandboxInfo {
   return {
     sandboxId: String(payload.id ?? payload.sandbox_id ?? ''),
-    templateVersionId: typeof payload.template_version_id === 'number' ? payload.template_version_id : undefined,
+    templateId: typeof payload.template_id === 'string' ? payload.template_id : templateSlug(payload.template),
+    name: typeof payload.name === 'string' ? payload.name : undefined,
     state: typeof payload.state === 'string' ? payload.state : undefined,
     metadata: recordOfStrings(payload.metadata),
-    startedAt: typeof payload.created_at === 'string' ? payload.created_at : undefined,
-    endAt: typeof payload.deadline_at === 'string' ? payload.deadline_at : undefined,
+    startedAt: typeof payload.started_at === 'string'
+      ? payload.started_at
+      : typeof payload.created_at === 'string' ? payload.created_at : undefined,
+    endAt: typeof payload.end_at === 'string'
+      ? payload.end_at
+      : typeof payload.deadline_at === 'string' ? payload.deadline_at : undefined,
   }
+}
+
+function templateSlug(value: unknown): string | undefined {
+  const template = record(value)
+  return typeof template.slug === 'string' ? template.slug : undefined
 }
 
 function putIfPresent(target: Record<string, unknown>, key: string, value: unknown): void {

@@ -19,7 +19,7 @@ test('connection config defaults to Watasu hosts', () => {
   assert.equal(config.authHeaders.Authorization, 'Bearer key')
 })
 
-test('connection config accepts E2B auth aliases', () => {
+test('connection config accepts access token alias', () => {
   const config = new ConnectionConfig({ accessToken: 'alias-key' })
   assert.equal(config.authHeaders.Authorization, 'Bearer alias-key')
 })
@@ -75,7 +75,7 @@ test('sandbox construction requires a session', () => {
   )
 })
 
-test('sandbox getHost is sync and E2B-shaped', () => {
+test('sandbox getHost is sync', () => {
   const sbx = new Sandbox({
     sandboxId: '1',
     connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
@@ -106,6 +106,78 @@ test('sandbox getHost derives route token from data-plane URL', () => {
   })
 
   assert.equal(sbx.getHost(3000), 'p3000-derived-token.sandbox.watasuhost.com')
+})
+
+test('sandbox create uses root snake_case API payload', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) })
+      return new Response(
+        JSON.stringify({
+          sandbox: { id: 'created', template_id: 'base' },
+          session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const sbx = await Sandbox.create('base:82', {
+      apiKey: 'key',
+      timeoutMs: 120_000,
+      envs: { HELLO: 'world' },
+      metadata: { purpose: 'compat' },
+      team: 'bridgeapp',
+    })
+
+    assert.equal(sbx.sandboxId, 'created')
+    assert.deepEqual(requests[0].body, {
+      template_id: 'base:82',
+      timeout: 120,
+      metadata: { purpose: 'compat' },
+      env_vars: { HELLO: 'world' },
+      secure: true,
+      allow_internet_access: true,
+      team: 'bridgeapp',
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('sandbox connect and setTimeout use root timeout payloads', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      if (String(url).endsWith('/connect')) {
+        return new Response(
+          JSON.stringify({
+            sandbox: { id: 'existing' },
+            session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      return new Response(JSON.stringify({ sandbox: { id: 'existing' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    const sbx = await Sandbox.connect('existing', { apiKey: 'key', timeoutMs: 90_000 })
+    await sbx.setTimeout(180_000)
+
+    assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
+      ['GET', 'https://api.watasu.io/v1/sandboxes/existing', undefined],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/connect', { timeout: 90 }],
+      ['POST', 'https://api.watasu.io/v1/sandboxes/existing/timeout', { timeout: 180 }],
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('sandbox isRunning reflects control-plane state', async () => {

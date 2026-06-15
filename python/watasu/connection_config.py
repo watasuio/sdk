@@ -19,6 +19,7 @@ class ApiParams(TypedDict, total=False):
     headers: Optional[Dict[str, str]]
     proxy: Optional[ProxyTypes]
     api_url: Optional[str]
+    debug: Optional[bool]
 
 
 @dataclass
@@ -50,15 +51,10 @@ class ConnectionConfig:
         proxy: Optional[ProxyTypes] = None,
         api_url: Optional[str] = None,
         data_plane_domain: Optional[str] = None,
+        debug: Optional[bool] = None,
         **_: Any,
     ) -> None:
-        self.api_key = (
-            api_key
-            or access_token
-            or os.environ.get("WATASU_API_KEY")
-            or os.environ.get("E2B_API_KEY")
-            or os.environ.get("E2B_ACCESS_TOKEN")
-        )
+        self.api_key = api_key or access_token or os.environ.get("WATASU_API_KEY")
         self.domain = domain or os.environ.get("WATASU_DOMAIN") or "watasu.io"
         self.data_plane_domain = (
             data_plane_domain
@@ -77,11 +73,17 @@ class ConnectionConfig:
         )
         self.headers = dict(headers or {})
         self.proxy = proxy
-        self.debug = os.environ.get("WATASU_DEBUG", "").lower() in {"1", "true", "yes"}
+        self.debug = (
+            bool(debug)
+            if debug is not None
+            else os.environ.get("WATASU_DEBUG", "").lower() in {"1", "true", "yes"}
+        )
 
     def get_request_timeout(self, request_timeout: Optional[float] = None) -> float:
         """Return the effective timeout in seconds for one HTTP request."""
-        return self.request_timeout if request_timeout is None else float(request_timeout)
+        return (
+            self.request_timeout if request_timeout is None else float(request_timeout)
+        )
 
     def get_api_params(self, **overrides: Any) -> Dict[str, Any]:
         """Return constructor kwargs that preserve this config with optional overrides."""
@@ -94,8 +96,11 @@ class ConnectionConfig:
             "proxy": self.proxy,
             "api_url": self.api_url,
             "data_plane_domain": self.data_plane_domain,
+            "debug": self.debug,
         }
-        params.update({key: value for key, value in overrides.items() if value is not None})
+        params.update(
+            {key: value for key, value in overrides.items() if value is not None}
+        )
         return params
 
     @property

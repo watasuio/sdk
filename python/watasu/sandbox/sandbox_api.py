@@ -65,16 +65,23 @@ def sandbox_info_from_api(payload: Dict[str, Any]) -> SandboxInfo:
     return SandboxInfo(
         sandbox_id=str(payload.get("id") or payload.get("sandbox_id") or ""),
         template_id=(
-            str(payload.get("template_version_id"))
-            if payload.get("template_version_id") is not None
-            else str(template.get("slug") or template.get("id") or "")
+            str(payload.get("template_id"))
+            if payload.get("template_id") is not None
+            else str(
+                template.get("slug")
+                or template.get("id")
+                or payload.get("template_version_id")
+                or ""
+            )
         )
         or None,
         name=payload.get("name"),
         metadata=payload.get("metadata") or {},
         state=payload.get("state"),
-        started_at=payload.get("created_at") or payload.get("ready_at"),
-        end_at=payload.get("deadline_at"),
+        started_at=payload.get("started_at")
+        or payload.get("created_at")
+        or payload.get("ready_at"),
+        end_at=payload.get("end_at") or payload.get("deadline_at"),
         raw=payload,
     )
 

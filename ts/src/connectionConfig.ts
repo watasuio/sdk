@@ -34,9 +34,7 @@ export class ConnectionConfig {
     this.apiKey =
       opts.apiKey ??
       opts.accessToken ??
-      env.WATASU_API_KEY ??
-      env.E2B_API_KEY ??
-      env.E2B_ACCESS_TOKEN
+      env.WATASU_API_KEY
     this.domain = opts.domain ?? env.WATASU_DOMAIN ?? 'watasu.io'
     this.apiUrl =
       opts.apiUrl ?? env.WATASU_API_URL ?? `https://api.${this.domain}/v1`

@@ -21,7 +21,7 @@ pub struct CreateOptions {
     pub envs: serde_json::Map<String, Value>,
     /// Whether the sandbox may access the public internet.
     pub allow_internet_access: bool,
-    /// Explicit template version id. When omitted, the API resolves `template`.
+    /// Explicit template version id. Encoded as a `template_id` pin on the wire.
     pub template_version_id: Option<u64>,
     /// Team slug to create the sandbox under.
     pub team: Option<String>,
@@ -62,6 +62,8 @@ impl Default for CreateOptions {
 pub struct SandboxInfo {
     /// Sandbox id.
     pub sandbox_id: String,
+    /// Template slug or id returned by the API.
+    pub template_id: Option<String>,
     /// Template version id, when returned by the API.
     pub template_version_id: Option<u64>,
     /// Current sandbox lifecycle state.
@@ -93,19 +95,19 @@ impl Sandbox {
         let config = ConnectionConfig::new(opts.connection.clone());
         let control = ControlClient::new(config.clone())?;
         let mut sandbox = serde_json::Map::new();
-        sandbox.insert("template".into(), Value::String(opts.template));
-        sandbox.insert("timeout_seconds".into(), Value::from(opts.timeout_seconds));
+        let template_id = match opts.template_version_id {
+            Some(version_id) => format!("{}:{version_id}", opts.template),
+            None => opts.template,
+        };
+        sandbox.insert("template_id".into(), Value::String(template_id));
+        sandbox.insert("timeout".into(), Value::from(opts.timeout_seconds));
         sandbox.insert("metadata".into(), Value::Object(opts.metadata));
+        sandbox.insert("env_vars".into(), Value::Object(opts.envs.clone()));
         sandbox.insert(
             "allow_internet_access".into(),
             Value::Bool(opts.allow_internet_access),
         );
-        put_if_some(
-            &mut sandbox,
-            "template_version_id",
-            opts.template_version_id,
-        );
-        put_if_some(&mut sandbox, "cpu", opts.cpu);
+        put_if_some(&mut sandbox, "cpu_count", opts.cpu);
         put_if_some(&mut sandbox, "memory_mb", opts.memory_mb);
         put_if_some_string(&mut sandbox, "network_class", opts.network_class);
         put_if_some_bool(
@@ -120,9 +122,7 @@ impl Sandbox {
             sandbox.insert("team".into(), Value::String(team));
         }
 
-        let response = control
-            .post("/sandboxes", serde_json::json!({ "sandbox": sandbox }))
-            .await?;
+        let response = control.post("/sandboxes", Value::Object(sandbox)).await?;
         Self::from_response(config, control, response, opts.envs)
     }
 
@@ -135,7 +135,7 @@ impl Sandbox {
         let response = control
             .post(
                 &format!("/sandboxes/{sandbox_id}/connect"),
-                serde_json::json!({ "connect": {} }),
+                serde_json::json!({}),
             )
             .await?;
         let mut sandbox = Self::from_response(config, control, response, Default::default())?;
@@ -156,9 +156,9 @@ impl Sandbox {
     /// Set this sandbox's lifetime in seconds.
     pub async fn set_timeout(&self, timeout_seconds: u64) -> Result<()> {
         self.control
-            .patch(
-                &format!("/sandboxes/{}", self.sandbox_id),
-                serde_json::json!({"sandbox": {"timeout_seconds": timeout_seconds}}),
+            .post(
+                &format!("/sandboxes/{}/timeout", self.sandbox_id),
+                serde_json::json!({"timeout": timeout_seconds}),
             )
             .await?;
         Ok(())
@@ -267,6 +267,17 @@ fn sandbox_info(value: &Value) -> SandboxInfo {
                     .unwrap_or_else(|| item.to_string())
             })
             .unwrap_or_default(),
+        template_id: value
+            .get("template_id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                value
+                    .get("template")
+                    .and_then(|template| template.get("slug"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            }),
         template_version_id: value.get("template_version_id").and_then(Value::as_u64),
         state: value
             .get("state")
@@ -278,11 +289,13 @@ fn sandbox_info(value: &Value) -> SandboxInfo {
             .cloned()
             .unwrap_or_default(),
         started_at: value
-            .get("created_at")
+            .get("started_at")
+            .or_else(|| value.get("created_at"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
         end_at: value
-            .get("deadline_at")
+            .get("end_at")
+            .or_else(|| value.get("deadline_at"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
     }

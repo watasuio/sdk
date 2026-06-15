@@ -48,7 +48,9 @@ class ControlClient:
             payload = response.json()
         except ValueError:
             payload = response.text
-        raise map_http_error(response.status_code, payload, response.text, resource=resource)
+        raise map_http_error(
+            response.status_code, payload, response.text, resource=resource
+        )
 
     def get(self, path: str, **kwargs: Any) -> Dict[str, Any]:
         return self.request("GET", path, **kwargs)

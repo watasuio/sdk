@@ -21,14 +21,13 @@ def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
     assert config.auth_headers["Authorization"] == "Bearer key"
 
 
-def test_connection_config_accepts_e2b_api_key_alias(monkeypatch):
+def test_connection_config_accepts_access_token_alias(monkeypatch):
     monkeypatch.delenv("WATASU_API_KEY", raising=False)
-    monkeypatch.setenv("E2B_API_KEY", "e2b-key")
 
-    config = ConnectionConfig()
+    config = ConnectionConfig(access_token="alias-key")
 
-    assert config.api_key == "e2b-key"
-    assert config.auth_headers["Authorization"] == "Bearer e2b-key"
+    assert config.api_key == "alias-key"
+    assert config.auth_headers["Authorization"] == "Bearer alias-key"
 
 
 def test_command_handle_raises_on_non_zero_exit():
@@ -78,7 +77,9 @@ def test_command_handle_decodes_runtime_base64_stream_frames():
 
     result = handle.wait()
 
-    assert result == CommandResult(stderr="err\n", stdout="4\n", exit_code=0, error=None)
+    assert result == CommandResult(
+        stderr="err\n", stdout="4\n", exit_code=0, error=None
+    )
 
 
 def test_process_socket_base64_encodes_stdin_frames():
@@ -103,13 +104,18 @@ def test_get_host_returns_host_only():
     class Control:
         def get(self, path, **kwargs):
             calls.append(path)
-            return {"sandbox_port": {"url": "https://p8000-token.sandbox.watasuhost.com"}}
+            return {
+                "sandbox_port": {"url": "https://p8000-token.sandbox.watasuhost.com"}
+            }
 
     sbx = Sandbox(
         "123",
         connection_config=config,
         control=Control(),
-        session={"data_plane_url": "https://token.sandbox.watasuhost.com", "token": "data"},
+        session={
+            "data_plane_url": "https://token.sandbox.watasuhost.com",
+            "token": "data",
+        },
         sandbox={},
     )
 
@@ -194,18 +200,18 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     sbx = Sandbox.create(
         api_key="key",
         team="bridgeapp",
-        template_version_id=82,
+        template="base:82",
         envs={"HELLO": "world"},
     )
 
     assert sbx.sandbox_id == "42"
     assert captured["path"] == "/sandboxes"
-    assert captured["kwargs"]["json"]["sandbox"]["template"] == "base"
-    assert captured["kwargs"]["json"]["sandbox"]["template_version_id"] == 82
-    assert captured["kwargs"]["json"]["sandbox"]["team"] == "bridgeapp"
+    assert captured["kwargs"]["json"]["template_id"] == "base:82"
+    assert captured["kwargs"]["json"]["env_vars"] == {"HELLO": "world"}
+    assert captured["kwargs"]["json"]["team"] == "bridgeapp"
 
 
-def test_sandbox_constructor_creates_like_e2b(monkeypatch):
+def test_sandbox_constructor_creates_with_default_template(monkeypatch):
     captured = {}
 
     class FakeControl:
@@ -229,8 +235,48 @@ def test_sandbox_constructor_creates_like_e2b(monkeypatch):
 
     assert sbx.sandbox_id == "new-sandbox"
     assert captured["path"] == "/sandboxes"
-    assert captured["kwargs"]["json"]["sandbox"]["template"] == "base"
-    assert captured["kwargs"]["json"]["sandbox"]["metadata"] == {"purpose": "compat"}
+    assert captured["kwargs"]["json"]["template_id"] == "base"
+    assert captured["kwargs"]["json"]["metadata"] == {"purpose": "compat"}
+
+
+def test_sandbox_connect_and_timeout_use_root_snake_case_payloads(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            pass
+
+        def get(self, path, **kwargs):
+            calls.append(("get", path, kwargs))
+            return {"sandbox": {"id": "existing"}}
+
+        def post(self, path, **kwargs):
+            calls.append(("post", path, kwargs))
+            if path.endswith("/connect"):
+                return {
+                    "sandbox": {"id": "existing"},
+                    "session": {
+                        "data_plane_url": "https://route.sandbox.watasuhost.com",
+                        "token": "data",
+                    },
+                }
+            return {"sandbox": {"id": "existing"}}
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    sbx = Sandbox.connect("existing", api_key="key", timeout=600)
+    sbx.set_timeout(900)
+
+    assert calls[1] == (
+        "post",
+        "/sandboxes/existing/connect",
+        {"json": {"timeout": 600}, "resource": "sandbox", "request_timeout": 150},
+    )
+    assert calls[2] == (
+        "post",
+        "/sandboxes/existing/timeout",
+        {"json": {"timeout": 900}, "resource": "sandbox"},
+    )
 
 
 def test_sandbox_context_manager_kills_on_exit(monkeypatch):
@@ -244,7 +290,10 @@ def test_sandbox_context_manager_kills_on_exit(monkeypatch):
     sbx = Sandbox(
         "123",
         connection_config=ConnectionConfig(api_key="key"),
-        session={"data_plane_url": "https://route.sandbox.watasuhost.com", "token": "data"},
+        session={
+            "data_plane_url": "https://route.sandbox.watasuhost.com",
+            "token": "data",
+        },
         sandbox={},
     )
 
@@ -267,7 +316,10 @@ def test_sandbox_is_running_uses_control_state():
             "123",
             connection_config=ConnectionConfig(api_key="key"),
             control=Control(state),
-            session={"data_plane_url": "https://route.sandbox.watasuhost.com", "token": "data"},
+            session={
+                "data_plane_url": "https://route.sandbox.watasuhost.com",
+                "token": "data",
+            },
             sandbox={},
         )
         assert sbx.is_running() is True
@@ -277,7 +329,10 @@ def test_sandbox_is_running_uses_control_state():
             "123",
             connection_config=ConnectionConfig(api_key="key"),
             control=Control(state),
-            session={"data_plane_url": "https://route.sandbox.watasuhost.com", "token": "data"},
+            session={
+                "data_plane_url": "https://route.sandbox.watasuhost.com",
+                "token": "data",
+            },
             sandbox={},
         )
         assert sbx.is_running() is False
@@ -294,4 +349,4 @@ def test_sandbox_create_requires_session_from_api(monkeypatch):
     monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
 
     with pytest.raises(Exception, match="sandbox session is required"):
-        Sandbox.create(api_key="key", template_version_id=82)
+        Sandbox.create(api_key="key", template="base:82")

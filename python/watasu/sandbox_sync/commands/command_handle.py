@@ -26,7 +26,9 @@ class CommandHandle:
         pid,
         handle_kill: Callable[[], bool],
         events,
-        handle_send_stdin: Optional[Callable[[Union[str, bytes], Optional[float]], None]] = None,
+        handle_send_stdin: Optional[
+            Callable[[Union[str, bytes], Optional[float]], None]
+        ] = None,
         handle_close_stdin: Optional[Callable[[Optional[float]], None]] = None,
     ):
         self._pid = pid
@@ -42,7 +44,9 @@ class CommandHandle:
     def __iter__(self):
         return self._handle_events()
 
-    def _handle_events(self) -> Iterator[Tuple[Optional[Stdout], Optional[Stderr], Optional[PtyOutput]]]:
+    def _handle_events(
+        self,
+    ) -> Iterator[Tuple[Optional[Stdout], Optional[Stderr], Optional[PtyOutput]]]:
         try:
             for frame in self._events:
                 frame_type = frame.get("type")
@@ -65,7 +69,9 @@ class CommandHandle:
                 elif frame_type in {"started", "ready", "pong"}:
                     continue
                 elif frame_type == "error":
-                    raise SandboxException(frame.get("message") or frame.get("code") or "process error")
+                    raise SandboxException(
+                        frame.get("message") or frame.get("code") or "process error"
+                    )
         except Exception as error:
             raise error
 
@@ -112,16 +118,22 @@ class CommandHandle:
         """Kill the process behind this handle."""
         return self._handle_kill()
 
-    def send_stdin(self, data: Union[str, bytes], request_timeout: Optional[float] = None) -> None:
+    def send_stdin(
+        self, data: Union[str, bytes], request_timeout: Optional[float] = None
+    ) -> None:
         """Send stdin bytes or text to the process."""
         if self._handle_send_stdin is None:
-            raise SandboxException("Sending stdin is not supported for this command handle.")
+            raise SandboxException(
+                "Sending stdin is not supported for this command handle."
+            )
         self._handle_send_stdin(data, request_timeout)
 
     def close_stdin(self, request_timeout: Optional[float] = None) -> None:
         """Close the stdin stream for the process."""
         if self._handle_close_stdin is None:
-            raise SandboxException("Closing stdin is not supported for this command handle.")
+            raise SandboxException(
+                "Closing stdin is not supported for this command handle."
+            )
         self._handle_close_stdin(request_timeout)
 
 

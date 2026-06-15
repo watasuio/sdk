@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Literal, Optional, Union, overload
 
 from watasu._transport.data_plane import DataPlaneClient
-from watasu._transport.process_ws import ProcessEventStream, ProcessSocket, QueuedProcessEventStream
+from watasu._transport.process_ws import (
+    ProcessEventStream,
+    ProcessSocket,
+    QueuedProcessEventStream,
+)
 from watasu.connection_config import ConnectionConfig, Username
 from watasu.sandbox.commands.main import ProcessInfo
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
@@ -44,7 +48,9 @@ class Commands:
         )
         return True
 
-    def send_stdin(self, pid, data: Union[str, bytes], request_timeout: Optional[float] = None):
+    def send_stdin(
+        self, pid, data: Union[str, bytes], request_timeout: Optional[float] = None
+    ):
         """Attach to a process and send stdin bytes or text."""
         handle = self.connect(pid, request_timeout=request_timeout)
         try:
@@ -65,8 +71,7 @@ class Commands:
         stdin: Optional[bool] = None,
         timeout: Optional[float] = 60,
         request_timeout: Optional[float] = None,
-    ):
-        ...
+    ): ...
 
     @overload
     def run(
@@ -81,8 +86,7 @@ class Commands:
         stdin: Optional[bool] = None,
         timeout: Optional[float] = 60,
         request_timeout: Optional[float] = None,
-    ) -> CommandHandle:
-        ...
+    ) -> CommandHandle: ...
 
     def run(
         self,
@@ -103,7 +107,9 @@ class Commands:
         ``background=True`` it returns ``CommandHandle`` immediately while the
         WebSocket remains attached.
         """
-        handle = self._start(cmd, envs, user, cwd, stdin or False, timeout, request_timeout)
+        handle = self._start(
+            cmd, envs, user, cwd, stdin or False, timeout, request_timeout
+        )
         if background:
             return handle
         return handle.wait(on_stdout=on_stdout, on_stderr=on_stderr)
@@ -128,8 +134,12 @@ class Commands:
             pid=actual_pid,
             handle_kill=lambda: self.kill(actual_pid),
             events=ProcessEventStream(socket, frames),
-            handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(data),
-            handle_close_stdin=lambda request_timeout=None: socket.send_json({"type": "close_stdin"}),
+            handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(
+                data
+            ),
+            handle_close_stdin=lambda request_timeout=None: socket.send_json(
+                {"type": "close_stdin"}
+            ),
         )
 
     def _start(
@@ -169,8 +179,12 @@ class Commands:
             pid=pid,
             handle_kill=lambda: self.kill(pid),
             events=QueuedProcessEventStream(socket, first, frames),
-            handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(data),
-            handle_close_stdin=lambda request_timeout=None: socket.send_json({"type": "close_stdin"}),
+            handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(
+                data
+            ),
+            handle_close_stdin=lambda request_timeout=None: socket.send_json(
+                {"type": "close_stdin"}
+            ),
         )
 
 

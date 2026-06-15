@@ -63,7 +63,9 @@ class DataPlaneClient:
             payload: Any = response.json()
         except ValueError:
             payload = response.text
-        raise map_http_error(response.status_code, payload, response.text, resource=resource)
+        raise map_http_error(
+            response.status_code, payload, response.text, resource=resource
+        )
 
     def get_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
         return self.request("GET", path, **kwargs).json()
@@ -80,7 +82,9 @@ class DataPlaneClient:
     def get_bytes(self, path: str, **kwargs: Any) -> bytes:
         return self.request("GET", path, **kwargs).content
 
-    def iter_bytes(self, path: str, chunk_size: int = 65_536, **kwargs: Any) -> Iterator[bytes]:
+    def iter_bytes(
+        self, path: str, chunk_size: int = 65_536, **kwargs: Any
+    ) -> Iterator[bytes]:
         response = self.request("GET", path, stream=True, **kwargs)
         return response.iter_content(chunk_size=chunk_size)
 

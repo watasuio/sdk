@@ -9,7 +9,11 @@ from watasu.connection_config import (
     ApiParams,
     ConnectionConfig,
 )
-from watasu.exceptions import InvalidArgumentException, NotFoundException, SandboxException
+from watasu.exceptions import (
+    InvalidArgumentException,
+    NotFoundException,
+    SandboxException,
+)
 from watasu.sandbox.sandbox_api import SandboxInfo, sandbox_info_from_api
 from watasu.sandbox_sync.commands.command import Commands
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
@@ -78,7 +82,12 @@ class Sandbox:
         lifecycle=None,
         **opts: ApiParams,
     ) -> None:
-        if connection_config is None and control is None and session is None and sandbox is None:
+        if (
+            connection_config is None
+            and control is None
+            and session is None
+            and sandbox is None
+        ):
             if sandbox_id is not None and template is None:
                 created = self.connect(sandbox_id, timeout=timeout, **opts)
             else:
@@ -98,9 +107,13 @@ class Sandbox:
             return
 
         if sandbox_id is None:
-            raise InvalidArgumentException("sandbox_id is required for internal sandbox construction")
+            raise InvalidArgumentException(
+                "sandbox_id is required for internal sandbox construction"
+            )
         if connection_config is None:
-            raise InvalidArgumentException("connection_config is required for internal sandbox construction")
+            raise InvalidArgumentException(
+                "connection_config is required for internal sandbox construction"
+            )
 
         self._sandbox_id = str(sandbox_id)
         self.connection_config = connection_config
@@ -110,7 +123,9 @@ class Sandbox:
         self._envs = dict(envs or {})
         self._data_plane = self._data_plane_from_session(session)
         self._filesystem = Filesystem(self._require_data_plane())
-        self._commands = Commands(self._require_data_plane(), connection_config, self._envs)
+        self._commands = Commands(
+            self._require_data_plane(), connection_config, self._envs
+        )
 
     @classmethod
     def create(
@@ -141,25 +156,19 @@ class Sandbox:
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         sandbox_params = {
-            "template": template or cls.default_template,
-            "timeout_seconds": timeout or 300,
+            "template_id": template or cls.default_template,
+            "timeout": timeout or 300,
             "metadata": metadata or {},
+            "env_vars": envs or {},
+            "secure": secure,
             "allow_internet_access": allow_internet_access,
         }
-        for key in (
-            "template_version_id",
-            "team",
-            "cpu",
-            "memory_mb",
-            "network_class",
-            "allow_package_registry_access",
-            "exposed_ports",
-        ):
+        for key in ("team",):
             if key in opts:
                 sandbox_params[key] = opts[key]
         response = control.post(
             "/sandboxes",
-            json={"sandbox": sandbox_params},
+            json=sandbox_params,
             resource="sandbox",
             request_timeout=_session_operation_request_timeout(config, opts),
         )
@@ -177,30 +186,38 @@ class Sandbox:
             envs=envs,
         )
 
-    def _connect_instance(self, timeout: Optional[int] = None, **opts: ApiParams) -> "Sandbox":
+    def _connect_instance(
+        self, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> "Sandbox":
         """Reconnect this sandbox and refresh its data-plane session."""
         response = self._control.post(
             f"/sandboxes/{self.sandbox_id}/connect",
-            json={"connect": {"timeout_seconds": timeout}} if timeout else {"connect": {}},
+            json={"timeout": timeout} if timeout else {},
             resource="sandbox",
-            request_timeout=_session_operation_request_timeout(self.connection_config, opts),
+            request_timeout=_session_operation_request_timeout(
+                self.connection_config, opts
+            ),
         )
         self._sandbox = response.get("sandbox") or self._sandbox
         self._session = response.get("session")
         self._data_plane = self._data_plane_from_session(self._session)
         self._filesystem = Filesystem(self._require_data_plane())
-        self._commands = Commands(self._require_data_plane(), self.connection_config, self._envs)
+        self._commands = Commands(
+            self._require_data_plane(), self.connection_config, self._envs
+        )
         return self
 
     @classmethod
-    def _connect_class(cls, sandbox_id: str, timeout: Optional[int] = None, **opts: ApiParams) -> "Sandbox":
+    def _connect_class(
+        cls, sandbox_id: str, timeout: Optional[int] = None, **opts: ApiParams
+    ) -> "Sandbox":
         """Connect to an existing sandbox by id and return a ready ``Sandbox``."""
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         info_response = control.get(f"/sandboxes/{sandbox_id}", resource="sandbox")
         response = control.post(
             f"/sandboxes/{sandbox_id}/connect",
-            json={"connect": {"timeout_seconds": timeout}} if timeout else {"connect": {}},
+            json={"timeout": timeout} if timeout else {},
             resource="sandbox",
             request_timeout=_session_operation_request_timeout(config, opts),
         )
@@ -226,13 +243,21 @@ class Sandbox:
             return False
 
         sandbox = payload.get("sandbox") or payload
-        return sandbox.get("state") in {"creating", "ready", "checkpointing", "restoring", "stopping"}
+        return sandbox.get("state") in {
+            "creating",
+            "ready",
+            "checkpointing",
+            "restoring",
+            "stopping",
+        }
 
     def _kill_instance(self, **opts: ApiParams) -> bool:
         """Destroy this sandbox."""
         if self.connection_config.debug:
             return True
-        return self._kill_class(self.sandbox_id, **self.connection_config.get_api_params(**opts))
+        return self._kill_class(
+            self.sandbox_id, **self.connection_config.get_api_params(**opts)
+        )
 
     @classmethod
     def _kill_class(cls, sandbox_id: str, **opts: ApiParams) -> bool:
@@ -245,15 +270,19 @@ class Sandbox:
 
     def _set_timeout_instance(self, timeout: int, **opts: ApiParams) -> None:
         """Set this sandbox's remaining lifetime in seconds."""
-        self._set_timeout_class(self.sandbox_id, timeout, **self.connection_config.get_api_params(**opts))
+        self._set_timeout_class(
+            self.sandbox_id, timeout, **self.connection_config.get_api_params(**opts)
+        )
 
     @classmethod
-    def _set_timeout_class(cls, sandbox_id: str, timeout: int, **opts: ApiParams) -> None:
+    def _set_timeout_class(
+        cls, sandbox_id: str, timeout: int, **opts: ApiParams
+    ) -> None:
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
-        control.patch(
-            f"/sandboxes/{sandbox_id}",
-            json={"sandbox": {"timeout_seconds": timeout}},
+        control.post(
+            f"/sandboxes/{sandbox_id}/timeout",
+            json={"timeout": timeout},
             resource="sandbox",
         )
 
@@ -261,7 +290,9 @@ class Sandbox:
 
     def _get_info_instance(self, **opts: ApiParams) -> SandboxInfo:
         """Fetch the latest control-plane metadata for this sandbox."""
-        return self._get_info_class(self.sandbox_id, **self.connection_config.get_api_params(**opts))
+        return self._get_info_class(
+            self.sandbox_id, **self.connection_config.get_api_params(**opts)
+        )
 
     @classmethod
     def _get_info_class(cls, sandbox_id: str, **opts: ApiParams) -> SandboxInfo:
@@ -278,7 +309,9 @@ class Sandbox:
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         payload = control.get("/sandboxes")
-        return SandboxPaginator([sandbox_info_from_api(item) for item in payload.get("sandboxes", [])])
+        return SandboxPaginator(
+            [sandbox_info_from_api(item) for item in payload.get("sandboxes", [])]
+        )
 
     def get_host(self, port: int) -> str:
         """Return the public hostname for an exposed sandbox port."""
@@ -319,18 +352,21 @@ class Sandbox:
 
     def _data_plane_from_session(self, session: Optional[Dict]) -> DataPlaneClient:
         if not session:
-            raise SandboxException("sandbox session is required for data-plane operations")
+            raise SandboxException(
+                "sandbox session is required for data-plane operations"
+            )
         token = session.get("token") or session.get("access_token")
         url = session.get("data_plane_url")
         if not token or not url:
-            raise SandboxException("sandbox session did not include data_plane_url and token")
+            raise SandboxException(
+                "sandbox session did not include data_plane_url and token"
+            )
         return DataPlaneClient(url, token, self.connection_config)
 
     def _require_data_plane(self) -> DataPlaneClient:
         if self._data_plane is None:
             raise SandboxException("sandbox data plane is not connected")
         return self._data_plane
-
 
 
 def _reject_unsupported_opts(opts: Dict, keys: Iterable[str]) -> None:

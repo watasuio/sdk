@@ -26,7 +26,9 @@ class EntryInfo(WriteInfo):
     permissions: str = ""
     owner: str = ""
     group: str = ""
-    modified_time: datetime = field(default_factory=lambda: datetime.fromtimestamp(0, timezone.utc))
+    modified_time: datetime = field(
+        default_factory=lambda: datetime.fromtimestamp(0, timezone.utc)
+    )
     symlink_target: Optional[str] = None
 
 
@@ -54,7 +56,11 @@ def file_type_from_api(value) -> Optional[FileType]:
 def entry_from_api(payload: Dict) -> EntryInfo:
     path = payload.get("path") or ""
     name = payload.get("name") or path.rstrip("/").split("/")[-1]
-    modified = payload.get("modified_time") or payload.get("mtime") or payload.get("updated_at")
+    modified = (
+        payload.get("modified_time")
+        or payload.get("mtime")
+        or payload.get("updated_at")
+    )
     modified_time = _parse_time(modified)
     return EntryInfo(
         name=name,
@@ -73,7 +79,9 @@ def entry_from_api(payload: Dict) -> EntryInfo:
 
 def write_info_from_api(payload: Dict) -> WriteInfo:
     entry = entry_from_api(payload)
-    return WriteInfo(name=entry.name, type=entry.type, path=entry.path, metadata=entry.metadata)
+    return WriteInfo(
+        name=entry.name, type=entry.type, path=entry.path, metadata=entry.metadata
+    )
 
 
 def _parse_time(value) -> datetime:

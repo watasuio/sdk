@@ -90,7 +90,9 @@ class Filesystem:
         )
         return [entry_from_api(item) for item in payload.get("entries", [])]
 
-    def exists(self, path: str, user=None, request_timeout: Optional[float] = None) -> bool:
+    def exists(
+        self, path: str, user=None, request_timeout: Optional[float] = None
+    ) -> bool:
         """Return whether a file or directory exists at ``path``."""
         try:
             self.get_info(path, user=user, request_timeout=request_timeout)
@@ -98,7 +100,9 @@ class Filesystem:
         except FileNotFoundException:
             return False
 
-    def get_info(self, path: str, user=None, request_timeout: Optional[float] = None) -> EntryInfo:
+    def get_info(
+        self, path: str, user=None, request_timeout: Optional[float] = None
+    ) -> EntryInfo:
         """Return stat metadata for ``path``."""
         payload = self._data_plane.get_json(
             "/runtime/v1/files/stat",
@@ -108,7 +112,9 @@ class Filesystem:
         )
         return entry_from_api(payload["file"])
 
-    def remove(self, path: str, user=None, request_timeout: Optional[float] = None) -> None:
+    def remove(
+        self, path: str, user=None, request_timeout: Optional[float] = None
+    ) -> None:
         """Remove a file at ``path``."""
         self._data_plane.delete_json(
             "/runtime/v1/files",
@@ -133,7 +139,9 @@ class Filesystem:
         )
         return entry_from_api(payload["file"])
 
-    def make_dir(self, path: str, user=None, request_timeout: Optional[float] = None) -> bool:
+    def make_dir(
+        self, path: str, user=None, request_timeout: Optional[float] = None
+    ) -> bool:
         """Create a directory, including parent directories when supported by the runtime."""
         self._data_plane.post_json(
             "/runtime/v1/directories",
@@ -145,7 +153,9 @@ class Filesystem:
 
     def watch_dir(self, path: str, *args, **kwargs):
         """Directory watching is not implemented yet."""
-        raise NotImplementedError("sandbox.files.watch_dir is not supported by Watasu yet")
+        raise NotImplementedError(
+            "sandbox.files.watch_dir is not supported by Watasu yet"
+        )
 
 
 def _to_bytes(data: Union[str, bytes, IO]) -> bytes:
