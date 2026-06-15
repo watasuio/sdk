@@ -5,6 +5,10 @@ import {
   CommandExitError,
   CommandHandle,
   ConnectionConfig,
+  Filesystem,
+  FilesystemWatcher,
+  ProcessManager,
+  ProcessOutput,
   ProcessSocket,
   Sandbox,
   SandboxError,
@@ -124,6 +128,108 @@ test('sandbox getHost derives route token from data-plane URL', () => {
   })
 
   assert.equal(sbx.getHost(3000), 'p3000-derived-token.sandbox.watasuhost.com')
+})
+
+test('sandbox exposes compatibility aliases without destroying local state', async () => {
+  const sbx = new Sandbox({
+    sandboxId: '1',
+    connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+    session: { data_plane_url: 'https://derived-token.sandbox.watasuhost.com', token: 'data' },
+    sandbox: { route_token: 'derived-token' },
+  })
+
+  assert.equal(sbx.id, '1')
+  assert.equal(sbx.filesystem, sbx.files)
+  assert.equal(typeof sbx.process.start, 'function')
+  assert.equal(typeof sbx.terminal.start, 'function')
+  assert.equal(sbx.getHostname(), 'derived-token.sandbox.watasuhost.com')
+  assert.equal(sbx.getHostname(8080), 'p8080-derived-token.sandbox.watasuhost.com')
+  assert.equal(sbx.getProtocol('http', true), 'https')
+  await sbx.close()
+})
+
+test('process output preserves stdout stderr and exit code', () => {
+  const output = new ProcessOutput()
+
+  output.addStdout({ line: 'ok\n', timestamp: 1, error: false, toString() { return this.line } })
+  output.addStderr({ line: 'bad\n', timestamp: 2, error: true, toString() { return this.line } })
+  output.setExitCode(7)
+
+  assert.equal(output.stdout, 'ok\n')
+  assert.equal(output.stderr, 'bad\n')
+  assert.equal(output.exitCode, 7)
+  assert.equal(output.error, true)
+})
+
+test('process manager keeps options-form cmd as a shell command', async () => {
+  const calls = []
+  const manager = new ProcessManager({
+    start(cmd, opts) {
+      calls.push([cmd, opts])
+      return Promise.resolve({
+        pid: 'pid-1',
+        wait() {
+          return Promise.resolve({ exitCode: 0, stdout: 'ok\n', stderr: '' })
+        },
+        kill() {
+          return Promise.resolve(true)
+        },
+        sendStdin() {},
+      })
+    },
+  })
+
+  const output = await manager.startAndWait({ cmd: 'echo ok', timeout: 1_000 })
+
+  assert.equal(output.stdout, 'ok\n')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0][0], 'echo ok')
+  assert.equal(calls[0][1].cmd, undefined)
+  assert.equal(calls[0][1].args, undefined)
+  assert.equal(calls[0][1].timeout, 1_000)
+})
+
+test('filesystem writeFiles uses snake_case batch route', async () => {
+  const calls = []
+  const fs = new Filesystem({
+    postJson(path, opts) {
+      calls.push([path, opts])
+      return Promise.resolve({
+        files: opts.json.files.map((file) => ({
+          path: file.path,
+          name: file.path.split('/').pop(),
+          type: 'file',
+          bytes: 3,
+        })),
+      })
+    },
+  })
+
+  const written = await fs.writeFiles([
+    { path: '/tmp/a.txt', data: 'abc' },
+    { path: '/tmp/b.bin', data: new Uint8Array([0, 1, 2]) },
+  ])
+
+  assert.equal(written[0].path, '/tmp/a.txt')
+  assert.deepEqual(calls, [
+    ['/runtime/v1/files/write_files', {
+      json: {
+        files: [
+          { path: '/tmp/a.txt', data_base64: 'YWJj' },
+          { path: '/tmp/b.bin', data_base64: 'AAEC' },
+        ],
+      },
+    }],
+  ])
+})
+
+test('filesystem watchDir can return a lazy watcher', () => {
+  const fs = new Filesystem({})
+  const watcher = fs.watchDir('/tmp')
+
+  assert.ok(watcher instanceof FilesystemWatcher)
+  assert.equal(typeof watcher.addEventListener, 'function')
+  assert.equal(typeof watcher.start, 'function')
 })
 
 test('sandbox create uses root snake_case API payload', async () => {

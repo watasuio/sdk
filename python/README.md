@@ -71,6 +71,12 @@ with Sandbox.create() as sbx:
     )
 
     watcher = sbx.files.watch_dir("/workspace/project", recursive=True)
+    sbx.files.write_files(
+        [
+            {"path": "/workspace/project/a.txt", "data": "alpha"},
+            {"path": "/workspace/project/b.bin", "data": b"\x00\x01\x02"},
+        ]
+    )
 
     terminal = sbx.pty.create(PtySize(rows=30, cols=100))
     terminal.send_stdin("echo hello\n")

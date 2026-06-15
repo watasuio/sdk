@@ -1,7 +1,7 @@
 import { ConnectionConfig } from './connectionConfig.js'
 import { DataPlaneClient } from './transport.js'
 import { ProcessFrame, ProcessSocket, base64DecodeBytes, base64DecodeText } from './processSocket.js'
-import { SandboxError } from './errors.js'
+import { SandboxError, TimeoutError } from './errors.js'
 
 export interface CommandResult {
   /** Process exit code. Zero means success. */
@@ -36,14 +36,26 @@ export interface ProcessInfo {
 export interface CommandStartOpts {
   /** Return a `CommandHandle` immediately instead of waiting for exit. */
   background?: boolean
+  /** Executable to start directly. When omitted, `cmd` strings run through a login shell. */
+  cmd?: string
+  /** Arguments for `cmd` when starting a direct executable. */
+  args?: string[]
   cwd?: string
+  /** Deprecated alias for `cwd`. */
+  rootDir?: string
   user?: string
   envs?: Record<string, string>
+  /** Alias for `envs`. */
+  envVars?: Record<string, string>
   onStdout?: (data: string) => void | Promise<void>
   onStderr?: (data: string) => void | Promise<void>
   onPty?: (data: Uint8Array) => void | Promise<void>
+  onExit?: (exitCode: number) => void | Promise<void>
   stdin?: boolean
   timeoutMs?: number
+  /** Alias for `timeoutMs`. */
+  timeout?: number
+  processID?: string
   requestTimeoutMs?: number
 }
 
@@ -61,7 +73,8 @@ export class CommandHandle implements Partial<CommandResult> {
     private readonly events: AsyncIterable<ProcessFrame>,
     private readonly onStdout?: (data: string) => void | Promise<void>,
     private readonly onStderr?: (data: string) => void | Promise<void>,
-    private readonly onPty?: (data: Uint8Array) => void | Promise<void>
+    private readonly onPty?: (data: Uint8Array) => void | Promise<void>,
+    private readonly onExit?: (exitCode: number) => void | Promise<void>
   ) {
     this.pending = this.handleEvents()
   }
@@ -72,8 +85,8 @@ export class CommandHandle implements Partial<CommandResult> {
   get error() { return this.result?.error }
 
   /** Wait until the process exits and return captured output. */
-  async wait(): Promise<CommandResult> {
-    await this.pending
+  async wait(timeoutMs?: number): Promise<CommandResult> {
+    await waitFor(this.pending, timeoutMs)
     if (!this.result) throw new SandboxError('Command ended without an exit event')
     if (this.result.exitCode !== 0) throw new CommandExitError(this.result)
     return this.result
@@ -118,12 +131,14 @@ export class CommandHandle implements Partial<CommandResult> {
           this._stdout += out
           await this.onPty?.(bytes)
         } else if (type === 'exit') {
+          const exitCode = Number(frame.exit_code ?? frame.exitCode ?? 0)
           this.result = {
-            exitCode: Number(frame.exit_code ?? frame.exitCode ?? 0),
+            exitCode,
             error: typeof frame.error === 'string' ? frame.error : undefined,
             stdout: this._stdout,
             stderr: this._stderr,
           }
+          await this.onExit?.(exitCode)
           return
         } else if (type === 'error') {
           throw new SandboxError(String(frame.message ?? frame.code ?? 'process error'))
@@ -175,7 +190,7 @@ export class Commands {
   async run(cmd: string, opts: CommandStartOpts = {}): Promise<CommandHandle | CommandResult> {
     const handle = await this.start(cmd, opts)
     if (opts.background) return handle
-    return handle.wait()
+    return handle.wait(opts.timeoutMs ?? opts.timeout)
   }
 
   /** Reconnect to a live process stream by pid. */
@@ -191,30 +206,48 @@ export class Commands {
     return new CommandHandle(actualPid, socket, () => this.kill(actualPid), socket, opts.onStdout, opts.onStderr, opts.onPty)
   }
 
-  private async start(cmd: string, opts: CommandStartOpts): Promise<CommandHandle> {
+  /** Start a command and return a live handle immediately. */
+  async start(cmd: string, opts: CommandStartOpts = {}): Promise<CommandHandle> {
     const socket = await new ProcessSocket(
       this.dataPlane.baseUrl,
       this.dataPlane.token,
       '/runtime/v1/process',
       opts.requestTimeoutMs ?? this.config.requestTimeoutMs
     ).connect()
-    const environment = { ...this.sandboxEnvs, ...(opts.envs ?? {}) }
+    const environment = { ...this.sandboxEnvs, ...(opts.envVars ?? opts.envs ?? {}) }
+    const processConfig = processStartConfig(cmd, opts)
     socket.sendJson({
       type: 'start',
-      cmd: '/bin/bash',
-      args: ['-l', '-c', cmd],
-      cwd: opts.cwd,
+      id: opts.processID,
+      cmd: processConfig.cmd,
+      args: processConfig.args,
+      cwd: opts.cwd ?? opts.rootDir,
       user: opts.user,
       environment,
       envs: environment,
       stdin: opts.stdin ?? false,
-      timeout_ms: opts.timeoutMs ?? 60_000,
+      timeout_ms: opts.timeoutMs ?? opts.timeout ?? 60_000,
     })
     const first = await nextStarted(socket)
     const pid = framePid(first)
     if (pid === undefined) throw new SandboxError('process started frame did not include pid')
-    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), opts.onStdout, opts.onStderr, opts.onPty)
+    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), opts.onStdout, opts.onStderr, opts.onPty, opts.onExit)
   }
+}
+
+function processStartConfig(cmd: string, opts: CommandStartOpts): { cmd: string; args: string[] } {
+  if (opts.args !== undefined || opts.cmd !== undefined) {
+    return { cmd: opts.cmd ?? cmd, args: opts.args ?? [] }
+  }
+  return { cmd: '/bin/bash', args: ['-l', '-c', cmd] }
+}
+
+function waitFor<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
+  if (timeoutMs === undefined || timeoutMs <= 0) return promise
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new TimeoutError()), timeoutMs)
+    promise.then(resolve, reject).finally(() => clearTimeout(timer))
+  })
 }
 
 async function nextStarted(events: AsyncIterable<ProcessFrame>): Promise<ProcessFrame> {

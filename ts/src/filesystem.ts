@@ -1,6 +1,6 @@
 import { DataPlaneClient, withQuery } from './transport.js'
 import { FileNotFoundError } from './errors.js'
-import { ProcessFrame, ProcessSocket } from './processSocket.js'
+import { ProcessFrame, ProcessSocket, base64Encode } from './processSocket.js'
 
 export enum FileType {
   /** Regular file. */
@@ -25,6 +25,11 @@ export interface EntryInfo {
 }
 
 export type WriteInfo = EntryInfo
+
+export interface WriteEntry {
+  path: string
+  data: string | Uint8Array
+}
 
 export interface FilesystemEvent {
   type: 'create' | 'write' | 'modify' | 'remove' | 'delete' | 'rename' | string
@@ -90,6 +95,50 @@ export class WatchHandle {
   }
 }
 
+/** Lazy filesystem watcher. Add listeners, then call `start()`. */
+export class FilesystemWatcher {
+  private handle?: WatchHandle
+  private listeners: Array<(event: FilesystemEvent) => void | Promise<void>> = []
+
+  constructor(
+    private readonly dataPlane: DataPlaneClient,
+    private readonly path: string,
+    private readonly opts: WatchOpts = {}
+  ) {}
+
+  async start(opts: WatchOpts = {}): Promise<void> {
+    if (this.handle) return
+    const nextOpts = { ...this.opts, ...opts }
+    const socket = await new ProcessSocket(
+      this.dataPlane.baseUrl,
+      this.dataPlane.token,
+      withQuery('/runtime/v1/files/watch', { path: this.path, recursive: nextOpts.recursive ?? false, include_entry: nextOpts.includeEntry }),
+      nextOpts.requestTimeoutMs
+    ).connect()
+    this.handle = new WatchHandle(socket, socket, async (event) => {
+      for (const listener of this.listeners) await listener(event)
+    }, nextOpts.onExit)
+  }
+
+  async stop(): Promise<void> {
+    this.handle?.stop()
+  }
+
+  addEventListener(listener: (event: FilesystemEvent) => void | Promise<void>): () => boolean {
+    this.listeners.push(listener)
+    return () => {
+      const index = this.listeners.indexOf(listener)
+      if (index === -1) return false
+      this.listeners.splice(index, 1)
+      return true
+    }
+  }
+
+  wait(): Promise<void> {
+    return this.handle?.wait() ?? Promise.resolve()
+  }
+}
+
 /** Filesystem helper for a sandbox data-plane session. */
 export class Filesystem {
   constructor(private readonly dataPlane: DataPlaneClient) {}
@@ -105,6 +154,11 @@ export class Filesystem {
     return new TextDecoder().decode(bytes)
   }
 
+  /** Read a file as raw bytes. */
+  async readBytes(path: string, opts: { requestTimeoutMs?: number; gzip?: boolean } = {}): Promise<Uint8Array> {
+    return this.read(path, { ...opts, format: 'bytes' }) as Promise<Uint8Array>
+  }
+
   /** Write UTF-8 text or bytes to a file. */
   async write(
     path: string,
@@ -114,6 +168,27 @@ export class Filesystem {
     const body = typeof data === 'string' ? new TextEncoder().encode(data) : data
     const payload = await this.dataPlane.putJson(withQuery('/runtime/v1/files', { path, gzip: opts.gzip }), body, opts)
     return entryInfo(payload.file ?? payload)
+  }
+
+  /** Write raw bytes to a file. */
+  async writeBytes(path: string, data: Uint8Array, opts: { requestTimeoutMs?: number; gzip?: boolean; metadata?: Record<string, string> } = {}): Promise<WriteInfo> {
+    return this.write(path, data, opts)
+  }
+
+  /** Write several files in one runtime API call. */
+  async writeFiles(files: WriteEntry[], opts: { requestTimeoutMs?: number } = {}): Promise<WriteInfo[]> {
+    if (files.length === 0) return []
+    const payload = await this.dataPlane.postJson('/runtime/v1/files/write_files', {
+      ...opts,
+      json: {
+        files: files.map((file) => ({
+          path: file.path,
+          data_base64: base64Encode(typeof file.data === 'string' ? new TextEncoder().encode(file.data) : file.data),
+        })),
+      },
+    })
+    const written = Array.isArray(payload.files) ? payload.files : []
+    return written.map(entryInfo)
   }
 
   /** List directory entries below `path`. */
@@ -161,19 +236,23 @@ export class Filesystem {
   }
 
   /** Start watching a directory for filesystem events. */
-  async watchDir(
+  watchDir(path: string): FilesystemWatcher
+  watchDir(
     path: string,
     onEvent: (event: FilesystemEvent) => void | Promise<void>,
+    opts?: WatchOpts
+  ): Promise<FilesystemWatcher>
+  watchDir(
+    path: string,
+    onEvent?: (event: FilesystemEvent) => void | Promise<void>,
     opts: WatchOpts = {}
-  ): Promise<WatchHandle> {
-    const socket = await new ProcessSocket(
-      this.dataPlane.baseUrl,
-      this.dataPlane.token,
-      withQuery('/runtime/v1/files/watch', { path, recursive: opts.recursive ?? false, include_entry: opts.includeEntry }),
-      opts.requestTimeoutMs
-    ).connect()
-    return new WatchHandle(socket, socket, onEvent, opts.onExit)
+  ): FilesystemWatcher | Promise<FilesystemWatcher> {
+    const watcher = new FilesystemWatcher(this.dataPlane, path, opts)
+    if (!onEvent) return watcher
+    watcher.addEventListener(onEvent)
+    return watcher.start().then(() => watcher)
   }
+
 }
 
 function entryInfo(value: unknown): EntryInfo {

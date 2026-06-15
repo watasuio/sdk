@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, IO, Optional, TypedDict, Union
 
 
 class FileType(Enum):
@@ -17,6 +17,13 @@ class WriteInfo:
     type: Optional[FileType]
     path: str
     metadata: Optional[Dict[str, str]] = None
+
+
+class WriteEntry(TypedDict):
+    """File path and data used by ``Filesystem.write_files``."""
+
+    path: str
+    data: Union[str, bytes, IO]
 
 
 @dataclass

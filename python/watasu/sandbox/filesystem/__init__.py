@@ -3,6 +3,7 @@ from .filesystem import (
     FileType,
     FilesystemEvent,
     FilesystemEventType,
+    WriteEntry,
     WriteInfo,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "FileType",
     "FilesystemEvent",
     "FilesystemEventType",
+    "WriteEntry",
     "WriteInfo",
 ]

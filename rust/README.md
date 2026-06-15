@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.6"
+watasu = "0.1.8"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -36,7 +36,7 @@ supplies a usable data-plane session. The crate does not poll sandbox readiness.
 use watasu::{
     CreateOptions, GitAddOptions, GitCloneOptions, GitCommitOptions,
     GitConfigureUserOptions, GitRemoteOperationOptions, PtyCreateOptions,
-    Sandbox, WatchOptions,
+    Sandbox, WatchOptions, WriteEntry,
 };
 
 # async fn run() -> watasu::Result<()> {
@@ -109,6 +109,12 @@ let mut watcher = sbx
             include_entry: true,
         },
     )
+    .await?;
+sbx.files
+    .write_files(vec![
+        WriteEntry::new("/workspace/project/a.txt", "alpha"),
+        WriteEntry::new("/workspace/project/b.bin", [0, 1, 2]),
+    ])
     .await?;
 
 let mut terminal = sbx.pty.create(PtyCreateOptions::default()).await?;

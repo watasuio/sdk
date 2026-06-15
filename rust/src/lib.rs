@@ -41,7 +41,7 @@ pub use commands::{
 };
 pub use config::{ConnectionConfig, ConnectionOptions, KEEPALIVE_PING_INTERVAL_SECS};
 pub use error::{Error, Result};
-pub use filesystem::{EntryInfo, FileType, Filesystem, WriteInfo};
+pub use filesystem::{EntryInfo, FileType, Filesystem, WriteEntry, WriteInfo};
 pub use filesystem::{FilesystemEvent, WatchHandle, WatchOptions};
 pub use git::{
     Git, GitAddOptions, GitBranches, GitCloneOptions, GitCommandResult, GitCommitOptions,

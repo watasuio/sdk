@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip as gzip_module
+import base64
 from io import IOBase, TextIOBase
 from typing import IO, Iterator, List, Literal, Optional, Union
 from urllib.parse import urlencode
@@ -10,6 +11,7 @@ from watasu._transport.process_ws import ProcessSocket
 from watasu.exceptions import FileNotFoundException, InvalidArgumentException
 from watasu.sandbox.filesystem.filesystem import (
     EntryInfo,
+    WriteEntry,
     WriteInfo,
     entry_from_api,
     write_info_from_api,
@@ -54,6 +56,24 @@ class Filesystem:
             return data.decode("utf-8")
         raise InvalidArgumentException("format must be 'text', 'bytes', or 'stream'")
 
+    def read_bytes(
+        self,
+        path: str,
+        user=None,
+        request_timeout: Optional[float] = None,
+        gzip: bool = False,
+    ) -> bytes:
+        """Read a file as bytes."""
+        return bytes(
+            self.read(
+                path,
+                format="bytes",
+                user=user,
+                request_timeout=request_timeout,
+                gzip=gzip,
+            )
+        )
+
     def write(
         self,
         path: str,
@@ -76,6 +96,34 @@ class Filesystem:
             resource="file",
         )
         return write_info_from_api(payload["file"])
+
+    def write_files(
+        self,
+        files: List[WriteEntry],
+        user=None,
+        request_timeout: Optional[float] = None,
+    ) -> List[WriteInfo]:
+        """Write several files in one runtime API call."""
+        if len(files) == 0:
+            return []
+
+        payload = self._data_plane.post_json(
+            "/runtime/v1/files/write_files",
+            json={
+                "files": [
+                    {
+                        "path": file["path"],
+                        "data_base64": base64.b64encode(_to_bytes(file["data"])).decode(
+                            "ascii"
+                        ),
+                    }
+                    for file in files
+                ]
+            },
+            request_timeout=request_timeout,
+            resource="file",
+        )
+        return [write_info_from_api(item) for item in payload.get("files", [])]
 
     def list(
         self,

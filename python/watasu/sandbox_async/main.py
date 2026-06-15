@@ -183,9 +183,17 @@ class AsyncFilesystem:
         """Read a file as text, bytes, or stream."""
         return await asyncio.to_thread(self._files.read, *args, **kwargs)
 
+    async def read_bytes(self, *args, **kwargs) -> bytes:
+        """Read a file as bytes."""
+        return await asyncio.to_thread(self._files.read_bytes, *args, **kwargs)
+
     async def write(self, *args, **kwargs) -> WriteInfo:
         """Write bytes, text, or a file-like object."""
         return await asyncio.to_thread(self._files.write, *args, **kwargs)
+
+    async def write_files(self, *args, **kwargs) -> List[WriteInfo]:
+        """Write several files in one runtime API call."""
+        return await asyncio.to_thread(self._files.write_files, *args, **kwargs)
 
     async def list(self, *args, **kwargs) -> List[EntryInfo]:
         """List directory entries."""
@@ -426,6 +434,11 @@ class AsyncSandbox:
         return self._sync.sandbox_id
 
     @property
+    def id(self):
+        """Sandbox id alias."""
+        return self._sync.sandbox_id
+
+    @property
     def files(self) -> AsyncFilesystem:
         """Async filesystem helper."""
         return self._files
@@ -495,6 +508,7 @@ class AsyncSandbox:
         )
 
     connect = _AsyncDualMethod(_connect_instance, _connect_class)
+    reconnect = connect
 
     async def is_running(self, request_timeout: Optional[float] = None) -> bool:
         """Return whether this sandbox is in a runtime-active lifecycle state."""
@@ -512,6 +526,10 @@ class AsyncSandbox:
         return await asyncio.to_thread(Sandbox.kill, sandbox_id, **opts)
 
     kill = _AsyncDualMethod(_kill_instance, _kill_class)
+
+    async def close(self) -> None:
+        """Close the local SDK attachment without destroying the sandbox."""
+        return None
 
     async def _set_timeout_instance(self, timeout: int, **opts: ApiParams) -> None:
         """Set this sandbox's remaining lifetime in seconds."""

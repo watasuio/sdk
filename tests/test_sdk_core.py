@@ -164,6 +164,10 @@ def test_filesystem_maps_watasu_file_entries():
                 }
             }
 
+        def get_bytes(self, path, **kwargs):
+            self.calls.append((path, kwargs))
+            return b"hello"
+
         def get_json(self, path, **kwargs):
             self.calls.append((path, kwargs))
             return {
@@ -179,6 +183,18 @@ def test_filesystem_maps_watasu_file_entries():
 
         def post_json(self, path, **kwargs):
             self.calls.append((path, kwargs))
+            if path.endswith("/write_files"):
+                return {
+                    "files": [
+                        {
+                            "path": item["path"],
+                            "name": item["path"].rstrip("/").split("/")[-1],
+                            "type": "file",
+                            "bytes": 3,
+                        }
+                        for item in kwargs["json"]["files"]
+                    ]
+                }
             return {
                 "file": {
                     "path": "/home/user/b.txt",
@@ -200,6 +216,17 @@ def test_filesystem_maps_watasu_file_entries():
 
     renamed = fs.rename("/home/user/a.txt", "/home/user/b.txt")
     assert renamed.path == "/home/user/b.txt"
+
+    written = fs.write_files(
+        [
+            {"path": "/home/user/c.txt", "data": "abc"},
+            {"path": "/home/user/d.bin", "data": b"\x00\x01\x02"},
+        ]
+    )
+    assert [item.path for item in written] == ["/home/user/c.txt", "/home/user/d.bin"]
+    assert fs._data_plane.calls[-1][0] == "/runtime/v1/files/write_files"
+    assert fs._data_plane.calls[-1][1]["json"]["files"][0]["data_base64"] == "YWJj"
+    assert fs.read_bytes("/home/user/d.bin") == b"hello"
 
 
 def test_git_helper_uses_data_plane_routes_and_parses_status():
@@ -563,6 +590,40 @@ def test_sandbox_constructor_creates_with_default_template(monkeypatch):
     assert captured["path"] == "/sandboxes"
     assert captured["kwargs"]["json"]["template_id"] == "base"
     assert captured["kwargs"]["json"]["metadata"] == {"purpose": "compat"}
+
+
+def test_sandbox_aliases_match_connection_lifecycle_shape(monkeypatch):
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            pass
+
+        def get(self, path, **kwargs):
+            calls.append(("get", path, kwargs))
+            return {"sandbox": {"id": "existing"}}
+
+        def post(self, path, **kwargs):
+            calls.append(("post", path, kwargs))
+            return {
+                "sandbox": {"id": "existing"},
+                "session": {
+                    "data_plane_url": "https://route.sandbox.watasuhost.com",
+                    "token": "data",
+                },
+            }
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+
+    sbx = Sandbox.reconnect("existing", api_key="key", timeout=600)
+
+    assert sbx.id == "existing"
+    assert sbx.close() is None
+    assert calls[1] == (
+        "post",
+        "/sandboxes/existing/connect",
+        {"json": {"timeout": 600}, "resource": "sandbox", "request_timeout": 150},
+    )
 
 
 def test_sandbox_connect_and_timeout_use_root_snake_case_payloads(monkeypatch):

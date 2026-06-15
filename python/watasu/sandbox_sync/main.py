@@ -58,6 +58,11 @@ class Sandbox:
         return self._sandbox_id
 
     @property
+    def id(self):
+        """Sandbox id alias."""
+        return self._sandbox_id
+
+    @property
     def files(self) -> Filesystem:
         return self._filesystem
 
@@ -243,6 +248,7 @@ class Sandbox:
         )
 
     connect = _DualMethod(_connect_instance, _connect_class)
+    reconnect = connect
 
     def is_running(self, request_timeout: Optional[float] = None) -> bool:
         """Return whether this sandbox is in a runtime-active lifecycle state."""
@@ -280,6 +286,10 @@ class Sandbox:
         return True
 
     kill = _DualMethod(_kill_instance, _kill_class)
+
+    def close(self) -> None:
+        """Close the local SDK attachment without destroying the sandbox."""
+        return None
 
     def _set_timeout_instance(self, timeout: int, **opts: ApiParams) -> None:
         """Set this sandbox's remaining lifetime in seconds."""

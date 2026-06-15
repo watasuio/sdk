@@ -9,7 +9,11 @@ export interface PtySize {
   rows: number
 }
 
-export interface PtyCreateOpts extends Omit<CommandStartOpts, 'background' | 'onStdout' | 'onStderr'>, PtySize {
+export interface PtyCreateOpts extends Omit<CommandStartOpts, 'background' | 'onStdout' | 'onStderr'> {
+  cols?: number
+  rows?: number
+  size?: PtySize
+  cmd?: string
   onData?: (data: Uint8Array) => void | Promise<void>
 }
 
@@ -34,18 +38,20 @@ export class Pty {
       '/runtime/v1/process',
       opts.requestTimeoutMs ?? this.config.requestTimeoutMs
     ).connect()
-    const envs = { TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ...(opts.envs ?? {}) }
+    const envs = { TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ...(opts.envVars ?? opts.envs ?? {}) }
+    const size = opts.size ?? { cols: opts.cols ?? 80, rows: opts.rows ?? 24 }
+    const args = opts.cmd === undefined ? ['-i', '-l'] : ['-l', '-c', opts.cmd]
     socket.sendJson({
       type: 'start',
       cmd: '/bin/bash',
-      args: ['-i', '-l'],
-      cwd: opts.cwd,
+      args,
+      cwd: opts.cwd ?? opts.rootDir,
       user: opts.user,
       environment: envs,
       envs,
       stdin: true,
-      pty: { cols: opts.cols, rows: opts.rows },
-      timeout_ms: opts.timeoutMs ?? 60_000,
+      pty: { cols: size.cols, rows: size.rows },
+      timeout_ms: opts.timeoutMs ?? opts.timeout ?? 60_000,
     })
     const first = await nextStarted(socket)
     const pid = framePid(first)

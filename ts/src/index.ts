@@ -25,8 +25,10 @@ export type {
 } from './sandbox.js'
 export { CommandExitError, CommandHandle, Commands } from './commands.js'
 export type { CommandResult, CommandStartOpts, ProcessInfo } from './commands.js'
-export { FileType, Filesystem, WatchHandle } from './filesystem.js'
-export type { EntryInfo, FilesystemEvent, WatchOpts, WriteInfo } from './filesystem.js'
+export { Process, ProcessManager, ProcessMessage, ProcessOutput } from './process.js'
+export type { ProcessOpts } from './process.js'
+export { FileType, Filesystem, FilesystemWatcher, WatchHandle } from './filesystem.js'
+export type { EntryInfo, FilesystemEvent, WatchOpts, WriteEntry, WriteInfo } from './filesystem.js'
 export { Git } from './git.js'
 export type {
   GitAddOpts,
@@ -48,4 +50,6 @@ export type {
 } from './git.js'
 export { Pty } from './pty.js'
 export type { PtyConnectOpts, PtyCreateOpts, PtySize } from './pty.js'
+export { Terminal, TerminalManager, TerminalOutput } from './terminal.js'
+export type { TerminalOpts } from './terminal.js'
 export { ProcessSocket, base64DecodeBytes, base64DecodeText, base64Encode } from './processSocket.js'

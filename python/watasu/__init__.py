@@ -36,6 +36,7 @@ from .sandbox.filesystem.filesystem import (
     FileType,
     FilesystemEvent,
     FilesystemEventType,
+    WriteEntry,
     WriteInfo,
 )
 from .sandbox.sandbox_api import (
@@ -204,6 +205,7 @@ __all__ = [
     "VolumeFileType",
     "VolumeInfo",
     "WatchHandle",
+    "WriteEntry",
     "WriteInfo",
     "client",
     "default_build_logger",

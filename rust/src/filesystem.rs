@@ -3,6 +3,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::process_socket::ProcessSocket;
 use crate::transport::DataPlaneClient;
+use base64::Engine;
 
 /// File type returned by sandbox filesystem metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +35,25 @@ pub struct EntryInfo {
 
 /// Metadata returned by write operations.
 pub type WriteInfo = EntryInfo;
+
+/// File path and bytes used by `Filesystem::write_files`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WriteEntry {
+    /// Absolute sandbox path to write.
+    pub path: String,
+    /// File content bytes.
+    pub data: Vec<u8>,
+}
+
+impl WriteEntry {
+    /// Create a file write entry.
+    pub fn new(path: impl Into<String>, data: impl AsRef<[u8]>) -> Self {
+        Self {
+            path: path.into(),
+            data: data.as_ref().to_vec(),
+        }
+    }
+}
 
 /// Filesystem event returned by a watch stream.
 #[derive(Clone, Debug, Default)]
@@ -124,6 +144,25 @@ impl Filesystem {
             )
             .await?;
         Ok(entry_info(payload.get("file").unwrap_or(&payload)))
+    }
+
+    /// Write several files in one runtime API call.
+    pub async fn write_files(&self, files: Vec<WriteEntry>) -> Result<Vec<WriteInfo>> {
+        if files.is_empty() {
+            return Ok(vec![]);
+        }
+        let payload = self
+            .data_plane
+            .post_json("/runtime/v1/files/write_files", write_files_payload(&files))
+            .await?;
+        Ok(payload
+            .get("files")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| entry_info(&value))
+            .collect())
     }
 
     /// List directory entries below `path`.
@@ -287,4 +326,41 @@ fn filesystem_event(value: Value) -> FilesystemEvent {
 
 fn urlencoding(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+fn write_files_payload(files: &[WriteEntry]) -> Value {
+    serde_json::json!({
+        "files": files
+            .iter()
+            .map(|file| {
+                serde_json::json!({
+                    "path": file.path.as_str(),
+                    "data_base64": base64::engine::general_purpose::STANDARD.encode(&file.data),
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{write_files_payload, WriteEntry};
+
+    #[test]
+    fn write_files_payload_uses_snake_case_base64_entries() {
+        assert_eq!(
+            write_files_payload(&[
+                WriteEntry::new("/tmp/a.txt", "abc"),
+                WriteEntry::new("/tmp/b.bin", [0, 1, 2]),
+            ]),
+            json!({
+                "files": [
+                    {"path": "/tmp/a.txt", "data_base64": "YWJj"},
+                    {"path": "/tmp/b.bin", "data_base64": "AAEC"}
+                ]
+            })
+        );
+    }
 }

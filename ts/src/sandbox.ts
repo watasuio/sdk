@@ -5,6 +5,8 @@ import { NotFoundError, SandboxError, unsupported } from './errors.js'
 import { Filesystem } from './filesystem.js'
 import { Git } from './git.js'
 import { Pty } from './pty.js'
+import { ProcessManager } from './process.js'
+import { TerminalManager } from './terminal.js'
 
 export interface SandboxCreateOpts extends ConnectionOpts {
   /** Template slug to create. Defaults to "base". */
@@ -105,9 +107,14 @@ export class Sandbox {
   static readonly defaultTemplate = 'base'
 
   files: Filesystem
+  filesystem: Filesystem
   commands: Commands
+  process: ProcessManager
   pty: Pty
+  terminal: TerminalManager
   git: Git
+  cwd: string | undefined
+  envVars: Record<string, string>
   readonly sandboxId: string
 
   private readonly config: ConnectionConfig
@@ -128,13 +135,22 @@ export class Sandbox {
     this.config = opts.connectionConfig
     this.control = opts.control ?? new ControlClient(this.config)
     this.envs = opts.envs ?? {}
+    this.envVars = this.envs
     this.sandbox = opts.sandbox ?? {}
     const dataPlane = dataPlaneFromSession(opts.session, this.config)
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
+    this.filesystem = this.files
     this.commands = new Commands(dataPlane, this.config, this.envs)
+    this.process = new ProcessManager(this.commands)
     this.pty = new Pty(dataPlane, this.config)
+    this.terminal = new TerminalManager(this.pty)
     this.git = new Git(dataPlane)
+  }
+
+  /** Sandbox id alias used by SDK-compatible code. */
+  get id(): string {
+    return this.sandboxId
   }
 
   static async create(opts?: SandboxCreateOpts): Promise<Sandbox>
@@ -196,6 +212,14 @@ export class Sandbox {
     })
   }
 
+  /** Alias for `connect`. */
+  static async reconnect(sandboxId: string, opts?: SandboxConnectOpts): Promise<Sandbox>
+  static async reconnect(opts: SandboxConnectOpts & { sandboxID: string }): Promise<Sandbox>
+  static async reconnect(sandboxOrOpts: string | (SandboxConnectOpts & { sandboxID: string }), opts: SandboxConnectOpts = {}): Promise<Sandbox> {
+    if (typeof sandboxOrOpts === 'string') return this.connect(sandboxOrOpts, opts)
+    return this.connect(sandboxOrOpts.sandboxID, sandboxOrOpts)
+  }
+
   /** Refresh this sandbox's data-plane session in place. */
   async connect(opts: SandboxConnectOpts = {}): Promise<this> {
     const response = await this.control.post(`/sandboxes/${this.sandboxId}/connect`, {
@@ -206,15 +230,18 @@ export class Sandbox {
     const dataPlane = dataPlaneFromSession(response.session, this.config)
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
+    this.filesystem = this.files
     this.commands = new Commands(dataPlane, this.config, this.envs)
+    this.process = new ProcessManager(this.commands)
     this.pty = new Pty(dataPlane, this.config)
+    this.terminal = new TerminalManager(this.pty)
     this.git = new Git(dataPlane)
     return this
   }
 
   /** Destroy a sandbox by id. */
-  static async kill(sandboxId: string, opts: ConnectionOpts = {}): Promise<boolean> {
-    const control = new ControlClient(new ConnectionConfig(opts))
+  static async kill(sandboxId: string, opts: ConnectionOpts | string = {}): Promise<boolean> {
+    const control = new ControlClient(new ConnectionConfig(typeof opts === 'string' ? { apiKey: opts } : opts))
     await control.delete(`/sandboxes/${sandboxId}`)
     return true
   }
@@ -304,6 +331,11 @@ export class Sandbox {
     })
   }
 
+  /** Keep the sandbox alive for `duration` milliseconds. */
+  async keepAlive(duration: number): Promise<void> {
+    await this.setTimeout(duration)
+  }
+
   /** Fetch control-plane metadata for a sandbox by id. */
   static async getInfo(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxInfo> {
     const control = new ControlClient(new ConnectionConfig(opts))
@@ -362,9 +394,10 @@ export class Sandbox {
   }
 
   /** List sandboxes visible to the configured API key. */
-  static async list(opts: ConnectionOpts & { team?: string } = {}): Promise<SandboxInfo[]> {
-    const control = new ControlClient(new ConnectionConfig(opts))
-    const payload = await control.get(opts.team ? `/sandboxes?team=${encodeURIComponent(opts.team)}` : '/sandboxes')
+  static async list(opts: (ConnectionOpts & { team?: string }) | string = {}): Promise<SandboxInfo[]> {
+    const listOpts = typeof opts === 'string' ? { apiKey: opts } : opts
+    const control = new ControlClient(new ConnectionConfig(listOpts))
+    const payload = await control.get(listOpts.team ? `/sandboxes?team=${encodeURIComponent(listOpts.team)}` : '/sandboxes')
     const sandboxes = Array.isArray(payload.sandboxes) ? payload.sandboxes : []
     return sandboxes.map((item) => sandboxInfo(record(item)))
   }
@@ -378,6 +411,20 @@ export class Sandbox {
     if (typeof routeToken !== 'string') throw new SandboxError('port response did not include host or url')
     return `p${port}-${routeToken}.sandbox.${this.config.dataPlaneDomain}`
   }
+
+  /** Return the public hostname for the sandbox or an exposed sandbox port. */
+  getHostname(port?: number): string {
+    if (port !== undefined) return this.getHost(port)
+    return new URL(this.dataPlane.baseUrl).host
+  }
+
+  /** Return a protocol string for a secure or insecure sandbox URL. */
+  getProtocol(baseProtocol = 'http', secure = true): string {
+    return `${baseProtocol}${secure ? 's' : ''}`
+  }
+
+  /** Close the local SDK attachment. This does not destroy the sandbox. */
+  async close(): Promise<void> {}
 
   /** Get a signed URL that accepts a POST upload for a sandbox file path. */
   async uploadUrl(path: string, opts: SandboxUrlOpts = {}): Promise<string> {

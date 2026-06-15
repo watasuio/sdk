@@ -16,8 +16,8 @@ Set `WATASU_API_KEY` before using the SDK.
 import { Sandbox } from '@watasu/sdk'
 
 const sbx = await Sandbox.create()
-await sbx.files.write('/home/user/a.js', 'console.log(2 + 2)')
-const result = await sbx.commands.run('node /home/user/a.js')
+await sbx.filesystem.write('/home/user/a.js', 'console.log(2 + 2)')
+const result = await sbx.process.startAndWait('node /home/user/a.js')
 console.log(result.stdout)
 console.log(await sbx.isRunning())
 await sbx.kill()
@@ -53,16 +53,22 @@ await sbx.git.push('/workspace/project', {
   setUpstream: true,
 })
 
-const watcher = await sbx.files.watchDir('/workspace/project', (event) => {
-  console.log(event.type, event.path)
-}, { recursive: true })
+await sbx.filesystem.writeFiles([
+  { path: '/workspace/project/a.txt', data: 'alpha' },
+  { path: '/workspace/project/b.bin', data: new Uint8Array([0, 1, 2]) },
+])
 
-const terminal = await sbx.pty.create({
-  cols: 100,
-  rows: 30,
+const watcher = sbx.filesystem.watchDir('/workspace/project')
+watcher.addEventListener((event) => {
+  console.log(event.type, event.path)
+})
+await watcher.start({ recursive: true })
+
+const terminal = await sbx.terminal.start({
+  size: { cols: 100, rows: 30 },
   onData: (data) => process.stdout.write(data),
 })
-await terminal.sendStdin('echo hello\n')
+await terminal.sendData('echo hello\n')
 
 const uploadUrl = await sbx.uploadUrl('/workspace/input.bin')
 const downloadUrl = await sbx.downloadUrl('/workspace/output.bin')
