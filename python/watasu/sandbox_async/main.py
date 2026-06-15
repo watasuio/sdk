@@ -476,6 +476,7 @@ class AsyncSandbox:
     """Async Watasu sandbox with sync and async helpers."""
 
     default_template = Sandbox.default_template
+    default_mcp_template = Sandbox.default_mcp_template
 
     @property
     def sandbox_id(self):

@@ -384,6 +384,54 @@ test('sandbox create uses root snake_case API payload', async () => {
   }
 })
 
+test('sandbox create with mcp starts gateway and caches token', async () => {
+  const originalFetch = globalThis.fetch
+  const originalRun = Commands.prototype.run
+  const requests = []
+  const commands = []
+  try {
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(init.body) })
+      return new Response(
+        JSON.stringify({
+          sandbox: { id: 'mcp-created', template_id: 'mcp-gateway', route_token: 'route-token' },
+          session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } }
+      )
+    }
+    Commands.prototype.run = async function (cmd, opts = {}) {
+      commands.push({ cmd, opts })
+      return { exitCode: 0, stdout: '', stderr: '' }
+    }
+
+    const sbx = await Sandbox.create({
+      apiKey: 'key',
+      mcp: { server: "it's-fine", config: { enabled: true } },
+    })
+
+    assert.equal(sbx.sandboxId, 'mcp-created')
+    assert.equal(requests.length, 1)
+    assert.deepEqual(requests[0].body, {
+      template_id: 'mcp-gateway',
+      timeout: 300,
+      metadata: {},
+      env_vars: {},
+      secure: true,
+      allow_internet_access: true,
+    })
+    assert.equal(commands.length, 1)
+    assert.equal(commands[0].opts.user, 'root')
+    assert.match(commands[0].cmd, /^mcp-gateway --config /)
+    assert.match(commands[0].cmd, /it'\\''s-fine/)
+    assert.match(commands[0].opts.envs.GATEWAY_ACCESS_TOKEN, /^[0-9a-f-]{36}$/)
+    assert.equal(await sbx.getMcpToken(), commands[0].opts.envs.GATEWAY_ACCESS_TOKEN)
+  } finally {
+    Commands.prototype.run = originalRun
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('sandbox list returns a paginator and uses nested query params', async () => {
   const originalFetch = globalThis.fetch
   const requests = []

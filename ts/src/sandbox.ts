@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
 import { DataPlaneClient, ControlClient } from './transport.js'
@@ -19,6 +21,7 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   allowInternetAccess?: boolean
   network?: SandboxNetworkUpdate
   team?: string
+  /** MCP gateway configuration to launch inside an `mcp-gateway` sandbox. */
   mcp?: unknown
   volumeMounts?: unknown
 }
@@ -255,12 +258,11 @@ export class Sandbox {
   static async create(template: string, opts?: SandboxCreateOpts): Promise<Sandbox>
   /** Create a sandbox and return it only after the API supplies a data-plane session. */
   static async create(templateOrOpts?: string | SandboxCreateOpts, opts: SandboxCreateOpts = {}): Promise<Sandbox> {
+    const sandboxOpts = typeof templateOrOpts === 'string' ? opts : templateOrOpts ?? {}
     const template = typeof templateOrOpts === 'string'
       ? templateOrOpts
-      : templateOrOpts?.template ?? Sandbox.defaultTemplate
-    const sandboxOpts = typeof templateOrOpts === 'string' ? opts : templateOrOpts ?? {}
+      : templateOrOpts?.template ?? (sandboxOpts.mcp !== undefined ? Sandbox.defaultMcpTemplate : Sandbox.defaultTemplate)
 
-    if (sandboxOpts.mcp !== undefined) unsupported('mcp')
     if (sandboxOpts.volumeMounts !== undefined) unsupported('volumeMounts')
 
     const config = new ConnectionConfig(sandboxOpts)
@@ -283,7 +285,7 @@ export class Sandbox {
     const sandbox = record(response.sandbox ?? response)
     const sandboxId = sandbox.id ?? sandbox.sandbox_id
     if (sandboxId === undefined) throw new SandboxError('create response did not include sandbox id')
-    return new Sandbox({
+    const sandboxInstance = new Sandbox({
       sandboxId: String(sandboxId),
       connectionConfig: config,
       control,
@@ -291,6 +293,8 @@ export class Sandbox {
       sandbox,
       envs: sandboxOpts.envs,
     })
+    if (sandboxOpts.mcp !== undefined) await sandboxInstance.startMcpGateway(sandboxOpts.mcp)
+    return sandboxInstance
   }
 
   /** Connect to an existing sandbox and return it with a fresh data-plane session. */
@@ -564,6 +568,21 @@ export class Sandbox {
     }
   }
 
+  private async startMcpGateway(config: unknown): Promise<void> {
+    const token = randomUUID()
+    this.mcpToken = token
+    try {
+      const result = await this.commands.run(`mcp-gateway --config ${shellQuote(JSON.stringify(config))}`, {
+        user: 'root',
+        envs: { GATEWAY_ACCESS_TOKEN: token },
+      })
+      if (result.exitCode !== 0) throw new SandboxError(`Failed to start MCP gateway: ${result.stderr}`)
+    } catch (error) {
+      this.mcpToken = undefined
+      throw error
+    }
+  }
+
   /** Return a protocol string for a secure or insecure sandbox URL. */
   getProtocol(baseProtocol = 'http', secure = true): string {
     return `${baseProtocol}${secure ? 's' : ''}`
@@ -772,6 +791,10 @@ function templateSlug(value: unknown): string | undefined {
 
 function putIfPresent(target: Record<string, unknown>, key: string, value: unknown): void {
   if (value !== undefined && value !== null) target[key] = value
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 function networkUpdatePayload(network: SandboxNetworkUpdate | undefined): Record<string, unknown> {

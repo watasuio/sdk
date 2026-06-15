@@ -648,6 +648,65 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
 
 
+def test_sandbox_create_with_mcp_starts_gateway_and_caches_token(monkeypatch):
+    captured = {}
+    commands = []
+
+    class FakeControl:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def post(self, path, **kwargs):
+            captured["path"] = path
+            captured["kwargs"] = kwargs
+            return {
+                "sandbox": {
+                    "id": "mcp-created",
+                    "template_id": "mcp-gateway",
+                    "route_token": "route-token",
+                },
+                "session": {
+                    "data_plane_url": "https://route.sandbox.watasuhost.com",
+                    "token": "data",
+                },
+            }
+
+    class FakeResult:
+        exit_code = 0
+        stderr = ""
+
+    def fake_run(self, cmd, **kwargs):
+        commands.append((cmd, kwargs))
+        return FakeResult()
+
+    monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
+    monkeypatch.setattr("watasu.sandbox_sync.commands.command.Commands.run", fake_run)
+
+    sbx = Sandbox.create(
+        api_key="key",
+        mcp={"server": "it's-fine", "config": {"enabled": True}},
+    )
+
+    assert sbx.sandbox_id == "mcp-created"
+    assert captured["path"] == "/sandboxes"
+    assert captured["kwargs"]["json"] == {
+        "template_id": "mcp-gateway",
+        "timeout": 300,
+        "metadata": {},
+        "env_vars": {},
+        "secure": True,
+        "allow_internet_access": True,
+    }
+    assert len(commands) == 1
+    cmd, kwargs = commands[0]
+    assert cmd.startswith("mcp-gateway --config ")
+    assert "'\"'\"'" in cmd
+    assert kwargs["user"] == "root"
+    token = kwargs["envs"]["GATEWAY_ACCESS_TOKEN"]
+    assert len(token) == 36
+    assert sbx.get_mcp_token() == token
+
+
 def test_python_sandbox_main_compatibility_imports():
     from watasu.sandbox.main import SandboxBase as ImportedSandboxBase
     from watasu.sandbox.main import SandboxOpts as ImportedSandboxOpts
