@@ -43,6 +43,18 @@ with Sandbox.beta_create(auto_pause=True) as sbx:
 the retained disk after timeout and allows a later data-plane request to resume
 that paused sandbox automatically. The default timeout action is `kill`.
 
+Mount a named persistent volume when the sandbox starts:
+
+```python
+with Sandbox.create(
+    volume_mounts={
+        "/workspace/cache": "cache",
+        "/data/models": {"name": "models"},
+    }
+) as sbx:
+    sbx.commands.run("echo ready > /workspace/cache/status.txt")
+```
+
 ```python
 from watasu import Sandbox
 

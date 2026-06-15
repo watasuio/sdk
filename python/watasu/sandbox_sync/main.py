@@ -170,6 +170,7 @@ class Sandbox(SandboxBase):
         allow_internet_access: bool = True,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
+        volume_mounts: Optional[Dict[str, Any]] = None,
         lifecycle=None,
         auto_pause: Optional[bool] = None,
         **opts: ApiParams,
@@ -181,8 +182,6 @@ class Sandbox(SandboxBase):
         ``timeout`` is the sandbox lifetime in seconds, not the HTTP request
         timeout. The returned object always has an active data-plane session.
         """
-        _reject_unsupported_opts(opts, ["volume_mounts"])
-
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         sandbox_params = {
@@ -200,6 +199,8 @@ class Sandbox(SandboxBase):
             sandbox_params["mcp"] = mcp
         if auto_pause is not None:
             sandbox_params["auto_pause"] = auto_pause
+        if volume_mounts is not None:
+            sandbox_params["volume_mounts"] = _volume_mounts_payload(volume_mounts)
         sandbox_params.update(_lifecycle_payload(lifecycle))
         sandbox_params.update(_network_payload(network))
         for key in ("team",):
@@ -921,6 +922,26 @@ def _lifecycle_payload(lifecycle: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             "lifecycle.auto_resume can only be true when lifecycle.on_timeout is 'pause'"
         )
     return {"lifecycle": {"on_timeout": on_timeout, "auto_resume": auto_resume}}
+
+
+def _volume_mounts_payload(volume_mounts: Dict[str, Any]) -> List[Dict[str, str]]:
+    if not isinstance(volume_mounts, dict):
+        unsupported("volume_mounts")
+    return [
+        {"path": str(path), "name": _volume_name(volume)}
+        for path, volume in volume_mounts.items()
+    ]
+
+
+def _volume_name(volume: Any) -> str:
+    if isinstance(volume, str):
+        return volume
+    if isinstance(volume, dict) and "name" in volume:
+        return str(volume["name"])
+    name = getattr(volume, "name", None)
+    if name is not None:
+        return str(name)
+    unsupported("volume_mounts")
 
 
 def _bool_value(value: Any) -> bool:

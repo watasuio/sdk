@@ -39,6 +39,8 @@ pub struct CreateOptions {
     pub lifecycle: Option<SandboxLifecycle>,
     /// Whether package registry egress should be allowed.
     pub allow_package_registry_access: Option<bool>,
+    /// Persistent volumes to mount into the sandbox.
+    pub volume_mounts: Vec<VolumeMount>,
     /// Raw exposed-port declarations for Watasu-specific callers.
     pub exposed_ports: Option<Value>,
 }
@@ -60,7 +62,27 @@ impl Default for CreateOptions {
             network: None,
             lifecycle: None,
             allow_package_registry_access: None,
+            volume_mounts: Vec::new(),
             exposed_ports: None,
+        }
+    }
+}
+
+/// A persistent volume mounted at a guest path when a sandbox starts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VolumeMount {
+    /// Volume name.
+    pub name: String,
+    /// Absolute path inside the guest.
+    pub path: String,
+}
+
+impl VolumeMount {
+    /// Create a volume mount from a guest path and volume name.
+    pub fn new(path: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            name: name.into(),
         }
     }
 }
@@ -130,6 +152,8 @@ pub struct SandboxInfo {
     pub state: Option<String>,
     /// Timeout lifecycle policy returned by the API.
     pub lifecycle: Option<SandboxInfoLifecycle>,
+    /// Persistent volumes mounted into the sandbox.
+    pub volume_mounts: Vec<VolumeMount>,
     /// User metadata.
     pub metadata: serde_json::Map<String, Value>,
     /// Creation timestamp.
@@ -336,6 +360,7 @@ impl Sandbox {
         if let Some(lifecycle) = opts.lifecycle {
             sandbox.insert("lifecycle".into(), lifecycle_payload(lifecycle)?);
         }
+        put_if_non_empty_volume_mounts(&mut sandbox, opts.volume_mounts);
         put_if_some_bool(
             &mut sandbox,
             "allow_package_registry_access",
@@ -898,6 +923,7 @@ fn sandbox_info(value: &Value) -> SandboxInfo {
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
         lifecycle: sandbox_lifecycle_info(value.get("lifecycle")),
+        volume_mounts: sandbox_volume_mounts_info(value),
         metadata: value
             .get("metadata")
             .and_then(Value::as_object)
@@ -927,6 +953,21 @@ fn lifecycle_payload(lifecycle: SandboxLifecycle) -> Result<Value> {
         "on_timeout": lifecycle.on_timeout,
         "auto_resume": lifecycle.auto_resume,
     }))
+}
+
+fn sandbox_volume_mounts_info(value: &Value) -> Vec<VolumeMount> {
+    value
+        .get("volume_mounts")
+        .or_else(|| value.get("volumeMounts"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.get("name").and_then(Value::as_str)?;
+            let path = entry.get("path").and_then(Value::as_str)?;
+            Some(VolumeMount::new(path, name))
+        })
+        .collect()
 }
 
 fn sandbox_lifecycle_info(value: Option<&Value>) -> Option<SandboxInfoLifecycle> {
@@ -1095,6 +1136,27 @@ fn put_if_non_empty_strings(
     }
 }
 
+fn put_if_non_empty_volume_mounts(
+    map: &mut serde_json::Map<String, Value>,
+    volume_mounts: Vec<VolumeMount>,
+) {
+    if volume_mounts.is_empty() {
+        return;
+    }
+
+    let mounts = volume_mounts
+        .into_iter()
+        .map(|mount| {
+            serde_json::json!({
+                "name": mount.name,
+                "path": mount.path,
+            })
+        })
+        .collect();
+
+    map.insert("volume_mounts".to_string(), Value::Array(mounts));
+}
+
 fn merge_object(target: &mut serde_json::Map<String, Value>, value: Value) {
     if let Value::Object(entries) = value {
         target.extend(entries);
@@ -1114,9 +1176,9 @@ mod tests {
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
     use super::{
-        metrics_list, network_payload, sandbox_list_path, sandbox_network_path, snapshot_info,
-        snapshot_list_path, ListOptions, NetworkUpdateOptions, SandboxListQuery,
-        SnapshotListOptions,
+        metrics_list, network_payload, put_if_non_empty_volume_mounts, sandbox_info,
+        sandbox_list_path, sandbox_network_path, snapshot_info, snapshot_list_path, ListOptions,
+        NetworkUpdateOptions, SandboxListQuery, SnapshotListOptions, VolumeMount,
     };
 
     #[test]
@@ -1168,6 +1230,47 @@ mod tests {
                 "allow_out": ["pypi.org:443"],
                 "deny_out": ["10.0.0.0/8"]
             })
+        );
+    }
+
+    #[test]
+    fn maps_volume_mounts_to_snake_case_create_payload() {
+        let mut payload = serde_json::Map::new();
+        put_if_non_empty_volume_mounts(
+            &mut payload,
+            vec![
+                VolumeMount::new("/workspace/cache", "cache"),
+                VolumeMount::new("/data/models", "models"),
+            ],
+        );
+
+        assert_eq!(
+            Value::Object(payload),
+            json!({
+                "volume_mounts": [
+                    {"name": "cache", "path": "/workspace/cache"},
+                    {"name": "models", "path": "/data/models"}
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn maps_volume_mounts_from_sandbox_info() {
+        let info = sandbox_info(&json!({
+            "id": "sandbox-1",
+            "volume_mounts": [
+                {"name": "cache", "path": "/workspace/cache"},
+                {"name": "models", "path": "/data/models"}
+            ]
+        }));
+
+        assert_eq!(
+            info.volume_mounts,
+            vec![
+                VolumeMount::new("/workspace/cache", "cache"),
+                VolumeMount::new("/data/models", "models")
+            ]
         );
     }
 

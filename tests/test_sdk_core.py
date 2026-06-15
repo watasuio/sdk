@@ -661,6 +661,10 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
         template="base:82",
         envs={"HELLO": "world"},
         lifecycle={"on_timeout": "pause", "auto_resume": True},
+        volume_mounts={
+            "/workspace/cache": "cache",
+            "/data/models": {"name": "models"},
+        },
         network={
             "allowOut": ["pypi.org:443"],
             "denyOut": ["10.0.0.0/8"],
@@ -676,6 +680,10 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
         "on_timeout": "pause",
         "auto_resume": True,
     }
+    assert captured["kwargs"]["json"]["volume_mounts"] == [
+        {"path": "/workspace/cache", "name": "cache"},
+        {"path": "/data/models", "name": "models"},
+    ]
     assert captured["kwargs"]["json"]["team"] == "bridgeapp"
     assert captured["kwargs"]["json"]["allow_out"] == ["pypi.org:443"]
     assert captured["kwargs"]["json"]["deny_out"] == ["10.0.0.0/8"]

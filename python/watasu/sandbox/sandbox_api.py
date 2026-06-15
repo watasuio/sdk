@@ -76,6 +76,7 @@ class SandboxInfo:
     metadata: Dict[str, Any] = field(default_factory=dict)
     state: Optional[str] = None
     lifecycle: Optional[SandboxInfoLifecycle] = None
+    volume_mounts: List[Dict[str, str]] = field(default_factory=list)
     started_at: Optional[str] = None
     end_at: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -100,12 +101,30 @@ def sandbox_info_from_api(payload: Dict[str, Any]) -> SandboxInfo:
         metadata=payload.get("metadata") or {},
         state=payload.get("state"),
         lifecycle=sandbox_lifecycle_from_api(payload.get("lifecycle")),
+        volume_mounts=sandbox_volume_mounts_from_api(
+            payload.get("volume_mounts", payload.get("volumeMounts"))
+        ),
         started_at=payload.get("started_at")
         or payload.get("created_at")
         or payload.get("ready_at"),
         end_at=payload.get("end_at") or payload.get("deadline_at"),
         raw=payload,
     )
+
+
+def sandbox_volume_mounts_from_api(payload: Any) -> List[Dict[str, str]]:
+    if not isinstance(payload, list):
+        return []
+
+    mounts = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        path = item.get("path")
+        if name and path:
+            mounts.append({"name": str(name), "path": str(path)})
+    return mounts
 
 
 def sandbox_lifecycle_from_api(payload: Any) -> Optional[SandboxInfoLifecycle]:

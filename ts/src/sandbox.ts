@@ -23,7 +23,8 @@ export interface SandboxCreateOpts extends ConnectionOpts {
   mcp?: McpServer
   /** Timeout lifecycle policy. Defaults to killing the sandbox at timeout. */
   lifecycle?: SandboxLifecycle
-  volumeMounts?: unknown
+  /** Persistent volumes to mount, keyed by guest path. */
+  volumeMounts?: Record<string, string | { name: string }>
 }
 
 export interface SandboxLifecycle {
@@ -73,6 +74,7 @@ export interface SandboxInfo {
   name?: string
   state?: string
   lifecycle?: SandboxInfoLifecycle
+  volumeMounts?: Array<{ name: string; path: string }>
   metadata: Record<string, string>
   startedAt?: string
   endAt?: string
@@ -280,8 +282,6 @@ export class Sandbox {
       ? templateOrOpts
       : templateOrOpts?.template ?? (sandboxOpts.mcp === undefined ? this.defaultTemplate : undefined)
 
-    if (sandboxOpts.volumeMounts !== undefined) unsupported('volumeMounts')
-
     const config = new ConnectionConfig(sandboxOpts)
     const control = new ControlClient(config)
     const sandboxPayload: Record<string, unknown> = {
@@ -294,6 +294,7 @@ export class Sandbox {
     putIfPresent(sandboxPayload, 'template_id', template)
     putIfPresent(sandboxPayload, 'mcp', sandboxOpts.mcp)
     putIfPresent(sandboxPayload, 'lifecycle', lifecyclePayload(sandboxOpts.lifecycle))
+    putIfPresent(sandboxPayload, 'volume_mounts', volumeMountsPayload(sandboxOpts.volumeMounts))
     Object.assign(sandboxPayload, networkUpdatePayload(sandboxOpts.network))
     putIfPresent(sandboxPayload, 'team', sandboxOpts.team)
 
@@ -749,6 +750,7 @@ function sandboxInfo(payload: Record<string, unknown>): SandboxInfo {
     name: typeof payload.name === 'string' ? payload.name : undefined,
     state: typeof payload.state === 'string' ? payload.state : undefined,
     lifecycle: sandboxLifecycleInfo(payload.lifecycle),
+    volumeMounts: volumeMountsInfo(payload.volume_mounts ?? payload.volumeMounts),
     metadata: recordOfStrings(payload.metadata),
     startedAt: typeof payload.started_at === 'string'
       ? payload.started_at
@@ -767,6 +769,25 @@ function lifecyclePayload(lifecycle?: SandboxLifecycle): Record<string, unknown>
     throw new SandboxError("lifecycle.autoResume can only be true when lifecycle.onTimeout is 'pause'")
   }
   return { on_timeout: onTimeout, auto_resume: autoResume }
+}
+
+function volumeMountsPayload(volumeMounts: SandboxCreateOpts['volumeMounts']): Array<{ name: string; path: string }> | undefined {
+  if (volumeMounts === undefined) return undefined
+  return Object.entries(volumeMounts).map(([path, volume]) => ({
+    path,
+    name: typeof volume === 'string' ? volume : volume.name,
+  }))
+}
+
+function volumeMountsInfo(value: unknown): Array<{ name: string; path: string }> | undefined {
+  if (!Array.isArray(value)) return undefined
+
+  return value
+    .map((item) => {
+      const entry = record(item)
+      return { name: String(entry.name ?? ''), path: String(entry.path ?? '') }
+    })
+    .filter((entry) => entry.name !== '' && entry.path !== '')
 }
 
 function sandboxLifecycleInfo(value: unknown): SandboxInfoLifecycle | undefined {

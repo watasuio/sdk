@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.21"
+watasu = "0.1.28"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -56,6 +56,24 @@ let sbx = Sandbox::create(CreateOptions {
 `SandboxLifecycle::kill()` is the default behavior. `SandboxLifecycle::pause`
 keeps the retained disk after timeout; passing `true` allows a later data-plane
 request to resume that paused sandbox automatically.
+
+Mount a named persistent volume when the sandbox starts:
+
+```rust
+use watasu::{CreateOptions, Sandbox, VolumeMount};
+
+# async fn run() -> watasu::Result<()> {
+let sbx = Sandbox::create(CreateOptions {
+    volume_mounts: vec![
+        VolumeMount::new("/workspace/cache", "cache"),
+        VolumeMount::new("/data/models", "models"),
+    ],
+    ..Default::default()
+})
+.await?;
+# Ok(())
+# }
+```
 
 ## Listing Sandboxes
 

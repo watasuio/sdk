@@ -363,6 +363,10 @@ test('sandbox create uses root snake_case API payload', async () => {
       envs: { HELLO: 'world' },
       metadata: { purpose: 'compat' },
       lifecycle: { onTimeout: 'pause', autoResume: true },
+      volumeMounts: {
+        '/workspace/cache': 'cache',
+        '/data/models': { name: 'models' },
+      },
       team: 'bridgeapp',
       network: {
         allowOut: ['pypi.org:443'],
@@ -380,6 +384,10 @@ test('sandbox create uses root snake_case API payload', async () => {
       secure: true,
       allow_internet_access: true,
       lifecycle: { on_timeout: 'pause', auto_resume: true },
+      volume_mounts: [
+        { path: '/workspace/cache', name: 'cache' },
+        { path: '/data/models', name: 'models' },
+      ],
       allow_out: ['pypi.org:443'],
       deny_out: ['10.0.0.0/8'],
       allow_package_registry_access: true,

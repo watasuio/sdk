@@ -43,6 +43,17 @@ const sbx = await Sandbox.create({
 disk after timeout; `autoResume` lets a later data-plane request resume that
 paused sandbox automatically.
 
+Mount a named persistent volume when the sandbox starts:
+
+```ts
+const sbx = await Sandbox.create({
+  volumeMounts: {
+    '/workspace/cache': 'cache',
+    '/data/models': { name: 'models' },
+  },
+})
+```
+
 ## Code Interpreter
 
 ```ts
