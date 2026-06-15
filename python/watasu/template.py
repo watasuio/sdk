@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import os
+from pathlib import Path
 import shlex
 import time
 from dataclasses import dataclass, field
@@ -107,6 +110,7 @@ class TemplateBase:
         self._file_ignore_patterns = file_ignore_patterns or []
         self._base: Optional[str] = None
         self._packages: Dict[str, List[str]] = {}
+        self._files: List[Dict[str, Any]] = []
         self._setup: List[str] = []
         self._env: Dict[str, str] = {}
         self._current_workdir: Optional[str] = None
@@ -178,16 +182,35 @@ class TemplateBase:
         return self
 
     def from_dockerfile(self, dockerfile_content_or_path: str) -> "TemplateBase":
-        """Dockerfile template builds are not supported by Watasu yet."""
-        unsupported("Template.from_dockerfile")
+        """Parse a Dockerfile or Dockerfile path into the Watasu template build spec."""
+        _parse_dockerfile_into_template(dockerfile_content_or_path, self)
+        return self
 
     def copy(self, *args: Any, **kwargs: Any) -> "TemplateBase":
-        """Local file-copy template layers are not supported by Watasu yet."""
-        unsupported("Template.copy")
+        """Copy local files or directories into the built template."""
+        if len(args) < 2:
+            raise InvalidArgumentException("copy requires src and dest")
+        src = args[0]
+        dest = args[1]
+        sources = src if isinstance(src, list) else [src]
+        for source in sources:
+            self._add_copy_source(str(source), str(dest), len(sources) > 1, kwargs)
+        return self
 
-    def copy_items(self, *args: Any, **kwargs: Any) -> "TemplateBase":
-        """Local file-copy template layers are not supported by Watasu yet."""
-        unsupported("Template.copy_items")
+    def copy_items(self, items: List[Dict[str, Any]]) -> "TemplateBase":
+        """Copy multiple local files or directories into the built template."""
+        for item in items:
+            self.copy(
+                item["src"],
+                item["dest"],
+                force_upload=item.get("force_upload") or item.get("forceUpload"),
+                user=item.get("user"),
+                mode=item.get("mode"),
+                resolve_symlinks=item.get("resolve_symlinks")
+                if "resolve_symlinks" in item
+                else item.get("resolveSymlinks"),
+            )
+        return self
 
     def remove(
         self,
@@ -346,6 +369,8 @@ class TemplateBase:
             spec["base"] = self._base
         if self._packages:
             spec["packages"] = self._packages
+        if self._files:
+            spec["files"] = self._files
         if self._setup:
             spec["setup"] = self._setup
         if self._env:
@@ -373,12 +398,93 @@ class TemplateBase:
             lines.append(f"RUN python3 -m pip install {package}")
         for package in packages.get("npm", []):
             lines.append(f"RUN npm install -g {package}")
+        for file in spec.get("files", []):
+            lines.append(f"COPY {file.get('source_path') or file.get('path')} {file.get('path')}")
         for command in spec.get("setup", []):
             lines.append(f"RUN {command}")
         return "\n".join(lines) + "\n"
 
     def _add_packages(self, manager: str, packages: List[str]) -> None:
         self._packages.setdefault(manager, []).extend(packages)
+
+    def _add_copy_source(
+        self,
+        source: str,
+        dest: str,
+        multiple_sources: bool,
+        options: Dict[str, Any],
+    ) -> None:
+        source_path = self._resolve_context_path(source)
+        resolve_symlinks = options.get("resolve_symlinks")
+        if resolve_symlinks is None:
+            resolve_symlinks = options.get("resolveSymlinks", True)
+
+        if source_path.is_dir():
+            for file_path in _walk_files(source_path, bool(resolve_symlinks)):
+                relative_path = _to_posix(file_path.relative_to(source_path))
+                context_relative_path = _to_posix(file_path.relative_to(self._context_path()))
+                if self._ignored(relative_path) or self._ignored(context_relative_path):
+                    continue
+                self._add_file_spec(
+                    file_path,
+                    _posix_join(dest, relative_path),
+                    context_relative_path,
+                    options,
+                )
+            return
+
+        if not source_path.is_file():
+            raise InvalidArgumentException(f"copy source is not a file or directory: {source}")
+
+        dest_path = _posix_join(dest, source_path.name) if multiple_sources or dest.endswith("/") else dest
+        self._add_file_spec(
+            source_path,
+            dest_path,
+            _to_posix(source_path.relative_to(self._context_path())),
+            options,
+        )
+
+    def _add_file_spec(
+        self,
+        source_path: Path,
+        dest_path: str,
+        context_relative_path: str,
+        options: Dict[str, Any],
+    ) -> None:
+        file_spec: Dict[str, Any] = {
+            "path": _normalize_sandbox_path(dest_path),
+            "source_path": context_relative_path,
+            "content_b64": base64.b64encode(source_path.read_bytes()).decode("ascii"),
+        }
+        mode = options.get("mode")
+        if mode is not None:
+            file_spec["mode"] = mode
+        user = options.get("user")
+        if user is not None:
+            file_spec["user"] = user
+        self._files.append(file_spec)
+
+    def _context_path(self) -> Path:
+        return Path(self._file_context_path or os.getcwd()).resolve()
+
+    def _resolve_context_path(self, source: str) -> Path:
+        source_path = Path(source)
+        if source_path.is_absolute():
+            raise InvalidArgumentException(
+                "copy source must be relative to the template file context"
+            )
+        context_path = self._context_path()
+        resolved = (context_path / source_path).resolve()
+        try:
+            resolved.relative_to(context_path)
+        except ValueError:
+            raise InvalidArgumentException(
+                "copy source must stay inside the template file context"
+            )
+        return resolved
+
+    def _ignored(self, relative_path: str) -> bool:
+        return any(_matches_ignore_pattern(relative_path, pattern) for pattern in self._file_ignore_patterns)
 
     def _command_with_context(self, command: str, user: Optional[str]) -> str:
         command_text = f"cd {shlex.quote(self._current_workdir)} && {command}" if self._current_workdir else command
@@ -690,3 +796,105 @@ def _string_list(value: Any) -> List[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def _walk_files(root: Path, resolve_symlinks: bool) -> List[Path]:
+    files: List[Path] = []
+    for child in sorted(root.iterdir(), key=lambda item: str(item)):
+        stat_path = child.resolve() if resolve_symlinks else child
+        if stat_path.is_dir():
+            files.extend(_walk_files(stat_path, resolve_symlinks))
+        elif stat_path.is_file():
+            files.append(stat_path)
+    return files
+
+
+def _normalize_sandbox_path(value: str) -> str:
+    return "/".join(str(value).replace("\\", "/").split("/"))
+
+
+def _posix_join(base: str, relative_path: str) -> str:
+    return _normalize_sandbox_path(os.path.join(base.replace("\\", "/"), relative_path))
+
+
+def _to_posix(path_value: Union[str, Path]) -> str:
+    return str(path_value).replace(os.sep, "/")
+
+
+def _matches_ignore_pattern(relative_path: str, pattern: str) -> bool:
+    if not pattern:
+        return False
+    pattern = pattern.replace("\\", "/")
+    if pattern.endswith("/"):
+        return relative_path.startswith(pattern)
+    if "*" not in pattern:
+        return relative_path == pattern or relative_path.startswith(f"{pattern}/")
+
+    import re
+
+    regex = "^" + ".*".join(re.escape(part) for part in pattern.split("*")) + "$"
+    return re.match(regex, relative_path) is not None
+
+
+def _parse_dockerfile_into_template(
+    dockerfile_content_or_path: str, template: TemplateBase
+) -> None:
+    raw_path = Path(dockerfile_content_or_path)
+    path = raw_path if raw_path.is_absolute() else template._context_path() / raw_path
+    content = path.read_text(encoding="utf-8") if path.is_file() else dockerfile_content_or_path
+
+    for keyword, value in _dockerfile_instructions(content):
+        upper = keyword.upper()
+        if upper == "FROM":
+            template.from_image(value.split()[0] if value.split() else "base")
+        elif upper == "RUN":
+            template.run_cmd(value)
+        elif upper == "WORKDIR":
+            template.set_workdir(value)
+        elif upper == "USER":
+            template.set_user(value)
+        elif upper == "ENV":
+            template.set_envs(_parse_env_instruction(value))
+        elif upper in {"COPY", "ADD"}:
+            words = [word for word in shlex.split(value) if not word.startswith("--")]
+            if len(words) < 2:
+                raise InvalidArgumentException(f"{upper} requires source and destination")
+            template.copy(words[:-1], words[-1])
+        elif upper in {"CMD", "ENTRYPOINT"}:
+            template.set_start_cmd(value, wait_for_timeout(20_000))
+
+
+def _dockerfile_instructions(content: str) -> List[tuple[str, str]]:
+    logical_lines: List[str] = []
+    current = ""
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            current += f"{line[:-1]} "
+            continue
+        logical_lines.append(f"{current}{line}")
+        current = ""
+    if current.strip():
+        logical_lines.append(current.strip())
+
+    instructions: List[tuple[str, str]] = []
+    for line in logical_lines:
+        parts = line.split(maxsplit=1)
+        if len(parts) == 2:
+            instructions.append((parts[0], parts[1].strip()))
+    return instructions
+
+
+def _parse_env_instruction(value: str) -> Dict[str, str]:
+    words = shlex.split(value)
+    if len(words) == 2 and "=" not in words[0]:
+        return {words[0]: words[1]}
+    env: Dict[str, str] = {}
+    for word in words:
+        if "=" in word:
+            key, item_value = word.split("=", 1)
+            if key:
+                env[key] = item_value
+    return env

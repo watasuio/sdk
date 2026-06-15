@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -841,6 +844,10 @@ test('sandbox static listSnapshots returns a paginated global snapshot list', as
 
 test('template builder sends snake_case build payloads and parses status', async () => {
   const originalFetch = globalThis.fetch
+  const contextPath = mkdtempSync(join(tmpdir(), 'watasu-template-'))
+  mkdirSync(join(contextPath, 'src'))
+  writeFileSync(join(contextPath, 'src', 'app.js'), 'console.log("ok")\n')
+  writeFileSync(join(contextPath, 'Dockerfile'), 'FROM node:22\nWORKDIR /workspace\nCOPY src /workspace/src\nRUN npm install\nENV NODE_ENV=production\nCMD node /workspace/src/app.js\n')
   const requests = []
   try {
     globalThis.fetch = async (url, init = {}) => {
@@ -875,10 +882,11 @@ test('template builder sends snake_case build payloads and parses status', async
       throw new Error(`unexpected request ${url}`)
     }
 
-    const template = Template()
+    const template = Template({ fileContextPath: contextPath })
       .fromPythonImage('3.12')
       .aptInstall(['git'])
       .pipInstall(['pytest'])
+      .copy('src/app.js', '/workspace/app.js', { mode: 0o755, user: 'root:root' })
       .setEnvs({ TOKEN: 'secret' })
       .runCmd('echo ready')
 
@@ -922,9 +930,26 @@ test('template builder sends snake_case build payloads and parses status', async
       'FROM base',
       'RUN apt-get update && apt-get install -y git',
       'RUN python3 -m pip install pytest',
+      'COPY src/app.js /workspace/app.js',
       'RUN echo ready',
       '',
     ].join('\n'))
+    assert.deepEqual(JSON.parse(await Template.toJSON(
+      Template({ fileContextPath: contextPath }).fromDockerfile('Dockerfile')
+    )), {
+      base: 'base',
+      files: [
+        {
+          path: '/workspace/src/app.js',
+          source_path: 'src/app.js',
+          content_b64: Buffer.from('console.log("ok")\n').toString('base64'),
+        },
+      ],
+      setup: ['cd \'/workspace\' && npm install'],
+      env: { NODE_ENV: 'production' },
+      start_cmd: 'node /workspace/src/app.js',
+      ready_cmd: 'sleep 20',
+    })
     assert.throws(() => Template().addMcpServer('exa'), /mcp-gateway/)
     assert.throws(
       () => Template().fromAWSRegistry('image', { accessKeyId: 'key', secretAccessKey: 'secret', region: 'us-east-1' }),
@@ -947,6 +972,15 @@ test('template builder sends snake_case build payloads and parses status', async
           build_spec: {
             base: 'base',
             packages: { apt: ['git'], pip: ['pytest'] },
+            files: [
+              {
+                path: '/workspace/app.js',
+                source_path: 'src/app.js',
+                content_b64: Buffer.from('console.log("ok")\n').toString('base64'),
+                mode: 493,
+                user: 'root:root',
+              },
+            ],
             setup: ['echo ready'],
             env: { TOKEN: 'secret' },
           },
@@ -961,6 +995,7 @@ test('template builder sends snake_case build payloads and parses status', async
     ])
   } finally {
     globalThis.fetch = originalFetch
+    rmSync(contextPath, { recursive: true, force: true })
   }
 })
 

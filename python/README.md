@@ -156,6 +156,7 @@ from watasu import Template
 template = (
     Template()
     .from_python_image("3.12")
+    .copy("requirements.txt", "/workspace/requirements.txt")
     .apt_install(["git"])
     .pip_install(["pytest"])
     .set_envs({"PIP_DISABLE_PIP_VERSION_CHECK": "1"})
@@ -185,6 +186,10 @@ from watasu.template_async import AsyncTemplate
 
 Template names resolve server-side. `python-ci` starts the latest ready build;
 `python-ci:stable` starts the tagged build.
+
+`Template(file_context_path=".").from_dockerfile("Dockerfile")` parses common
+`FROM`, `WORKDIR`, `COPY`, `RUN`, `ENV`, `CMD`, and `ENTRYPOINT` instructions
+into Watasu's package-spec builder.
 
 ## Metrics And Snapshots
 

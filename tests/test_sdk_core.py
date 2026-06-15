@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 
 import pytest
@@ -1532,8 +1533,10 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
     ]
 
 
-def test_template_builder_sends_snake_case_payloads(monkeypatch):
+def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
     monkeypatch.setenv("WATASU_API_KEY", "key")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('ok')\n")
     calls = []
 
     class Response:
@@ -1583,10 +1586,11 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch):
     monkeypatch.setattr("requests.Session.request", request)
 
     template = (
-        Template()
+        Template(file_context_path=str(tmp_path))
         .from_python_image("3.12")
         .apt_install(["git"])
         .pip_install(["pytest"])
+        .copy("src/app.py", "/workspace/app.py", mode=0o755, user="root:root")
         .set_envs({"TOKEN": "secret"})
         .run_cmd("echo ready")
     )
@@ -1618,6 +1622,17 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch):
                 "build_spec": {
                     "base": "base",
                     "packages": {"apt": ["git"], "pip": ["pytest"]},
+                    "files": [
+                        {
+                            "path": "/workspace/app.py",
+                            "source_path": "src/app.py",
+                            "content_b64": base64.b64encode(b"print('ok')\n").decode(
+                                "ascii"
+                            ),
+                            "mode": 493,
+                            "user": "root:root",
+                        }
+                    ],
                     "setup": ["echo ready"],
                     "env": {"TOKEN": "secret"},
                 },
@@ -1634,26 +1649,63 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch):
     ]
 
 
-def test_template_builder_compatibility_serializers_and_mcp_helper():
+def test_template_builder_compatibility_serializers_and_mcp_helper(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('ok')\n")
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.12\n"
+        "WORKDIR /workspace\n"
+        "COPY src /workspace/src\n"
+        "RUN python3 -m pip install pytest\n"
+        "ENV PYTHONUNBUFFERED=1\n"
+        "CMD python3 /workspace/src/app.py\n"
+    )
+
     template = (
-        Template()
+        Template(file_context_path=str(tmp_path))
         .from_python_image("3.12")
         .apt_install(["git"])
         .pip_install(["pytest"])
+        .copy("src/app.py", "/workspace/app.py")
         .run_cmd("echo ready")
     )
 
     assert json.loads(Template.to_json(template)) == {
         "base": "base",
         "packages": {"apt": ["git"], "pip": ["pytest"]},
+        "files": [
+            {
+                "path": "/workspace/app.py",
+                "source_path": "src/app.py",
+                "content_b64": base64.b64encode(b"print('ok')\n").decode("ascii"),
+            }
+        ],
         "setup": ["echo ready"],
     }
     assert Template.to_dockerfile(template) == (
         "FROM base\n"
         "RUN apt-get update && apt-get install -y git\n"
         "RUN python3 -m pip install pytest\n"
+        "COPY src/app.py /workspace/app.py\n"
         "RUN echo ready\n"
     )
+
+    assert Template(file_context_path=str(tmp_path)).from_dockerfile(
+        "Dockerfile"
+    ).to_build_spec() == {
+        "base": "base",
+        "files": [
+            {
+                "path": "/workspace/src/app.py",
+                "source_path": "src/app.py",
+                "content_b64": base64.b64encode(b"print('ok')\n").decode("ascii"),
+            }
+        ],
+        "setup": ["cd /workspace && python3 -m pip install pytest"],
+        "env": {"PYTHONUNBUFFERED": "1"},
+        "start_cmd": "python3 /workspace/src/app.py",
+        "ready_cmd": "sleep 20",
+    }
 
     mcp_template = Template().from_template("mcp-gateway").add_mcp_server(
         ["exa", "brave"]

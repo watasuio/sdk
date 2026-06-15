@@ -143,6 +143,7 @@ import { Template } from '@watasu/sdk'
 
 const template = Template()
   .fromPythonImage('3.12')
+  .copy('requirements.txt', '/workspace/requirements.txt')
   .aptInstall(['git'])
   .pipInstall(['pytest'])
   .setEnvs({ PIP_DISABLE_PIP_VERSION_CHECK: '1' })
@@ -161,6 +162,10 @@ console.log(await Template.exists('python-ci'))
 
 Template names resolve server-side. `python-ci` starts the latest ready build;
 `python-ci:stable` starts the tagged build.
+
+`Template({ fileContextPath: process.cwd() }).fromDockerfile('Dockerfile')`
+parses common `FROM`, `WORKDIR`, `COPY`, `RUN`, `ENV`, `CMD`, and `ENTRYPOINT`
+instructions into Watasu's package-spec builder.
 
 ## Metrics And Snapshots
 

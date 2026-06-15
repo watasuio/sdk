@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { ConnectionConfig, ConnectionOpts } from './connectionConfig.js'
 import { InvalidArgumentError, NotFoundError, SandboxError, unsupported } from './errors.js'
 import { ControlClient, withQuery } from './transport.js'
@@ -50,8 +52,15 @@ export interface TemplateTag {
 }
 
 export interface TemplateOptions {
-  fileContextPath?: unknown
+  fileContextPath?: string
   fileIgnorePatterns?: string[]
+}
+
+export interface CopyOptions {
+  forceUpload?: true
+  user?: string
+  mode?: number
+  resolveSymlinks?: boolean
 }
 
 export interface BasicBuildOptions {
@@ -67,15 +76,31 @@ export interface BasicBuildOptions {
 export type BuildOptions = ConnectionOpts & BasicBuildOptions
 export type GetBuildStatusOptions = ConnectionOpts & { logsOffset?: number }
 export type TemplateClass = TemplateBase
-export type CopyItem = Record<string, unknown>
+export type CopyItem = {
+  src: string | string[]
+  dest: string
+  forceUpload?: true
+  user?: string
+  mode?: number
+  resolveSymlinks?: boolean
+}
 export type TemplateBuilder = TemplateBase
 export type TemplateFinal = TemplateBase
 export type TemplateFromImage = TemplateBase
 export type ReadyCommand = string | ReadyCmd
 
+interface TemplateFileSpec {
+  path: string
+  content_b64: string
+  source_path?: string
+  mode?: number
+  user?: string
+}
+
 interface BuildSpec {
   base?: string
   packages?: Record<string, string[]>
+  files?: TemplateFileSpec[]
   setup?: string[]
   env?: Record<string, string>
   start_cmd?: string
@@ -135,6 +160,7 @@ export function waitForTimeout(timeout: number): ReadyCmd {
 export class TemplateBase {
   private base: string | undefined
   private packages: Record<string, string[]> = {}
+  private files: TemplateFileSpec[] = []
   private setup: string[] = []
   private env: Record<string, string> = {}
   private currentWorkdir: string | undefined
@@ -142,8 +168,13 @@ export class TemplateBase {
   private startCmd: string | undefined
   private readyCmd: string | undefined
   private force = false
+  private readonly fileContextPath: string
+  private readonly fileIgnorePatterns: string[]
 
-  constructor(_options: TemplateOptions = {}) {}
+  constructor(options: TemplateOptions = {}) {
+    this.fileContextPath = path.resolve(options.fileContextPath ?? process.cwd())
+    this.fileIgnorePatterns = options.fileIgnorePatterns ?? []
+  }
 
   static async build(template: TemplateClass, name: string, options?: Omit<BuildOptions, 'alias'>): Promise<BuildInfo>
   static async build(template: TemplateClass, options: BuildOptions): Promise<BuildInfo>
@@ -306,16 +337,33 @@ export class TemplateBase {
     return this
   }
 
-  fromDockerfile(_dockerfileContentOrPath: string): TemplateBuilder {
-    unsupported('Template.fromDockerfile')
+  fromDockerfile(dockerfileContentOrPath: string): TemplateBuilder {
+    const candidate = path.isAbsolute(dockerfileContentOrPath)
+      ? dockerfileContentOrPath
+      : path.resolve(this.fileContextPath, dockerfileContentOrPath)
+    const content = fs.existsSync(candidate) && fs.statSync(candidate).isFile()
+      ? fs.readFileSync(candidate, 'utf8')
+      : dockerfileContentOrPath
+    parseDockerfileIntoTemplate(content, this)
+    return this
   }
 
-  copy(_src: unknown, _dest: unknown, _options?: unknown): TemplateBuilder {
-    unsupported('Template.copy')
+  copy(src: string | string[], dest: string, options: CopyOptions = {}): TemplateBuilder {
+    const sources = Array.isArray(src) ? src : [src]
+    for (const source of sources) this.addCopySource(source, dest, options, sources.length > 1)
+    return this
   }
 
-  copyItems(_items: CopyItem[]): TemplateBuilder {
-    unsupported('Template.copyItems')
+  copyItems(items: CopyItem[]): TemplateBuilder {
+    for (const item of items) {
+      this.copy(item.src, item.dest, {
+        forceUpload: item.forceUpload,
+        user: item.user,
+        mode: item.mode,
+        resolveSymlinks: item.resolveSymlinks,
+      })
+    }
+    return this
   }
 
   remove(path: string | string[], options: { force?: boolean; recursive?: boolean; user?: string } = {}): TemplateBuilder {
@@ -428,6 +476,7 @@ export class TemplateBase {
     const spec: BuildSpec = {}
     if (this.base) spec.base = this.base
     if (Object.keys(this.packages).length > 0) spec.packages = this.packages
+    if (this.files.length > 0) spec.files = this.files
     if (this.setup.length > 0) spec.setup = this.setup
     if (Object.keys(this.env).length > 0) spec.env = this.env
     if (this.startCmd) spec.start_cmd = this.startCmd
@@ -437,6 +486,58 @@ export class TemplateBase {
 
   private addPackages(manager: string, packages: string[]) {
     this.packages[manager] = [...(this.packages[manager] ?? []), ...packages]
+  }
+
+  private addCopySource(source: string, dest: string, options: CopyOptions, multipleSources: boolean) {
+    const sourcePath = this.resolveContextPath(source)
+    const stat = fs.statSync(sourcePath)
+    if (stat.isDirectory()) {
+      for (const filePath of walkFiles(sourcePath, options.resolveSymlinks ?? true)) {
+        const relativePath = toPosixPath(path.relative(sourcePath, filePath))
+        if (this.ignored(relativePath) || this.ignored(toPosixPath(path.relative(this.fileContextPath, filePath)))) continue
+        this.addFileSpec(
+          filePath,
+          posixJoin(dest, relativePath),
+          toPosixPath(path.relative(this.fileContextPath, filePath)),
+          options
+        )
+      }
+      return
+    }
+
+    if (!stat.isFile()) {
+      throw new InvalidArgumentError(`copy source is not a file or directory: ${source}`)
+    }
+
+    const destPath = multipleSources || dest.endsWith('/') ? posixJoin(dest, path.basename(source)) : dest
+    this.addFileSpec(sourcePath, destPath, toPosixPath(path.relative(this.fileContextPath, sourcePath)), options)
+  }
+
+  private addFileSpec(filePath: string, destPath: string, sourcePath: string, options: CopyOptions) {
+    const file: TemplateFileSpec = {
+      path: normalizeSandboxPath(destPath),
+      source_path: sourcePath,
+      content_b64: fs.readFileSync(filePath).toString('base64'),
+    }
+    if (options.mode !== undefined) file.mode = options.mode
+    if (options.user !== undefined) file.user = options.user
+    this.files.push(file)
+  }
+
+  private resolveContextPath(source: string): string {
+    if (path.isAbsolute(source)) {
+      throw new InvalidArgumentError('copy source must be relative to the template file context')
+    }
+    const resolved = path.resolve(this.fileContextPath, source)
+    const relative = path.relative(this.fileContextPath, resolved)
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new InvalidArgumentError('copy source must stay inside the template file context')
+    }
+    return resolved
+  }
+
+  private ignored(relativePath: string): boolean {
+    return this.fileIgnorePatterns.some((pattern) => matchesIgnorePattern(relativePath, pattern))
   }
 
   private commandWithContext(command: string, user?: string): string {
@@ -453,6 +554,7 @@ export class TemplateBase {
     for (const packageName of this.packages.apt ?? []) lines.push(`RUN apt-get update && apt-get install -y ${packageName}`)
     for (const packageName of this.packages.pip ?? []) lines.push(`RUN python3 -m pip install ${packageName}`)
     for (const packageName of this.packages.npm ?? []) lines.push(`RUN npm install -g ${packageName}`)
+    for (const file of this.files) lines.push(`COPY ${file.source_path ?? file.path} ${file.path}`)
     for (const command of this.setup) lines.push(`RUN ${command}`)
     return `${lines.join('\n')}\n`
   }
@@ -460,6 +562,126 @@ export class TemplateBase {
 
 function readyCommandText(command: ReadyCommand): string {
   return command instanceof ReadyCmd ? command.getCmd() : command
+}
+
+function walkFiles(root: string, resolveSymlinks: boolean): string[] {
+  const entries = fs.readdirSync(root, { withFileTypes: true })
+  const files: string[] = []
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name)
+    const stat = resolveSymlinks ? fs.statSync(entryPath) : fs.lstatSync(entryPath)
+    if (stat.isDirectory()) files.push(...walkFiles(entryPath, resolveSymlinks))
+    if (stat.isFile()) files.push(entryPath)
+  }
+  return files.sort()
+}
+
+function normalizeSandboxPath(value: string): string {
+  return toPosixPath(value).replace(/\/+/g, '/')
+}
+
+function posixJoin(base: string, relativePath: string): string {
+  const normalizedBase = normalizeSandboxPath(base)
+  return normalizeSandboxPath(path.posix.join(normalizedBase, relativePath))
+}
+
+function toPosixPath(value: string): string {
+  return value.split(path.sep).join('/')
+}
+
+function matchesIgnorePattern(relativePath: string, pattern: string): boolean {
+  if (!pattern) return false
+  const normalizedPattern = toPosixPath(pattern)
+  if (normalizedPattern.endsWith('/')) return relativePath.startsWith(normalizedPattern)
+  if (!normalizedPattern.includes('*')) return relativePath === normalizedPattern || relativePath.startsWith(`${normalizedPattern}/`)
+  const escaped = normalizedPattern.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')
+  return new RegExp(`^${escaped}$`).test(relativePath)
+}
+
+function parseDockerfileIntoTemplate(dockerfileContentOrPath: string, template: TemplateBase) {
+  for (const instruction of dockerfileInstructions(dockerfileContentOrPath)) {
+    const keyword = instruction.keyword.toUpperCase()
+    const value = instruction.value
+    if (keyword === 'FROM') {
+      template.fromImage(value.split(/\s+/)[0] || 'base')
+    } else if (keyword === 'RUN') {
+      template.runCmd(value)
+    } else if (keyword === 'WORKDIR') {
+      template.setWorkdir(value)
+    } else if (keyword === 'USER') {
+      template.setUser(value)
+    } else if (keyword === 'ENV') {
+      template.setEnvs(parseEnvInstruction(value))
+    } else if (keyword === 'COPY' || keyword === 'ADD') {
+      const args = shellWords(value).filter((word) => !word.startsWith('--'))
+      if (args.length < 2) throw new InvalidArgumentError(`${keyword} requires source and destination`)
+      const dest = args[args.length - 1]
+      template.copy(args.slice(0, -1), dest)
+    } else if (keyword === 'CMD' || keyword === 'ENTRYPOINT') {
+      template.setStartCmd(value, waitForTimeout(20_000))
+    }
+  }
+}
+
+function dockerfileInstructions(content: string): Array<{ keyword: string; value: string }> {
+  const logicalLines: string[] = []
+  let current = ''
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    if (line.endsWith('\\')) {
+      current += `${line.slice(0, -1)} `
+      continue
+    }
+    logicalLines.push(`${current}${line}`)
+    current = ''
+  }
+  if (current.trim()) logicalLines.push(current.trim())
+
+  return logicalLines.flatMap((line) => {
+    const match = line.match(/^([A-Za-z]+)\s+(.*)$/)
+    return match ? [{ keyword: match[1], value: match[2].trim() }] : []
+  })
+}
+
+function parseEnvInstruction(value: string): Record<string, string> {
+  const words = shellWords(value)
+  if (words.length === 2 && !words[0].includes('=')) return { [words[0]]: words[1] }
+  const env: Record<string, string> = {}
+  for (const word of words) {
+    const index = word.indexOf('=')
+    if (index > 0) env[word.slice(0, index)] = word.slice(index + 1)
+  }
+  return env
+}
+
+function shellWords(value: string): string[] {
+  const words: string[] = []
+  let word = ''
+  let quote: '"' | "'" | undefined
+  let escaping = false
+  for (const char of value) {
+    if (escaping) {
+      word += char
+      escaping = false
+    } else if (char === '\\') {
+      escaping = true
+    } else if (quote) {
+      if (char === quote) quote = undefined
+      else word += char
+    } else if (char === '"' || char === "'") {
+      quote = char
+    } else if (/\s/.test(char)) {
+      if (word) {
+        words.push(word)
+        word = ''
+      }
+    } else {
+      word += char
+    }
+  }
+  if (word) words.push(word)
+  return words
 }
 
 export interface TemplateFactory {
