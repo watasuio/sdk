@@ -81,19 +81,11 @@ from .sandbox_sync.git import Git, GitBranches, GitCommandResult, GitFileStatus,
 from .sandbox_sync.main import Sandbox
 from .sandbox_sync.paginator import SandboxPaginator, SnapshotPaginator
 from .stubs import (
-    AsyncVolume,
     CopyItem,
     LogEntryEnd,
     LogEntryLevel,
     LogEntryStart,
     OutputHandler,
-    Volume,
-    VolumeAndToken,
-    VolumeApiParams,
-    VolumeConnectionConfig,
-    VolumeEntryStat,
-    VolumeFileType,
-    VolumeInfo,
 )
 from .template import (
     AsyncTemplate,
@@ -114,6 +106,16 @@ from .template import (
     wait_for_process,
     wait_for_timeout,
     wait_for_url,
+)
+from .volume import (
+    AsyncVolume,
+    Volume,
+    VolumeAndToken,
+    VolumeApiParams,
+    VolumeConnectionConfig,
+    VolumeEntryStat,
+    VolumeFileType,
+    VolumeInfo,
 )
 
 __all__ = [

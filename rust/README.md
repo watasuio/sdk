@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.29"
+watasu = "0.1.30"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -71,6 +71,32 @@ let sbx = Sandbox::create(CreateOptions {
     ..Default::default()
 })
 .await?;
+# Ok(())
+# }
+```
+
+Create and edit a persistent volume while it is detached:
+
+```rust
+use watasu::{Volume, VolumeCreateOptions, VolumeWriteOptions};
+
+# async fn run() -> watasu::Result<()> {
+let volume = Volume::create("cache", VolumeCreateOptions::default()).await?;
+volume.make_dir("/workspace", VolumeWriteOptions::default()).await?;
+volume
+    .write_file(
+        "/workspace/status.txt",
+        "ready\n",
+        VolumeWriteOptions {
+            mode: Some("0644".into()),
+            ..Default::default()
+        },
+    )
+    .await?;
+let content = volume.read_file("/workspace/status.txt").await?;
+println!("{}", String::from_utf8_lossy(&content));
+volume.remove("/workspace/status.txt").await?;
+volume.destroy().await?;
 # Ok(())
 # }
 ```

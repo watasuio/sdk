@@ -36,6 +36,7 @@ mod pty;
 mod sandbox;
 mod template;
 mod transport;
+mod volume;
 
 pub use commands::{
     CommandExit, CommandHandle, CommandOptions, CommandResult, Commands, ProcessInfo,
@@ -62,4 +63,7 @@ pub use template::{
     BuildInfo, BuildStatusReason, LogEntry, Template, TemplateBuildOptions, TemplateBuildStatus,
     TemplateBuildStatusOptions, TemplateBuildStatusResponse, TemplateBuilder, TemplateTag,
     TemplateTagInfo,
+};
+pub use volume::{
+    Volume, VolumeCreateOptions, VolumeEntryStat, VolumeInfo, VolumeListOptions, VolumeWriteOptions,
 };

@@ -54,6 +54,20 @@ const sbx = await Sandbox.create({
 })
 ```
 
+Create and edit a persistent volume while it is detached:
+
+```ts
+import { Volume } from '@watasu/sdk'
+
+const volume = await Volume.create('cache')
+await volume.makeDir('/workspace')
+await volume.writeFile('/workspace/status.txt', 'ready\n', { mode: '0644' })
+console.log(await volume.readFile('/workspace/status.txt'))
+console.log((await volume.list('/workspace')).map((entry) => entry.path))
+await volume.remove('/workspace/status.txt')
+await volume.destroy()
+```
+
 ## Code Interpreter
 
 ```ts

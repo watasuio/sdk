@@ -55,6 +55,20 @@ with Sandbox.create(
     sbx.commands.run("echo ready > /workspace/cache/status.txt")
 ```
 
+Create and edit a persistent volume while it is detached:
+
+```python
+from watasu import Volume
+
+volume = Volume.create("cache")
+volume.make_dir("/workspace")
+volume.write_file("/workspace/status.txt", "ready\n", mode="0644")
+print(volume.read_file("/workspace/status.txt"))
+print([entry.path for entry in volume.list("/workspace")])
+volume.remove("/workspace/status.txt")
+volume.destroy()
+```
+
 ```python
 from watasu import Sandbox
 

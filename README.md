@@ -16,7 +16,7 @@ only with a usable data-plane session. SDKs do not poll sandbox readiness.
 Supported sandbox helpers include sandbox list pagination/filtering, streaming
 commands, code execution, PTY sessions, filesystem read/write/list/watch, Git
 clone/auth/status/branches/add/commit/pull/push/remotes/config, signed
-upload/download URLs, metrics, disk snapshots, snapshot list pagination,
-snapshot restore, snapshot delete, live sandbox network-policy updates, and
-package-spec template builds with local file copy, Dockerfile parsing, build
-status, and tag helpers.
+upload/download URLs, persistent volume create/connect/list/read/write/delete,
+metrics, disk snapshots, snapshot list pagination, snapshot restore, snapshot
+delete, live sandbox network-policy updates, and package-spec template builds
+with local file copy, Dockerfile parsing, build status, and tag helpers.

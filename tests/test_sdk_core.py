@@ -22,6 +22,8 @@ from watasu import (
     SandboxOpts,
     McpServer,
     Template,
+    Volume,
+    AsyncVolume,
     TemplateBuildStatus,
     get_signature,
     wait_for_timeout,
@@ -65,6 +67,156 @@ def test_template_sync_and_async_import_paths_match_top_level_exports():
     assert TemplateSyncMain is Template
     assert TemplateAsyncExport is AsyncTemplate
     assert TemplateAsyncMain is AsyncTemplate
+
+
+def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatch):
+    import watasu.volume as volume_module
+
+    calls = []
+
+    class FakeControl:
+        def __init__(self, config):
+            self.config = config
+
+        def post(self, path, **kwargs):
+            calls.append(("POST", path, kwargs))
+            if path == "/volumes":
+                return {
+                    "volume": {
+                        "id": 42,
+                        "name": "cache",
+                        "token": "wvol_secret",
+                        "state": "ready",
+                        "size_mb": 10240,
+                        "metadata": {"purpose": "tests"},
+                    }
+                }
+            raise AssertionError(path)
+
+        def put(self, path, **kwargs):
+            calls.append(("PUT", path, kwargs))
+            return {
+                "file": {
+                    "path": "/workspace/a.txt",
+                    "name": "a.txt",
+                    "type": "file",
+                    "bytes": 5,
+                }
+            }
+
+        def get(self, path, **kwargs):
+            calls.append(("GET", path, kwargs))
+            if path.endswith("/files"):
+                return {"file": {"path": "/workspace/a.txt", "content_b64": "aGVsbG8="}}
+            if path.endswith("/directories"):
+                return {
+                    "entries": [
+                        {
+                            "path": "/workspace/a.txt",
+                            "name": "a.txt",
+                            "type": "file",
+                            "bytes": 5,
+                        }
+                    ]
+                }
+            return {"volume": {"id": 42, "name": "cache"}}
+
+        def delete(self, path, **kwargs):
+            calls.append(("DELETE", path, kwargs))
+            return {"deleted": True}
+
+    monkeypatch.setattr(volume_module, "ControlClient", FakeControl)
+
+    volume = Volume.create("cache", api_key="key", team="core")
+    assert isinstance(volume, Volume)
+    assert volume.id == "42"
+    assert volume.name == "cache"
+    assert volume.token == "wvol_secret"
+
+    written = volume.write_file("/workspace/a.txt", "hello", mode="0644")
+    assert written.path == "/workspace/a.txt"
+    assert volume.read_file("/workspace/a.txt") == "hello"
+    assert volume.list("/workspace", depth=2)[0].name == "a.txt"
+    assert volume.remove("/workspace/a.txt") is True
+    assert volume.destroy() is True
+
+    assert calls[0] == (
+        "POST",
+        "/volumes",
+        {
+            "json": {"name": "cache", "team": "core"},
+            "resource": "volume",
+            "request_timeout": None,
+        },
+    )
+    assert calls[1] == (
+        "PUT",
+        "/volumes/42/files",
+        {
+            "json": {
+                "path": "/workspace/a.txt",
+                "content_b64": "aGVsbG8=",
+                "mode": "0644",
+            },
+            "resource": "volume",
+            "request_timeout": None,
+        },
+    )
+    assert calls[2] == (
+        "GET",
+        "/volumes/42/files",
+        {
+            "params": {"path": "/workspace/a.txt"},
+            "resource": "volume",
+            "request_timeout": None,
+        },
+    )
+    assert calls[3] == (
+        "GET",
+        "/volumes/42/directories",
+        {
+            "params": {"path": "/workspace", "depth": 2},
+            "resource": "volume",
+            "request_timeout": None,
+        },
+    )
+    assert calls[4] == (
+        "DELETE",
+        "/volumes/42/path",
+        {
+            "params": {"path": "/workspace/a.txt"},
+            "resource": "volume",
+            "request_timeout": None,
+        },
+    )
+    assert calls[5][0:2] == ("DELETE", "/volumes/42")
+
+
+def test_async_volume_wraps_sync_volume_methods(monkeypatch):
+    import watasu.volume as volume_module
+
+    class FakeControl:
+        def __init__(self, config):
+            self.config = config
+
+        def post(self, path, **kwargs):
+            return {"volume": {"id": 42, "name": "cache", "token": "wvol_secret"}}
+
+        def get(self, path, **kwargs):
+            if path.endswith("/directories"):
+                return {"entries": [{"path": "/workspace", "name": "workspace", "type": "directory"}]}
+            return {"volume": {"id": 42, "name": "cache"}}
+
+    monkeypatch.setattr(volume_module, "ControlClient", FakeControl)
+
+    async def scenario():
+        volume = await AsyncVolume.create("cache", api_key="key")
+        assert isinstance(volume, AsyncVolume)
+        assert volume.id == "42"
+        assert (await volume.get_info()).name == "cache"
+        assert (await volume.list("/"))[0].name == "workspace"
+
+    asyncio.run(scenario())
 
 
 def test_command_handle_raises_on_non_zero_exit():

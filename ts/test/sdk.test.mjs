@@ -21,6 +21,7 @@ import {
   WatchHandle,
   ReadyCmd,
   Template,
+  Volume,
   base64DecodeText,
   base64Encode,
   waitForFile,
@@ -406,6 +407,124 @@ test('sandbox create rejects lifecycle autoResume without pause timeout', async 
     }),
     /autoResume/
   )
+})
+
+test('volume helper uses control API paths and snake_case payloads', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({
+        url: String(url),
+        method: init.method,
+        body: init.body ? JSON.parse(init.body) : undefined,
+      })
+
+      const parsedUrl = new URL(String(url))
+      if (parsedUrl.pathname === '/v1/volumes' && init.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            volume: {
+              id: 42,
+              name: 'cache',
+              token: 'wvol_secret',
+              state: 'ready',
+              size_mb: 10240,
+              metadata: { purpose: 'tests' },
+            },
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (parsedUrl.pathname === '/v1/volumes/42/files' && init.method === 'PUT') {
+        return new Response(
+          JSON.stringify({
+            file: { path: '/workspace/a.txt', name: 'a.txt', type: 'file', bytes: 5 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (parsedUrl.pathname === '/v1/volumes/42/files' && init.method === 'GET') {
+        return new Response(
+          JSON.stringify({ file: { path: '/workspace/a.txt', content_b64: 'aGVsbG8=' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (parsedUrl.pathname === '/v1/volumes/42/directories' && init.method === 'GET') {
+        return new Response(
+          JSON.stringify({
+            entries: [{ path: '/workspace/a.txt', name: 'a.txt', type: 'file', bytes: 5 }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (parsedUrl.pathname === '/v1/volumes/42/path' && init.method === 'DELETE') {
+        return new Response(JSON.stringify({ status: { status: 'deleted' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (parsedUrl.pathname === '/v1/volumes/42' && init.method === 'DELETE') {
+        return new Response(JSON.stringify({ deleted: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new Error(`unexpected request ${init.method} ${url}`)
+    }
+
+    const volume = await Volume.create('cache', { apiKey: 'key', team: 'core' })
+    assert.ok(volume instanceof Volume)
+    assert.equal(volume.id, '42')
+    assert.equal(volume.name, 'cache')
+    assert.equal(volume.token, 'wvol_secret')
+
+    const written = await volume.writeFile('/workspace/a.txt', 'hello', { mode: '0644' })
+    assert.equal(written.path, '/workspace/a.txt')
+    assert.equal(await volume.readFile('/workspace/a.txt'), 'hello')
+    assert.equal((await volume.list('/workspace', { depth: 2 }))[0].name, 'a.txt')
+    assert.equal(await volume.remove('/workspace/a.txt'), true)
+    assert.equal(await volume.destroy(), true)
+
+    assert.deepEqual(requests.map((request) => ({
+      url: request.url,
+      method: request.method,
+      body: request.body,
+    })), [
+      {
+        url: 'https://api.watasu.io/v1/volumes',
+        method: 'POST',
+        body: { name: 'cache', team: 'core' },
+      },
+      {
+        url: 'https://api.watasu.io/v1/volumes/42/files',
+        method: 'PUT',
+        body: { path: '/workspace/a.txt', content_b64: 'aGVsbG8=', mode: '0644' },
+      },
+      {
+        url: 'https://api.watasu.io/v1/volumes/42/files?path=%2Fworkspace%2Fa.txt',
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: 'https://api.watasu.io/v1/volumes/42/directories?path=%2Fworkspace&depth=2',
+        method: 'GET',
+        body: undefined,
+      },
+      {
+        url: 'https://api.watasu.io/v1/volumes/42/path?path=%2Fworkspace%2Fa.txt',
+        method: 'DELETE',
+        body: undefined,
+      },
+      {
+        url: 'https://api.watasu.io/v1/volumes/42',
+        method: 'DELETE',
+        body: undefined,
+      },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('code interpreter sandbox create defaults to code-interpreter template', async () => {
