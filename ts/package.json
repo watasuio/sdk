@@ -1,6 +1,6 @@
 {
   "name": "@watasu/sdk",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "description": "TypeScript SDK for Watasu",
@@ -28,5 +28,10 @@
     "@types/node": "^24.0.3",
     "@types/ws": "^8.18.1",
     "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/watasuio/sdk.git",
+    "directory": "ts"
   }
 }
