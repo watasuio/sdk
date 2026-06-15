@@ -128,6 +128,36 @@ with Sandbox.create(
     )
 ```
 
+## Template Builds
+
+```python
+from watasu import Template
+
+template = (
+    Template()
+    .from_python_image("3.12")
+    .apt_install(["git"])
+    .pip_install(["pytest"])
+    .set_envs({"PIP_DISABLE_PIP_VERSION_CHECK": "1"})
+    .run_cmd("echo ready")
+)
+
+build = Template.build_in_background(
+    template,
+    "python-ci:stable",
+    tags=["stable"],
+    cpu_count=2,
+    memory_mb=2048,
+)
+status = Template.get_build_status(build)
+
+Template.assign_tags("python-ci:stable", ["prod"])
+print(Template.exists("python-ci"))
+```
+
+Template names resolve server-side. `python-ci` starts the latest ready build;
+`python-ci:stable` starts the tagged build.
+
 ## Metrics And Snapshots
 
 ```python

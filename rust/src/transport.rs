@@ -36,6 +36,10 @@ impl ControlClient {
         self.request(Method::DELETE, path, None).await
     }
 
+    pub(crate) async fn delete_with_body(&self, path: &str, body: Value) -> Result<Value> {
+        self.request(Method::DELETE, path, Some(body)).await
+    }
+
     async fn request(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
         let api_key = self.config.api_key.as_ref().ok_or(Error::MissingApiKey)?;
         let mut request = self

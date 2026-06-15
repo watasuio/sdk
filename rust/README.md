@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.12"
+watasu = "0.1.14"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -213,6 +213,44 @@ sbx.update_network(NetworkUpdateOptions {
 # Ok(())
 # }
 ```
+
+## Template Builds
+
+```rust
+use watasu::{Template, TemplateBuildOptions, TemplateBuilder};
+
+# async fn run() -> watasu::Result<()> {
+let template = TemplateBuilder::new()
+    .from_python_image("3.12")
+    .apt_install(["git"])
+    .pip_install(["pytest"])
+    .run_cmd("echo ready");
+
+let build = Template::build_in_background(
+    template,
+    "python-ci:stable",
+    TemplateBuildOptions {
+        tags: vec!["stable".into()],
+        cpu_count: Some(2),
+        memory_mb: Some(2048),
+        ..Default::default()
+    },
+)
+.await?;
+
+let status = Template::get_build_status(&build, Default::default()).await?;
+Template::assign_tags(
+    "python-ci:stable",
+    vec!["prod".into()],
+    Default::default(),
+)
+.await?;
+# Ok(())
+# }
+```
+
+Template names resolve server-side. `python-ci` starts the latest ready build;
+`python-ci:stable` starts the tagged build.
 
 ## Metrics And Snapshots
 

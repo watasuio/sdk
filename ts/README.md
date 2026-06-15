@@ -119,6 +119,32 @@ await sbx.updateNetwork({
 })
 ```
 
+## Template Builds
+
+```ts
+import { Template } from '@watasu/sdk'
+
+const template = Template()
+  .fromPythonImage('3.12')
+  .aptInstall(['git'])
+  .pipInstall(['pytest'])
+  .setEnvs({ PIP_DISABLE_PIP_VERSION_CHECK: '1' })
+  .runCmd('echo ready')
+
+const build = await Template.buildInBackground(template, 'python-ci:stable', {
+  tags: ['stable'],
+  cpuCount: 2,
+  memoryMB: 2048,
+})
+const status = await Template.getBuildStatus(build)
+
+await Template.assignTags('python-ci:stable', ['prod'])
+console.log(await Template.exists('python-ci'))
+```
+
+Template names resolve server-side. `python-ci` starts the latest ready build;
+`python-ci:stable` starts the tagged build.
+
 ## Metrics And Snapshots
 
 ```ts

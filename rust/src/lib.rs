@@ -34,6 +34,7 @@ mod git;
 mod process_socket;
 mod pty;
 mod sandbox;
+mod template;
 mod transport;
 
 pub use commands::{
@@ -55,4 +56,9 @@ pub use sandbox::{
     CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, ListOptions,
     NetworkUpdateOptions, RestoreOptions, Sandbox, SandboxInfo, SandboxListPage, SandboxListQuery,
     SandboxMetrics, SnapshotInfo, SnapshotListOptions, SnapshotListPage,
+};
+pub use template::{
+    BuildInfo, BuildStatusReason, LogEntry, Template, TemplateBuildOptions, TemplateBuildStatus,
+    TemplateBuildStatusOptions, TemplateBuildStatusResponse, TemplateBuilder, TemplateTag,
+    TemplateTagInfo,
 };

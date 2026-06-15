@@ -12,6 +12,8 @@ from watasu import (
     ConnectionConfig,
     ConflictException,
     Sandbox,
+    Template,
+    TemplateBuildStatus,
 )
 from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.filesystem.filesystem import FileType
@@ -1351,4 +1353,170 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
             },
         ),
         ("delete", "/sandboxes/async-123", {"resource": "sandbox"}),
+    ]
+
+
+def test_template_builder_sends_snake_case_payloads(monkeypatch):
+    monkeypatch.setenv("WATASU_API_KEY", "key")
+    calls = []
+
+    class Response:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.content = json.dumps(payload).encode()
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+    def request(self, method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json"), kwargs.get("params")))
+        if url.endswith("/templates"):
+            return Response(
+                201,
+                {
+                    "template_build": {
+                        "template_id": "42",
+                        "build_id": "99",
+                        "alias": "python-ci",
+                        "name": "python-ci:stable",
+                        "tags": ["stable"],
+                    }
+                },
+            )
+        if "/templates/42/builds/99/status" in url:
+            return Response(
+                200,
+                {
+                    "template_id": "42",
+                    "build_id": "99",
+                    "status": "ready",
+                    "log_entries": [
+                        {
+                            "timestamp": "2026-06-15T00:00:00Z",
+                            "level": "info",
+                            "message": "done",
+                        }
+                    ],
+                    "logs": ["done"],
+                },
+            )
+        raise AssertionError(f"unexpected request {method} {url}")
+
+    monkeypatch.setattr("requests.Session.request", request)
+
+    template = (
+        Template()
+        .from_python_image("3.12")
+        .apt_install(["git"])
+        .pip_install(["pytest"])
+        .set_envs({"TOKEN": "secret"})
+        .run_cmd("echo ready")
+    )
+
+    build = Template.build_in_background(
+        template,
+        "python-ci:stable",
+        tags=["stable"],
+        cpu_count=4,
+        memory_mb=4096,
+        skip_cache=True,
+        team="sdk-team",
+    )
+    status = Template.get_build_status(build, logs_offset=1)
+
+    assert build.template_id == "42"
+    assert status.status == TemplateBuildStatus.READY
+    assert status.log_entries[0].message == "done"
+    assert calls == [
+        (
+            "POST",
+            "https://api.watasu.io/v1/templates",
+            {
+                "name": "python-ci:stable",
+                "tags": ["stable"],
+                "cpu_count": 4,
+                "memory_mb": 4096,
+                "skip_cache": True,
+                "build_spec": {
+                    "base": "base",
+                    "packages": {"apt": ["git"], "pip": ["pytest"]},
+                    "setup": ["echo ready"],
+                    "env": {"TOKEN": "secret"},
+                },
+                "team": "sdk-team",
+            },
+            None,
+        ),
+        (
+            "GET",
+            "https://api.watasu.io/v1/templates/42/builds/99/status",
+            None,
+            {"logs_offset": 1},
+        ),
+    ]
+
+
+def test_template_alias_and_tag_helpers(monkeypatch):
+    monkeypatch.setenv("WATASU_API_KEY", "key")
+    calls = []
+
+    class Response:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload if payload is not None else {}
+            self.content = b"" if status_code == 204 else json.dumps(self._payload).encode()
+            self.text = "" if status_code == 204 else json.dumps(self._payload)
+
+        def json(self):
+            return self._payload
+
+    def request(self, method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        if url.endswith("/templates/aliases/missing"):
+            return Response(404, {"error": "not_found"})
+        if "/templates/aliases/" in url:
+            return Response(200, {"template": {"slug": "python-ci"}})
+        if url.endswith("/templates/tags") and method == "POST":
+            return Response(200, {"build_id": "99", "tags": ["stable", "prod"]})
+        if url.endswith("/templates/tags") and method == "DELETE":
+            return Response(204)
+        if url.endswith("/templates/python-ci/tags"):
+            return Response(
+                200,
+                [
+                    {
+                        "tag": "prod",
+                        "build_id": "99",
+                        "created_at": "2026-06-15T00:00:00Z",
+                    }
+                ],
+            )
+        raise AssertionError(f"unexpected request {method} {url}")
+
+    monkeypatch.setattr("requests.Session.request", request)
+
+    assert Template.exists("python-ci") is True
+    assert Template.alias_exists("missing") is False
+    assert Template.assign_tags("python-ci:stable", ["prod"]).tags == ["stable", "prod"]
+    Template.remove_tags("python-ci", "prod")
+    tags = Template.get_tags("python-ci")
+
+    assert tags[0].tag == "prod"
+    assert tags[0].build_id == "99"
+    assert calls == [
+        ("GET", "https://api.watasu.io/v1/templates/aliases/python-ci", None),
+        ("GET", "https://api.watasu.io/v1/templates/aliases/missing", None),
+        (
+            "POST",
+            "https://api.watasu.io/v1/templates/tags",
+            {"target": "python-ci:stable", "tags": ["prod"]},
+        ),
+        (
+            "DELETE",
+            "https://api.watasu.io/v1/templates/tags",
+            {"name": "python-ci", "tags": ["prod"]},
+        ),
+        ("GET", "https://api.watasu.io/v1/templates/python-ci/tags", None),
     ]

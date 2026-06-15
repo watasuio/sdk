@@ -15,6 +15,7 @@ import {
   SandboxPaginator,
   SnapshotPaginator,
   WatchHandle,
+  Template,
   base64DecodeText,
   base64Encode,
 } from '../dist/index.js'
@@ -670,6 +671,151 @@ test('sandbox static listSnapshots returns a paginated global snapshot list', as
         url: 'https://api.watasu.io/v1/sandbox_snapshots?limit=1&next_token=2',
         method: 'GET',
       },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('template builder sends snake_case build payloads and parses status', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      if (String(url).endsWith('/templates')) {
+        return new Response(
+          JSON.stringify({
+            template_build: {
+              template_id: '42',
+              build_id: '99',
+              alias: 'python-ci',
+              name: 'python-ci:stable',
+              tags: ['stable'],
+              status: 'building',
+            },
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      if (String(url).includes('/templates/42/builds/99/status')) {
+        return new Response(
+          JSON.stringify({
+            template_id: '42',
+            build_id: '99',
+            status: 'ready',
+            log_entries: [{ timestamp: '2026-06-15T00:00:00Z', level: 'info', message: 'done' }],
+            logs: ['done'],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected request ${url}`)
+    }
+
+    const template = Template()
+      .fromPythonImage('3.12')
+      .aptInstall(['git'])
+      .pipInstall(['pytest'])
+      .setEnvs({ TOKEN: 'secret' })
+      .runCmd('echo ready')
+
+    const build = await Template.buildInBackground(template, 'python-ci:stable', {
+      apiKey: 'key',
+      cpuCount: 4,
+      memoryMB: 4096,
+      tags: ['stable'],
+      skipCache: true,
+      team: 'sdk-team',
+    })
+    const status = await Template.getBuildStatus(build, { apiKey: 'key', logsOffset: 1 })
+
+    assert.equal(build.templateId, '42')
+    assert.equal(status.status, 'ready')
+    assert.equal(status.logEntries[0].message, 'done')
+    assert.deepEqual(requests, [
+      {
+        url: 'https://api.watasu.io/v1/templates',
+        method: 'POST',
+        body: {
+          name: 'python-ci:stable',
+          tags: ['stable'],
+          cpu_count: 4,
+          memory_mb: 4096,
+          skip_cache: true,
+          build_spec: {
+            base: 'base',
+            packages: { apt: ['git'], pip: ['pytest'] },
+            setup: ['echo ready'],
+            env: { TOKEN: 'secret' },
+          },
+          team: 'sdk-team',
+        },
+      },
+      {
+        url: 'https://api.watasu.io/v1/templates/42/builds/99/status?logs_offset=1',
+        method: 'GET',
+        body: undefined,
+      },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('template alias and tag helpers use compatibility routes', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
+      if (String(url).endsWith('/templates/aliases/missing')) {
+        return new Response(JSON.stringify({ error: 'not_found' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (String(url).includes('/templates/aliases/')) {
+        return new Response(JSON.stringify({ template: { slug: 'python-ci' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (String(url).endsWith('/templates/tags') && init.method === 'POST') {
+        return new Response(JSON.stringify({ build_id: '99', tags: ['stable', 'prod'] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (String(url).endsWith('/templates/tags') && init.method === 'DELETE') {
+        return new Response(null, { status: 204 })
+      }
+      if (String(url).endsWith('/templates/python-ci/tags')) {
+        return new Response(JSON.stringify([{ tag: 'prod', build_id: '99', created_at: '2026-06-15T00:00:00Z' }]), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      throw new Error(`unexpected request ${url}`)
+    }
+
+    assert.equal(await Template.exists('python-ci', { apiKey: 'key' }), true)
+    assert.equal(await Template.aliasExists('missing', { apiKey: 'key' }), false)
+    assert.deepEqual(await Template.assignTags('python-ci:stable', ['prod'], { apiKey: 'key' }), {
+      buildId: '99',
+      tags: ['stable', 'prod'],
+    })
+    await Template.removeTags('python-ci', 'prod', { apiKey: 'key' })
+    const tags = await Template.getTags('python-ci', { apiKey: 'key' })
+    assert.equal(tags[0].tag, 'prod')
+    assert.equal(tags[0].buildId, '99')
+
+    assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
+      ['GET', 'https://api.watasu.io/v1/templates/aliases/python-ci', undefined],
+      ['GET', 'https://api.watasu.io/v1/templates/aliases/missing', undefined],
+      ['POST', 'https://api.watasu.io/v1/templates/tags', { target: 'python-ci:stable', tags: ['prod'] }],
+      ['DELETE', 'https://api.watasu.io/v1/templates/tags', { name: 'python-ci', tags: ['prod'] }],
+      ['GET', 'https://api.watasu.io/v1/templates/python-ci/tags', undefined],
     ])
   } finally {
     globalThis.fetch = originalFetch

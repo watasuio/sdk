@@ -62,3 +62,22 @@ export type { PtyConnectOpts, PtyCreateOpts, PtySize } from './pty.js'
 export { Terminal, TerminalManager, TerminalOutput } from './terminal.js'
 export type { TerminalOpts } from './terminal.js'
 export { ProcessSocket, base64DecodeBytes, base64DecodeText, base64Encode } from './processSocket.js'
+export { Template, TemplateBase } from './template.js'
+export type {
+  BuildInfo,
+  BuildOptions,
+  BuildStatusReason,
+  CopyItem,
+  GetBuildStatusOptions,
+  LogEntry,
+  TemplateBuildStatus,
+  TemplateBuildStatusResponse,
+  TemplateBuilder,
+  TemplateClass,
+  TemplateFactory,
+  TemplateFinal,
+  TemplateFromImage,
+  TemplateOptions,
+  TemplateTag,
+  TemplateTagInfo,
+} from './template.js'
