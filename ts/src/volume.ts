@@ -88,6 +88,9 @@ export class Volume {
   readonly id: string
   readonly name: string
   readonly token?: string
+  readonly domain?: string
+  readonly debug?: boolean
+  readonly proxy?: string
 
   private readonly config: ConnectionConfig
   private readonly control: ControlClient
@@ -104,6 +107,9 @@ export class Volume {
     this.name = opts.name ?? this.volumeId
     this.token = opts.token
     this.config = opts.connectionConfig
+    this.domain = this.config.domain
+    this.debug = this.config.debug
+    this.proxy = this.config.proxy
     this.control = opts.control ?? new ControlClient(this.config)
   }
 

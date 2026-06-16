@@ -8,6 +8,12 @@ export const KEEPALIVE_PING_INTERVAL_SEC = 50
 export const SESSION_OPERATION_REQUEST_TIMEOUT_MS = 150_000
 
 export type Username = string
+export interface Logger {
+  debug?: (...args: unknown[]) => void
+  info?: (...args: unknown[]) => void
+  warn?: (...args: unknown[]) => void
+  error?: (...args: unknown[]) => void
+}
 
 /** Connection options accepted by Watasu SDK entrypoints. */
 export interface ConnectionOpts {
@@ -22,13 +28,17 @@ export interface ConnectionOpts {
   headers?: Record<string, string>
   apiHeaders?: Record<string, string>
   debug?: boolean
+  logger?: Logger
   signal?: AbortSignal
-  proxy?: unknown
+  proxy?: string
 }
 
 /** Resolved connection settings used by control-plane and data-plane clients. */
 export class ConnectionConfig {
+  static envdPort = 49983
+
   readonly apiKey?: string
+  readonly accessToken?: string
   readonly domain: string
   readonly apiUrl: string
   /** Absolute sandbox data-plane URL override, primarily for local runtimes. */
@@ -38,15 +48,19 @@ export class ConnectionConfig {
   readonly headers: Record<string, string>
   readonly apiHeaders: Record<string, string>
   readonly debug: boolean
+  readonly logger?: Logger
   readonly signal?: AbortSignal
-  readonly proxy?: unknown
+  readonly proxy?: string
 
   constructor(opts: ConnectionOpts = {}) {
     const env = typeof process !== 'undefined' ? process.env : {}
-    this.apiKey =
+    const token =
       opts.apiKey ??
       opts.accessToken ??
-      env.WATASU_API_KEY
+      env.WATASU_API_KEY ??
+      env.WATASU_ACCESS_TOKEN
+    this.apiKey = token
+    this.accessToken = opts.accessToken ?? token
     this.domain = opts.domain ?? env.WATASU_DOMAIN ?? 'watasu.io'
     this.apiUrl =
       opts.apiUrl ?? env.WATASU_API_URL ?? `https://api.${this.domain}/v1`
@@ -61,14 +75,16 @@ export class ConnectionConfig {
     this.headers = opts.headers ?? {}
     this.apiHeaders = opts.apiHeaders ?? {}
     this.debug = opts.debug ?? false
+    this.logger = opts.logger
     this.signal = opts.signal
     this.proxy = opts.proxy
   }
 
   /** HTTP headers including the configured bearer token. */
   get authHeaders(): Record<string, string> {
-    return this.apiKey
-      ? { ...this.headers, ...this.apiHeaders, Authorization: `Bearer ${this.apiKey}` }
+    const token = this.accessToken ?? this.apiKey
+    return token
+      ? { ...this.headers, ...this.apiHeaders, Authorization: `Bearer ${token}` }
       : { ...this.headers, ...this.apiHeaders }
   }
 
@@ -91,6 +107,7 @@ export class ConnectionConfig {
   }
 
   /** Return the sandbox data-plane API URL for a Watasu route token. */
+  getSandboxUrl(sandboxId: string, opts: { sandboxDomain: string; envdPort: number }): string
   getSandboxUrl(sandboxId: string, opts: { sandboxDomain?: string; envdPort: number }): string {
     if (this.sandboxUrl) return this.sandboxUrl
     if (this.debug) return `http://localhost:${opts.envdPort}`
@@ -98,11 +115,16 @@ export class ConnectionConfig {
   }
 
   /** Return the direct sandbox data-plane API URL for a Watasu route token. */
+  getSandboxDirectUrl(sandboxId: string, opts: { sandboxDomain: string; envdPort: number }): string
   getSandboxDirectUrl(sandboxId: string, opts: { sandboxDomain?: string; envdPort: number }): string {
-    return this.getSandboxUrl(sandboxId, opts)
+    return this.getSandboxUrl(sandboxId, {
+      sandboxDomain: opts.sandboxDomain ?? this.dataPlaneDomain,
+      envdPort: opts.envdPort,
+    })
   }
 
   /** Return the public hostname for a Watasu sandbox route token and port. */
+  getHost(sandboxId: string, port: number, sandboxDomain: string): string
   getHost(sandboxId: string, port: number, sandboxDomain = this.dataPlaneDomain): string {
     if (this.debug) return `localhost:${port}`
     return `p${port}-${sandboxId}.sandbox.${sandboxDomain}`

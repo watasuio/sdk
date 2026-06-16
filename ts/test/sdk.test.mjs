@@ -70,6 +70,23 @@ test('connection config defaults to Watasu hosts', () => {
   assert.equal(config.apiUrl, 'https://api.watasu.io/v1')
   assert.equal(config.dataPlaneDomain, 'watasuhost.com')
   assert.equal(config.authHeaders.Authorization, 'Bearer key')
+  assert.equal(config.accessToken, 'key')
+  assert.equal(ConnectionConfig.envdPort, 49983)
+})
+
+test('connection config exposes access token logger and proxy options', () => {
+  const logger = { debug() {}, info() {}, warn() {}, error() {} }
+  const config = new ConnectionConfig({
+    accessToken: 'token',
+    logger,
+    proxy: 'http://127.0.0.1:8080',
+  })
+
+  assert.equal(config.apiKey, 'token')
+  assert.equal(config.accessToken, 'token')
+  assert.equal(config.logger, logger)
+  assert.equal(config.proxy, 'http://127.0.0.1:8080')
+  assert.equal(config.authHeaders.Authorization, 'Bearer token')
 })
 
 test('core package exposes reference-compatible runtime symbols', async () => {
@@ -897,11 +914,20 @@ test('volume helper uses control API paths and snake_case payloads', async () =>
       throw new Error(`unexpected request ${init.method} ${url}`)
     }
 
-    const volume = await Volume.create('cache', { apiKey: 'key', team: 'watasu' })
+    const volume = await Volume.create('cache', {
+      apiKey: 'key',
+      team: 'watasu',
+      domain: 'watasu.io',
+      debug: false,
+      proxy: 'http://127.0.0.1:8080',
+    })
     assert.ok(volume instanceof Volume)
     assert.equal(volume.id, '42')
     assert.equal(volume.name, 'cache')
     assert.equal(volume.token, 'wvol_secret')
+    assert.equal(volume.domain, 'watasu.io')
+    assert.equal(volume.debug, false)
+    assert.equal(volume.proxy, 'http://127.0.0.1:8080')
 
     const written = await volume.writeFile('/workspace/a.txt', 'hello', { mode: '0644' })
     assert.equal(written.path, '/workspace/a.txt')
