@@ -289,8 +289,6 @@ class AsyncWatchHandle:
         if self._task is not None:
             self._task.cancel()
 
-    close = stop
-
     async def get_new_events(self) -> List[FilesystemEvent]:
         """Return queued filesystem events."""
         return await asyncio.to_thread(self._handle.get_new_events)

@@ -33,8 +33,6 @@ class WatchHandle:
         self._closed = True
         self._socket.close()
 
-    close = stop
-
     def get_new_events(self) -> List[FilesystemEvent]:
         """Return filesystem events received since the previous drain."""
         if self._closed:
