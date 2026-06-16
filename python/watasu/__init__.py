@@ -168,6 +168,7 @@ __all__ = [
     "NotEnoughSpaceException",
     "NotFoundException",
     "OutputHandler",
+    "ProcessInfo",
     "ProxyTypes",
     "PtyOutput",
     "Pty",

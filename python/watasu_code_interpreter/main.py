@@ -10,6 +10,7 @@ from watasu.sandbox_async.main import AsyncSandbox as BaseAsyncSandbox
 from watasu.sandbox_async.main import _AsyncDualMethod, _thread_callback
 from watasu.sandbox_sync.main import Sandbox as BaseSandbox
 
+from .constants import DEFAULT_TEMPLATE
 from .models import Context, Execution, ExecutionError, OutputMessage, Result
 from .models import context_from_api
 from .models import execution_from_api
@@ -18,7 +19,7 @@ from .models import execution_from_api
 class Sandbox(BaseSandbox):
     """Sandbox specialized for running Python code."""
 
-    default_template = "code-interpreter"
+    default_template = DEFAULT_TEMPLATE
 
     def run_code(
         self,

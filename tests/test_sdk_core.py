@@ -131,9 +131,15 @@ def test_template_sync_and_async_import_paths_match_top_level_exports():
 
 
 def test_code_interpreter_package_re_exports_core_sdk_helpers():
+    import watasu_code_interpreter.code_interpreter_async as ci_async
+    import watasu_code_interpreter.code_interpreter_sync as ci_sync
+    import watasu_code_interpreter.constants as ci_constants
+    import watasu_code_interpreter.exceptions as ci_exceptions
+
     assert watasu_code_interpreter.Sandbox is CodeInterpreterSandbox
     assert watasu_code_interpreter.Sandbox is not watasu.Sandbox
     assert watasu_code_interpreter.Sandbox.default_template == "code-interpreter"
+    assert watasu_code_interpreter.ProcessInfo is watasu.ProcessInfo
     assert watasu_code_interpreter.ConnectionConfig is watasu.ConnectionConfig
     assert watasu_code_interpreter.Template is watasu.Template
     assert watasu_code_interpreter.PtySize is watasu.PtySize
@@ -141,6 +147,17 @@ def test_code_interpreter_package_re_exports_core_sdk_helpers():
     assert watasu.AsyncCommandHandle is AsyncCommandHandle
     assert issubclass(watasu_code_interpreter.MIMEType, str)
     assert callable(watasu_code_interpreter.OutputHandler)
+    assert ci_sync.Sandbox is CodeInterpreterSandbox
+    assert ci_async.AsyncSandbox is watasu_code_interpreter.AsyncSandbox
+    assert ci_constants.DEFAULT_TEMPLATE == "code-interpreter"
+    assert ci_constants.DEFAULT_TIMEOUT == 300
+    assert ci_constants.JUPYTER_PORT == 49999
+    assert isinstance(
+        ci_exceptions.format_request_timeout_error(), watasu.TimeoutException
+    )
+    assert isinstance(
+        ci_exceptions.format_execution_timeout_error(), watasu.TimeoutException
+    )
 
 
 def test_code_interpreter_result_matches_chart_and_mapping_helpers():
