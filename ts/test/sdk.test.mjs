@@ -981,7 +981,6 @@ test('code interpreter package re-exports core SDK helpers', () => {
   assert.equal(DefaultCodeInterpreterSandbox, CodeInterpreterSandbox)
   assert.equal(CodeInterpreterTemplate, Template)
   assert.equal(CodeInterpreterPty, Pty)
-  assert.equal(CodeInterpreterSandbox.defaultTemplate, 'code-interpreter')
   assert.notEqual(CodeInterpreterSandbox, Sandbox)
 })
 

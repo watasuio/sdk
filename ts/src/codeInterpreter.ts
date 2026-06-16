@@ -1,5 +1,5 @@
 import { InvalidArgumentError } from './errors.js'
-import { Sandbox as BaseSandbox, SandboxConnectOpts, SandboxCreateOpts } from './sandbox.js'
+import { Sandbox as BaseSandbox } from './sandbox.js'
 
 export {
   ApiError,
@@ -461,25 +461,27 @@ export class Context {
 
 /** Sandbox specialized for running Python code. */
 export class Sandbox extends BaseSandbox {
-  static readonly defaultTemplate = 'code-interpreter'
+  protected static readonly defaultTemplate: string = 'code-interpreter'
 
   protected get jupyterUrl(): string {
     return this.runtimeBaseUrl
   }
 
-  static async create(opts?: SandboxCreateOpts): Promise<Sandbox>
-  static async create(template: string, opts?: SandboxCreateOpts): Promise<Sandbox>
-  static async create(templateOrOpts?: string | SandboxCreateOpts, opts: SandboxCreateOpts = {}): Promise<Sandbox> {
-    return await super.create(templateOrOpts as string & SandboxCreateOpts, opts) as Sandbox
-  }
-
-  static async connect(sandboxId: string, opts: SandboxConnectOpts = {}): Promise<Sandbox> {
-    return await super.connect(sandboxId, opts) as Sandbox
-  }
-
   /** Run Python code in the sandbox and return structured execution output. */
-  async runCode(code: string, opts?: RunCodeOpts & { language?: RunCodeLanguage }): Promise<Execution>
-  async runCode(code: string, opts?: RunCodeOpts & { context?: Context | string }): Promise<Execution>
+  async runCode(code: string, opts?: RunCodeOpts & {
+    /**
+     * Language to use for code execution.
+     *
+     * If not defined, the default Python context is used.
+     */
+    language?: RunCodeLanguage
+  }): Promise<Execution>
+  async runCode(code: string, opts?: RunCodeOpts & {
+    /**
+     * Context to run the code in.
+     */
+    context?: Context
+  }): Promise<Execution>
   async runCode(
     code: string,
     opts: RunCodeOpts & { language?: RunCodeLanguage; context?: Context | string } = {}
@@ -518,6 +520,7 @@ export class Sandbox extends BaseSandbox {
   }
 
   /** Remove a persistent code context. */
+  async removeCodeContext(context: Context | string): Promise<void>
   async removeCodeContext(context: Context | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<void> {
     await this.runtimeDeleteJson(`/runtime/v1/code/contexts/${encodeURIComponent(requireContextId(context))}`, {
       requestTimeoutMs: opts.requestTimeoutMs,
@@ -526,6 +529,7 @@ export class Sandbox extends BaseSandbox {
   }
 
   /** List persistent code contexts. */
+  async listCodeContexts(): Promise<Context[]>
   async listCodeContexts(opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<Context[]> {
     const response = await this.runtimeGetJson('/runtime/v1/code/contexts', {
       requestTimeoutMs: opts.requestTimeoutMs,
@@ -536,6 +540,7 @@ export class Sandbox extends BaseSandbox {
   }
 
   /** Restart a persistent code context. */
+  async restartCodeContext(context: Context | string): Promise<void>
   async restartCodeContext(context: Context | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<void> {
     await this.runtimePostJson(`/runtime/v1/code/contexts/${encodeURIComponent(requireContextId(context))}/restart`, {}, {
       requestTimeoutMs: opts.requestTimeoutMs,

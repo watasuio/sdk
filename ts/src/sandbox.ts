@@ -95,8 +95,6 @@ export interface SandboxListOpts extends ConnectionOpts {
   team?: string
 }
 
-type SandboxRequestOpts = Pick<ConnectionOpts, 'requestTimeoutMs' | 'signal'>
-
 export interface SandboxInfo {
   sandboxId: string
   templateId?: string
@@ -292,24 +290,30 @@ export class SandboxPaginator {
 /** Running Watasu sandbox with ready `files` and `commands` helpers. */
 export class Sandbox {
   /** Default template slug used when create is called without a template. */
-  static readonly defaultTemplate: string = 'base'
+  protected static readonly defaultTemplate: string = 'base'
   /** Default template slug used by MCP creation once Watasu supports it. */
-  static readonly defaultMcpTemplate: string = 'mcp-gateway'
+  protected static readonly defaultMcpTemplate: string = 'mcp-gateway'
   /** Default sandbox lifetime in milliseconds. */
-  static readonly defaultSandboxTimeoutMs = 300_000
+  protected static readonly defaultSandboxTimeoutMs = 300_000
 
-  files: Filesystem
-  commands: Commands
-  process: ProcessManager
-  pty: Pty
-  terminal: TerminalManager
-  git: Git
+  readonly files: Filesystem
+  readonly commands: Commands
+  readonly process: ProcessManager
+  readonly pty: Pty
+  readonly terminal: TerminalManager
+  readonly git: Git
   cwd: string | undefined
   readonly sandboxId: string
+  readonly sandboxDomain: string
+  readonly trafficAccessToken?: string
 
-  private readonly mcpPort = 50005
-  private mcpToken: string | undefined
-  private readonly config: ConnectionConfig
+  protected readonly mcpPort = 50005
+  protected readonly envdPort = 49983
+  protected readonly connectionConfig: ConnectionConfig
+  protected readonly envdAccessToken?: string
+  private readonly envdApiUrl: string
+  private readonly envdDirectUrl: string
+  private mcpToken?: string
   private readonly control: ControlClient
   private readonly envs: Record<string, string>
   private dataPlane: DataPlaneClient
@@ -324,16 +328,22 @@ export class Sandbox {
     envs?: Record<string, string>
   }) {
     this.sandboxId = String(opts.sandboxId)
-    this.config = opts.connectionConfig
-    this.control = opts.control ?? new ControlClient(this.config)
+    this.connectionConfig = opts.connectionConfig
+    this.control = opts.control ?? new ControlClient(this.connectionConfig)
     this.envs = opts.envs ?? {}
     this.sandbox = opts.sandbox ?? {}
-    const dataPlane = dataPlaneFromSession(opts.session, this.config)
+    const session = record(opts.session)
+    this.sandboxDomain = stringValue(session.sandbox_domain ?? session.sandboxDomain ?? this.sandbox.sandbox_domain ?? this.sandbox.domain) ?? ''
+    this.trafficAccessToken = stringValue(session.traffic_access_token ?? session.trafficAccessToken ?? this.sandbox.traffic_access_token ?? this.sandbox.trafficAccessToken)
+    this.envdAccessToken = stringValue(session.envd_access_token ?? session.envdAccessToken ?? session.token)
+    const dataPlane = dataPlaneFromSession(opts.session, this.connectionConfig)
     this.dataPlane = dataPlane
+    this.envdApiUrl = dataPlane.baseUrl
+    this.envdDirectUrl = dataPlane.baseUrl
     this.files = new Filesystem(dataPlane)
-    this.commands = new Commands(dataPlane, this.config, this.envs)
+    this.commands = new Commands(dataPlane, this.connectionConfig, this.envs)
     this.process = new ProcessManager(this.commands)
-    this.pty = new Pty(dataPlane, this.config)
+    this.pty = new Pty(dataPlane, this.connectionConfig)
     this.terminal = new TerminalManager(this.pty)
     this.git = new Git(dataPlane)
   }
@@ -343,10 +353,14 @@ export class Sandbox {
     return this.sandboxId
   }
 
-  static async create(opts?: SandboxCreateOpts): Promise<Sandbox>
-  static async create(template: string, opts?: SandboxCreateOpts): Promise<Sandbox>
+  static create<S extends typeof Sandbox>(this: S, opts?: SandboxOpts): Promise<InstanceType<S>>
+  static create<S extends typeof Sandbox>(this: S, template: string, opts?: SandboxOpts): Promise<InstanceType<S>>
   /** Create a sandbox and return it only after the API supplies a data-plane session. */
-  static async create(templateOrOpts?: string | SandboxCreateOpts, opts: SandboxCreateOpts = {}): Promise<Sandbox> {
+  static async create<S extends typeof Sandbox>(
+    this: S,
+    templateOrOpts?: string | SandboxCreateOpts,
+    opts: SandboxCreateOpts = {}
+  ): Promise<InstanceType<S>> {
     const sandboxOpts = typeof templateOrOpts === 'string' ? opts : templateOrOpts ?? {}
     const template = typeof templateOrOpts === 'string'
       ? templateOrOpts
@@ -364,7 +378,7 @@ export class Sandbox {
       session: sandboxInfo.session,
       sandbox: sandboxInfo.sandbox,
       envs: sandboxInfo.envs,
-    })
+    }) as InstanceType<S>
   }
 
   protected static createSandbox(template: string, timeoutMs: number, opts?: SandboxCreateOpts): Promise<SandboxConnectionDetails>
@@ -409,7 +423,11 @@ export class Sandbox {
   }
 
   /** Connect to an existing sandbox and return it with a fresh data-plane session. */
-  static async connect(sandboxId: string, opts: SandboxConnectOpts = {}): Promise<Sandbox> {
+  static async connect<S extends typeof Sandbox>(
+    this: S,
+    sandboxId: string,
+    opts: SandboxConnectOpts = {}
+  ): Promise<InstanceType<S>> {
     const sandboxInfo = await this.connectSandbox(sandboxId, opts)
     return new this({
       sandboxId: sandboxInfo.sandboxId,
@@ -417,7 +435,7 @@ export class Sandbox {
       control: sandboxInfo.control,
       session: sandboxInfo.session,
       sandbox: sandboxInfo.sandbox,
-    })
+    }) as InstanceType<S>
   }
 
   protected static async connectSandbox(
@@ -448,18 +466,26 @@ export class Sandbox {
   async connect(opts: SandboxConnectOpts = {}): Promise<this> {
     const response = await this.control.post(`/sandboxes/${this.sandboxId}/resume`, {
       json: opts.timeoutMs ? { timeout: Math.ceil(opts.timeoutMs / 1000) } : {},
-      requestTimeoutMs: sessionOperationRequestTimeout(this.config, opts),
+      requestTimeoutMs: sessionOperationRequestTimeout(this.connectionConfig, opts),
       signal: opts.signal,
     })
     this.sandbox = record(response.sandbox ?? this.sandbox)
-    const dataPlane = dataPlaneFromSession(response.session, this.config)
+    const dataPlane = dataPlaneFromSession(response.session, this.connectionConfig)
+    const mutable = this as {
+      files: Filesystem
+      commands: Commands
+      process: ProcessManager
+      pty: Pty
+      terminal: TerminalManager
+      git: Git
+    }
     this.dataPlane = dataPlane
-    this.files = new Filesystem(dataPlane)
-    this.commands = new Commands(dataPlane, this.config, this.envs)
-    this.process = new ProcessManager(this.commands)
-    this.pty = new Pty(dataPlane, this.config)
-    this.terminal = new TerminalManager(this.pty)
-    this.git = new Git(dataPlane)
+    mutable.files = new Filesystem(dataPlane)
+    mutable.commands = new Commands(dataPlane, this.connectionConfig, this.envs)
+    mutable.process = new ProcessManager(this.commands)
+    mutable.pty = new Pty(dataPlane, this.connectionConfig)
+    mutable.terminal = new TerminalManager(this.pty)
+    mutable.git = new Git(dataPlane)
     return this
   }
 
@@ -490,12 +516,11 @@ export class Sandbox {
   }
 
   /** Destroy a sandbox by id. */
-  static async kill(sandboxId: string, opts: ConnectionOpts | string = {}): Promise<boolean> {
-    const requestOpts = typeof opts === 'string' ? {} : opts
-    const control = new ControlClient(new ConnectionConfig(typeof opts === 'string' ? { apiKey: opts } : opts))
+  static async kill(sandboxId: string, opts: ConnectionOpts = {}): Promise<boolean> {
+    const control = new ControlClient(new ConnectionConfig(opts))
     await control.delete(`/sandboxes/${sandboxId}`, {
-      requestTimeoutMs: requestOpts.requestTimeoutMs,
-      signal: requestOpts.signal,
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return true
   }
@@ -557,7 +582,7 @@ export class Sandbox {
   }
 
   /** Destroy this sandbox. */
-  async kill(opts: SandboxRequestOpts = {}): Promise<boolean> {
+  async kill(opts: Pick<SandboxOpts, 'requestTimeoutMs' | 'signal'> = {}): Promise<boolean> {
     await this.control.delete(`/sandboxes/${this.sandboxId}`, {
       requestTimeoutMs: opts.requestTimeoutMs,
       signal: opts.signal,
@@ -566,7 +591,7 @@ export class Sandbox {
   }
 
   /** Check if this sandbox is in a runtime-active lifecycle state. */
-  async isRunning(opts: SandboxRequestOpts = {}): Promise<boolean> {
+  async isRunning(opts: Pick<ConnectionOpts, 'requestTimeoutMs' | 'signal'> = {}): Promise<boolean> {
     try {
       const payload = await this.control.get(`/sandboxes/${this.sandboxId}`, {
         requestTimeoutMs: opts.requestTimeoutMs,
@@ -591,7 +616,7 @@ export class Sandbox {
   }
 
   /** Set this sandbox's lifetime. */
-  async setTimeout(timeoutMs: number, opts: SandboxRequestOpts = {}): Promise<void> {
+  async setTimeout(timeoutMs: number, opts: Pick<SandboxOpts, 'requestTimeoutMs' | 'signal'> = {}): Promise<void> {
     await this.control.post(`/sandboxes/${this.sandboxId}/timeout`, {
       json: { timeout: Math.ceil(timeoutMs / 1000) },
       requestTimeoutMs: opts.requestTimeoutMs,
@@ -615,7 +640,7 @@ export class Sandbox {
   }
 
   /** Fetch the latest control-plane metadata for this sandbox. */
-  async getInfo(opts: SandboxRequestOpts = {}): Promise<SandboxInfo> {
+  async getInfo(opts: Pick<SandboxOpts, 'requestTimeoutMs' | 'signal'> = {}): Promise<SandboxInfo> {
     const payload = await this.control.get(`/sandboxes/${this.sandboxId}`, {
       requestTimeoutMs: opts.requestTimeoutMs,
       signal: opts.signal,
@@ -663,9 +688,8 @@ export class Sandbox {
   }
 
   /** Return a paginator for sandboxes visible to the configured API key. */
-  static list(opts: SandboxListOpts | string = {}): SandboxPaginator {
-    const listOpts = typeof opts === 'string' ? { apiKey: opts } : opts
-    return new SandboxPaginator(listOpts)
+  static list(opts: SandboxListOpts = {}): SandboxPaginator {
+    return new SandboxPaginator(opts)
   }
 
   /** Return the public hostname for an exposed sandbox port. */
@@ -673,9 +697,9 @@ export class Sandbox {
     const routeToken =
       this.sandbox.route_token ??
       this.sandbox.routeToken ??
-      routeTokenFromDataPlaneUrl(this.dataPlane.baseUrl, this.config.dataPlaneDomain)
+      routeTokenFromDataPlaneUrl(this.dataPlane.baseUrl, this.connectionConfig.dataPlaneDomain)
     if (typeof routeToken !== 'string') throw new SandboxError('port response did not include host or url')
-    return `p${port}-${routeToken}.sandbox.${this.config.dataPlaneDomain}`
+    return `p${port}-${routeToken}.sandbox.${this.connectionConfig.dataPlaneDomain}`
   }
 
   /** Return the conventional MCP URL for this sandbox. */
@@ -719,7 +743,7 @@ export class Sandbox {
   }
 
   /** Atomically replace this sandbox's network egress policy. */
-  async updateNetwork(network: SandboxNetworkUpdate, opts: SandboxNetworkUpdateOpts = {}): Promise<void> {
+  async updateNetwork(network: SandboxNetworkUpdate, opts: Pick<SandboxOpts, 'requestTimeoutMs' | 'signal'> = {}): Promise<void> {
     const sandbox = await Sandbox.putNetwork(this.sandboxId, network, { ...this.resolveApiOpts(), ...opts })
     this.sandbox = sandbox ?? this.sandbox
   }
@@ -786,16 +810,16 @@ export class Sandbox {
 
   private resolveApiOpts(): ConnectionOpts {
     return {
-      apiKey: this.config.apiKey,
-      apiUrl: this.config.apiUrl,
-      sandboxUrl: this.config.sandboxUrl,
-      dataPlaneDomain: this.config.dataPlaneDomain,
-      requestTimeoutMs: this.config.requestTimeoutMs,
-      headers: this.config.headers,
-      apiHeaders: this.config.apiHeaders,
-      debug: this.config.debug,
-      signal: this.config.signal,
-      proxy: this.config.proxy,
+      apiKey: this.connectionConfig.apiKey,
+      apiUrl: this.connectionConfig.apiUrl,
+      sandboxUrl: this.connectionConfig.sandboxUrl,
+      dataPlaneDomain: this.connectionConfig.dataPlaneDomain,
+      requestTimeoutMs: this.connectionConfig.requestTimeoutMs,
+      headers: this.connectionConfig.headers,
+      apiHeaders: this.connectionConfig.apiHeaders,
+      debug: this.connectionConfig.debug,
+      signal: this.connectionConfig.signal,
+      proxy: this.connectionConfig.proxy,
     }
   }
 }

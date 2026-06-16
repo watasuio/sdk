@@ -16,7 +16,7 @@ type ApiPaths = paths
 type ApiSchemas = components['schemas']
 
 const languageOpts: RunCodeOpts & { language?: 'python' } = { language: 'python' }
-const contextOpts: RunCodeOpts & { context?: Context | string } = { context: 'ctx-1' }
+const contextOpts: RunCodeOpts & { context?: Context } = {} as RunCodeOpts & { context?: Context }
 
 void sandboxCtor
 void codeInterpreterCtor
