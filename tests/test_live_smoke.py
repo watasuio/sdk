@@ -531,6 +531,16 @@ def _exercise_commands(sbx: Sandbox) -> None:
     cat.close_stdin(request_timeout=REQUEST_TIMEOUT)
     assert cat.wait().stdout == "stdin-ok\n"
 
+    manager_cat = sbx.commands.run(
+        "cat",
+        background=True,
+        stdin=True,
+        request_timeout=REQUEST_TIMEOUT,
+    )
+    sbx.commands.send_stdin(manager_cat.pid, "manager-stdin-ok\n", request_timeout=REQUEST_TIMEOUT)
+    sbx.commands.close_stdin(manager_cat.pid, request_timeout=REQUEST_TIMEOUT)
+    assert manager_cat.wait().stdout == "manager-stdin-ok\n"
+
     sleeper = sbx.commands.run(
         "sleep 60",
         background=True,
@@ -559,6 +569,20 @@ async def _exercise_async_commands(sbx: AsyncSandbox) -> None:
     await cat.send_stdin("async-stdin-ok\n", request_timeout=REQUEST_TIMEOUT)
     await cat.close_stdin(request_timeout=REQUEST_TIMEOUT)
     assert (await cat.wait()).stdout == "async-stdin-ok\n"
+
+    manager_cat = await sbx.commands.run(
+        "cat",
+        background=True,
+        stdin=True,
+        request_timeout=REQUEST_TIMEOUT,
+    )
+    await sbx.commands.send_stdin(
+        manager_cat.pid,
+        "async-manager-stdin-ok\n",
+        request_timeout=REQUEST_TIMEOUT,
+    )
+    await sbx.commands.close_stdin(manager_cat.pid, request_timeout=REQUEST_TIMEOUT)
+    assert (await manager_cat.wait()).stdout == "async-manager-stdin-ok\n"
 
     sleeper = await sbx.commands.run("sleep 60", background=True, request_timeout=REQUEST_TIMEOUT)
     assert any(str(item.pid) == str(sleeper.pid) for item in await sbx.commands.list(request_timeout=REQUEST_TIMEOUT))

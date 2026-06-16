@@ -3,7 +3,7 @@ from __future__ import annotations
 import gzip as gzip_module
 import base64
 from io import IOBase, TextIOBase
-from typing import IO, Iterator, List, Literal, Optional, Union
+from typing import Dict, IO, Iterator, List, Literal, Optional, Union
 from urllib.parse import urlencode
 
 from watasu._transport.data_plane import DataPlaneClient
@@ -102,6 +102,9 @@ class Filesystem:
         files: List[WriteEntry],
         user=None,
         request_timeout: Optional[float] = None,
+        gzip: bool = False,
+        use_octet_stream: bool = False,
+        metadata: Optional[Dict[str, str]] = None,
     ) -> List[WriteInfo]:
         """Write several files in one runtime API call."""
         if len(files) == 0:
@@ -113,9 +116,9 @@ class Filesystem:
                 "files": [
                     {
                         "path": file["path"],
-                        "data_base64": base64.b64encode(_to_bytes(file["data"])).decode(
-                            "ascii"
-                        ),
+                        "data_base64": base64.b64encode(
+                            _maybe_gzip(_to_bytes(file["data"]), gzip)
+                        ).decode("ascii"),
                     }
                     for file in files
                 ]
@@ -209,6 +212,7 @@ class Filesystem:
         request_timeout: Optional[float] = None,
         recursive: bool = False,
         include_entry: bool = False,
+        allow_network_mounts: bool = False,
     ) -> WatchHandle:
         """Watch a directory for filesystem events."""
         query = urlencode(
@@ -216,6 +220,7 @@ class Filesystem:
                 "path": path,
                 "recursive": "true" if recursive else "false",
                 "include_entry": "true" if include_entry else "false",
+                "allow_network_mounts": "true" if allow_network_mounts else "false",
             }
         )
         socket = ProcessSocket(
@@ -238,3 +243,7 @@ def _to_bytes(data: Union[str, bytes, IO]) -> bytes:
     if isinstance(data, IOBase):
         return data.read()
     raise InvalidArgumentException(f"Unsupported data type: {type(data)}")
+
+
+def _maybe_gzip(data: bytes, enabled: bool) -> bytes:
+    return gzip_module.compress(data) if enabled else data

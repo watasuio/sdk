@@ -58,6 +58,14 @@ class Commands:
         finally:
             handle.disconnect()
 
+    def close_stdin(self, pid, request_timeout: Optional[float] = None) -> None:
+        """Attach to a process and close stdin, signalling EOF."""
+        handle = self.connect(pid, request_timeout=request_timeout)
+        try:
+            handle.close_stdin(request_timeout=request_timeout)
+        finally:
+            handle.disconnect()
+
     @overload
     def run(
         self,

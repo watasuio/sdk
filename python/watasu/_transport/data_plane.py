@@ -19,8 +19,6 @@ class DataPlaneClient:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.config = config
-        self._session = requests.Session()
-        self._session.trust_env = False
 
     @property
     def headers(self) -> Dict[str, str]:
@@ -45,8 +43,10 @@ class DataPlaneClient:
         resource: Optional[str] = None,
         stream: bool = False,
     ) -> requests.Response:
+        session = requests.Session()
+        session.trust_env = False
         try:
-            response = self._session.request(
+            response = session.request(
                 method,
                 self.url(path),
                 headers=self.headers,
@@ -58,17 +58,30 @@ class DataPlaneClient:
                 stream=stream,
             )
         except requests.Timeout:
+            session.close()
             raise format_request_timeout_error()
+        except Exception:
+            session.close()
+            raise
 
         if response.status_code < 400:
+            if stream:
+                setattr(response, "_watasu_session", session)
+            else:
+                session.close()
             return response
 
         try:
             payload: Any = response.json()
+            fallback = response.text
         except ValueError:
             payload = response.text
+            fallback = response.text
+        finally:
+            response.close()
+            session.close()
         raise map_http_error(
-            response.status_code, payload, response.text, resource=resource
+            response.status_code, payload, fallback, resource=resource
         )
 
     def get_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
@@ -90,7 +103,7 @@ class DataPlaneClient:
         self, path: str, chunk_size: int = 65_536, **kwargs: Any
     ) -> Iterator[bytes]:
         response = self.request("GET", path, stream=True, **kwargs)
-        return response.iter_content(chunk_size=chunk_size)
+        return _iter_content_and_close(response, chunk_size)
 
 
 def _requests_proxies(proxy: Any):
@@ -99,6 +112,18 @@ def _requests_proxies(proxy: Any):
     if isinstance(proxy, str):
         return {"http": proxy, "https": proxy}
     return proxy
+
+
+def _iter_content_and_close(
+    response: requests.Response, chunk_size: int
+) -> Iterator[bytes]:
+    try:
+        yield from response.iter_content(chunk_size=chunk_size)
+    finally:
+        response.close()
+        session = getattr(response, "_watasu_session", None)
+        if session is not None:
+            session.close()
 
 
 def _json_or_empty(response: requests.Response) -> Dict[str, Any]:

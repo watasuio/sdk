@@ -19,7 +19,7 @@ from watasu.sandbox.filesystem.filesystem import (
 from watasu.sandbox.sandbox_api import FileUrlInfo, SandboxInfo, SandboxMetrics, SnapshotInfo
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
 from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
-from watasu.sandbox_sync.git import GitCommandResult, GitStatus
+from watasu.sandbox_sync.git import GitBranches, GitCommandResult, GitStatus
 from watasu.sandbox_sync.main import Sandbox
 from watasu.sandbox_sync.paginator import SandboxPaginator
 
@@ -162,6 +162,12 @@ class AsyncCommands:
             self._commands.send_stdin, pid, data, request_timeout=request_timeout
         )
 
+    async def close_stdin(self, pid, request_timeout: Optional[float] = None) -> None:
+        """Attach to a process and close stdin, signalling EOF."""
+        await asyncio.to_thread(
+            self._commands.close_stdin, pid, request_timeout=request_timeout
+        )
+
     async def connect(
         self,
         pid: int,
@@ -224,6 +230,7 @@ class AsyncFilesystem:
         format: Literal["text", "bytes", "stream"] = "text",
         user: Optional[Username] = None,
         request_timeout: Optional[float] = None,
+        gzip: bool = False,
     ):
         """Read a file as text, bytes, or stream."""
         return await asyncio.to_thread(
@@ -232,6 +239,7 @@ class AsyncFilesystem:
             format=format,
             user=user,
             request_timeout=request_timeout,
+            gzip=gzip,
         )
 
     async def read_bytes(
@@ -239,6 +247,7 @@ class AsyncFilesystem:
         path: str,
         user: Optional[Username] = None,
         request_timeout: Optional[float] = None,
+        gzip: bool = False,
     ) -> bytes:
         """Read a file as bytes."""
         return await asyncio.to_thread(
@@ -246,6 +255,7 @@ class AsyncFilesystem:
             path,
             user=user,
             request_timeout=request_timeout,
+            gzip=gzip,
         )
 
     async def write(
@@ -254,6 +264,9 @@ class AsyncFilesystem:
         data: Union[str, bytes, IO],
         user: Optional[Username] = None,
         request_timeout: Optional[float] = None,
+        gzip: bool = False,
+        use_octet_stream: bool = False,
+        metadata: Optional[Dict[str, str]] = None,
     ) -> WriteInfo:
         """Write bytes, text, or a file-like object."""
         return await asyncio.to_thread(
@@ -262,6 +275,9 @@ class AsyncFilesystem:
             data,
             user=user,
             request_timeout=request_timeout,
+            gzip=gzip,
+            use_octet_stream=use_octet_stream,
+            metadata=metadata,
         )
 
     async def write_files(
@@ -269,6 +285,9 @@ class AsyncFilesystem:
         files: List[WriteEntry],
         user: Optional[Username] = None,
         request_timeout: Optional[float] = None,
+        gzip: bool = False,
+        use_octet_stream: bool = False,
+        metadata: Optional[Dict[str, str]] = None,
     ) -> List[WriteInfo]:
         """Write several files in one runtime API call."""
         return await asyncio.to_thread(
@@ -276,6 +295,9 @@ class AsyncFilesystem:
             files,
             user=user,
             request_timeout=request_timeout,
+            gzip=gzip,
+            use_octet_stream=use_octet_stream,
+            metadata=metadata,
         )
 
     async def list(
@@ -376,6 +398,7 @@ class AsyncFilesystem:
         timeout: Optional[float] = 60,
         recursive: bool = False,
         include_entry: bool = False,
+        allow_network_mounts: bool = False,
     ) -> "AsyncWatchHandle":
         """Watch a directory for filesystem events."""
         handle = await asyncio.to_thread(
@@ -385,6 +408,7 @@ class AsyncFilesystem:
             request_timeout=request_timeout,
             recursive=recursive,
             include_entry=include_entry,
+            allow_network_mounts=allow_network_mounts,
         )
         async_handle = AsyncWatchHandle(handle)
         if on_event is not None:
@@ -511,65 +535,509 @@ class AsyncGit:
     def __init__(self, git):
         self._git = git
 
-    async def clone(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.clone, *args, **kwargs)
+    async def clone(
+        self,
+        url: str,
+        path: Optional[str] = None,
+        branch: Optional[str] = None,
+        depth: Optional[int] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+        dangerously_store_credentials: bool = False,
+        recursive: bool = False,
+    ) -> GitCommandResult:
+        """Clone a Git repository into the sandbox."""
+        return await asyncio.to_thread(
+            self._git.clone,
+            url,
+            path=path,
+            branch=branch,
+            depth=depth,
+            username=username,
+            password=password,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+            dangerously_store_credentials=dangerously_store_credentials,
+            recursive=recursive,
+        )
 
-    async def dangerously_authenticate(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.dangerously_authenticate, *args, **kwargs)
+    async def dangerously_authenticate(
+        self,
+        username: str,
+        password: str,
+        host: Optional[str] = None,
+        protocol: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Store Git credentials in the sandbox credential helper."""
+        return await asyncio.to_thread(
+            self._git.dangerously_authenticate,
+            username,
+            password,
+            host=host,
+            protocol=protocol,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def configure_user(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.configure_user, *args, **kwargs)
+    async def configure_user(
+        self,
+        name: str,
+        email: str,
+        scope: Optional[str] = None,
+        path: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Configure Git author identity globally or for one repository."""
+        return await asyncio.to_thread(
+            self._git.configure_user,
+            name,
+            email,
+            scope=scope,
+            path=path,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def init(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.init, *args, **kwargs)
+    async def init(
+        self,
+        path: str,
+        bare: bool = False,
+        initial_branch: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Initialize a Git repository."""
+        return await asyncio.to_thread(
+            self._git.init,
+            path,
+            bare=bare,
+            initial_branch=initial_branch,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def status(self, *args, **kwargs) -> GitStatus:
-        return await asyncio.to_thread(self._git.status, *args, **kwargs)
+    async def status(
+        self,
+        path: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitStatus:
+        """Return parsed repository status for ``path``."""
+        return await asyncio.to_thread(
+            self._git.status,
+            path,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def branches(self, *args, **kwargs):
-        return await asyncio.to_thread(self._git.branches, *args, **kwargs)
+    async def branches(
+        self,
+        path: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitBranches:
+        """Return branches and the current branch for ``path``."""
+        return await asyncio.to_thread(
+            self._git.branches,
+            path,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def create_branch(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.create_branch, *args, **kwargs)
+    async def create_branch(
+        self,
+        path: str,
+        branch: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Create and check out a new branch."""
+        return await asyncio.to_thread(
+            self._git.create_branch,
+            path,
+            branch,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def delete_branch(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.delete_branch, *args, **kwargs)
+    async def delete_branch(
+        self,
+        path: str,
+        branch: str,
+        force: bool = False,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Delete a branch."""
+        return await asyncio.to_thread(
+            self._git.delete_branch,
+            path,
+            branch,
+            force=force,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def add(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.add, *args, **kwargs)
+    async def add(
+        self,
+        path: str,
+        files: Optional[List[str]] = None,
+        all: bool = True,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Stage files. Defaults to all files."""
+        return await asyncio.to_thread(
+            self._git.add,
+            path,
+            files=files,
+            all=all,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def commit(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.commit, *args, **kwargs)
+    async def commit(
+        self,
+        path: str,
+        message: str,
+        author_name: Optional[str] = None,
+        author_email: Optional[str] = None,
+        allow_empty: bool = False,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Commit staged files."""
+        return await asyncio.to_thread(
+            self._git.commit,
+            path,
+            message,
+            author_name=author_name,
+            author_email=author_email,
+            allow_empty=allow_empty,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def reset(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.reset, *args, **kwargs)
+    async def reset(
+        self,
+        path: str,
+        mode: Optional[Literal["soft", "mixed", "hard", "merge", "keep"]] = None,
+        target: Optional[str] = None,
+        paths: Optional[List[str]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Reset the current HEAD to a specified state."""
+        return await asyncio.to_thread(
+            self._git.reset,
+            path,
+            mode=mode,
+            target=target,
+            paths=paths,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def restore(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.restore, *args, **kwargs)
+    async def restore(
+        self,
+        path: str,
+        paths: List[str],
+        staged: Optional[bool] = None,
+        worktree: Optional[bool] = None,
+        source: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Restore working tree files or unstage changes."""
+        return await asyncio.to_thread(
+            self._git.restore,
+            path,
+            paths,
+            staged=staged,
+            worktree=worktree,
+            source=source,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def pull(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.pull, *args, **kwargs)
+    async def pull(
+        self,
+        path: str,
+        remote: Optional[str] = None,
+        branch: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Pull the current branch with a fast-forward-only merge."""
+        return await asyncio.to_thread(
+            self._git.pull,
+            path,
+            remote=remote,
+            branch=branch,
+            username=username,
+            password=password,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def push(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.push, *args, **kwargs)
+    async def push(
+        self,
+        path: str,
+        remote: Optional[str] = None,
+        branch: Optional[str] = None,
+        set_upstream: bool = True,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Push the current branch or a selected branch."""
+        return await asyncio.to_thread(
+            self._git.push,
+            path,
+            remote=remote,
+            branch=branch,
+            set_upstream=set_upstream,
+            username=username,
+            password=password,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def checkout(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.checkout, *args, **kwargs)
+    async def checkout(
+        self,
+        path: str,
+        ref: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Check out an arbitrary ref in a repository."""
+        return await asyncio.to_thread(
+            self._git.checkout,
+            path,
+            ref,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def checkout_branch(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.checkout_branch, *args, **kwargs)
+    async def checkout_branch(
+        self,
+        path: str,
+        branch: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Check out an existing branch in a repository."""
+        return await asyncio.to_thread(
+            self._git.checkout_branch,
+            path,
+            branch,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def remote_add(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.remote_add, *args, **kwargs)
+    async def remote_add(
+        self,
+        path: str,
+        name: str,
+        url: str,
+        fetch: bool = False,
+        overwrite: bool = False,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Add a remote."""
+        return await asyncio.to_thread(
+            self._git.remote_add,
+            path,
+            name,
+            url,
+            fetch=fetch,
+            overwrite=overwrite,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def remote_get(self, *args, **kwargs) -> Optional[str]:
-        return await asyncio.to_thread(self._git.remote_get, *args, **kwargs)
+    async def remote_get(
+        self,
+        path: str,
+        name: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> Optional[str]:
+        """Return the URL for a remote."""
+        return await asyncio.to_thread(
+            self._git.remote_get,
+            path,
+            name,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def set_config(self, *args, **kwargs) -> GitCommandResult:
-        return await asyncio.to_thread(self._git.set_config, *args, **kwargs)
+    async def set_config(
+        self,
+        key: str,
+        value: str,
+        scope: Optional[str] = None,
+        path: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
+        """Set a Git config value."""
+        return await asyncio.to_thread(
+            self._git.set_config,
+            key,
+            value,
+            scope=scope,
+            path=path,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
-    async def get_config(self, *args, **kwargs) -> str:
-        return await asyncio.to_thread(self._git.get_config, *args, **kwargs)
+    async def get_config(
+        self,
+        key: str,
+        scope: Optional[str] = None,
+        path: Optional[str] = None,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> str:
+        """Get a Git config value."""
+        return await asyncio.to_thread(
+            self._git.get_config,
+            key,
+            scope=scope,
+            path=path,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
 
 class AsyncSnapshotPaginator:

@@ -112,15 +112,15 @@ class Git:
         path: Optional[str] = None,
         branch: Optional[str] = None,
         depth: Optional[int] = None,
-        recursive: bool = False,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        dangerously_store_credentials: bool = False,
         envs: Optional[Dict[str, str]] = None,
         user: Optional[str] = None,
         cwd: Optional[str] = None,
         timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
+        dangerously_store_credentials: bool = False,
+        recursive: bool = False,
     ) -> GitCommandResult:
         """Clone a Git repository into the sandbox."""
         return self._run(
@@ -444,8 +444,8 @@ class Git:
     def pull(
         self,
         path: str,
-        branch: Optional[str] = None,
         remote: Optional[str] = None,
+        branch: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
@@ -474,8 +474,8 @@ class Git:
     def push(
         self,
         path: str,
-        branch: Optional[str] = None,
         remote: Optional[str] = None,
+        branch: Optional[str] = None,
         set_upstream: bool = True,
         username: Optional[str] = None,
         password: Optional[str] = None,
@@ -527,9 +527,26 @@ class Git:
             request_timeout,
         )
 
-    def checkout_branch(self, path: str, branch: str, **kwargs) -> GitCommandResult:
+    def checkout_branch(
+        self,
+        path: str,
+        branch: str,
+        envs: Optional[Dict[str, str]] = None,
+        user: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_timeout: Optional[float] = None,
+    ) -> GitCommandResult:
         """Check out an existing branch in a repository."""
-        return self.checkout(path, branch, **kwargs)
+        return self.checkout(
+            path,
+            branch,
+            envs=envs,
+            user=user,
+            cwd=cwd,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
 
     def remote_add(
         self,

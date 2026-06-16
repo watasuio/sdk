@@ -41,6 +41,7 @@ from watasu.sandbox_async.main import (
     AsyncCommandHandle,
     AsyncCommands,
     AsyncFilesystem,
+    AsyncGit,
     AsyncPty,
 )
 from watasu.sandbox_sync.commands.command import Commands as SyncCommands
@@ -247,6 +248,30 @@ def test_commands_list_prefers_stable_process_id_over_guest_os_pid():
     assert process.cmd == "bash"
     assert process.args == ["-lc", "sleep 60"]
     assert process.cwd == "/workspace"
+
+
+def test_commands_close_stdin_connects_and_disconnects():
+    calls = []
+    commands = SyncCommands(object(), ConnectionConfig(api_key="key"))
+
+    class FakeHandle:
+        def close_stdin(self, request_timeout=None):
+            calls.append(("close_stdin", request_timeout))
+
+        def disconnect(self):
+            calls.append(("disconnect", None))
+
+    commands.connect = lambda pid, request_timeout=None: (
+        calls.append(("connect", pid, request_timeout)) or FakeHandle()
+    )
+
+    commands.close_stdin(123, request_timeout=5)
+
+    assert calls == [
+        ("connect", 123, 5),
+        ("close_stdin", 5),
+        ("disconnect", None),
+    ]
 
 
 def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatch):
@@ -507,6 +532,21 @@ def test_async_command_connect_pumps_configured_output_callbacks():
     assert stdout == ["connected\n"]
     assert stderr == ["warning\n"]
     assert result.exit_code == 0
+
+
+def test_async_commands_close_stdin_forwards_to_sync_commands():
+    calls = []
+
+    class FakeCommands:
+        def close_stdin(self, pid, request_timeout=None):
+            calls.append((pid, request_timeout))
+
+    async def scenario():
+        await AsyncCommands(FakeCommands()).close_stdin(123, request_timeout=5)
+
+    asyncio.run(scenario())
+
+    assert calls == [(123, 5)]
 
 
 def test_async_command_handle_observes_background_callback_failures():
@@ -792,6 +832,12 @@ def test_filesystem_maps_watasu_file_entries():
     assert fs._data_plane.calls[-1][0] == "/runtime/v1/files/write_files"
     assert fs._data_plane.calls[-1][1]["json"]["files"][0]["data_base64"] == "YWJj"
     assert fs.read_bytes("/home/user/d.bin") == b"hello"
+
+    fs.write_files([{"path": "/home/user/e.txt", "data": "abc"}], gzip=True)
+    compressed = base64.b64decode(
+        fs._data_plane.calls[-1][1]["json"]["files"][0]["data_base64"]
+    )
+    assert compressed.startswith(b"\x1f\x8b")
 
 
 def test_git_helper_uses_data_plane_routes_and_parses_status():
@@ -1114,6 +1160,78 @@ def test_git_helper_uses_data_plane_routes_and_parses_status():
                 "request_timeout": None,
             },
         ),
+    ]
+
+
+def test_git_helper_keeps_reference_positional_argument_order():
+    calls = []
+
+    class DataPlane:
+        def post_json(self, path, **kwargs):
+            calls.append((path, kwargs["json"]))
+            return {"git": {"path": "/workspace/repo", "stdout": "", "stderr": ""}}
+
+    git = Git(DataPlane())
+
+    git.clone("https://git.example/repo.git", "/workspace/repo", "main", 1, "user", "token")
+    git.pull("/workspace/repo", "origin", "main", "user", "token")
+    git.push("/workspace/repo", "origin", "main", True, "user", "token")
+
+    assert calls[0] == (
+        "/runtime/v1/git/clone",
+        {
+            "url": "https://git.example/repo.git",
+            "path": "/workspace/repo",
+            "branch": "main",
+            "depth": 1,
+            "username": "user",
+            "password": "token",
+        },
+    )
+    assert calls[1] == (
+        "/runtime/v1/git/pull",
+        {
+            "path": "/workspace/repo",
+            "remote": "origin",
+            "branch": "main",
+            "username": "user",
+            "password": "token",
+        },
+    )
+    assert calls[2] == (
+        "/runtime/v1/git/push",
+        {
+            "path": "/workspace/repo",
+            "remote": "origin",
+            "branch": "main",
+            "set_upstream": True,
+            "username": "user",
+            "password": "token",
+        },
+    )
+
+
+def test_async_git_exposes_explicit_reference_signatures():
+    clone = inspect.signature(AsyncGit.clone)
+    pull = inspect.signature(AsyncGit.pull)
+    push = inspect.signature(AsyncGit.push)
+
+    assert list(clone.parameters)[:7] == [
+        "self",
+        "url",
+        "path",
+        "branch",
+        "depth",
+        "username",
+        "password",
+    ]
+    assert list(pull.parameters)[:4] == ["self", "path", "remote", "branch"]
+    assert list(push.parameters)[:5] == [
+        "self",
+        "path",
+        "remote",
+        "branch",
+        "set_upstream",
     ]
 
 
