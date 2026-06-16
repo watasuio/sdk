@@ -37,6 +37,37 @@ export interface ConnectionOpts {
 export class ConnectionConfig {
   static envdPort = 49983
 
+  static get domain(): string {
+    const env = typeof process !== 'undefined' ? process.env : {}
+    return env.WATASU_DOMAIN ?? 'watasu.io'
+  }
+
+  static get apiUrl(): string {
+    const env = typeof process !== 'undefined' ? process.env : {}
+    return env.WATASU_API_URL ?? `https://api.${this.domain}/v1`
+  }
+
+  static get sandboxUrl(): string | undefined {
+    const env = typeof process !== 'undefined' ? process.env : {}
+    return env.WATASU_SANDBOX_URL
+  }
+
+  static get debug(): boolean {
+    const env = typeof process !== 'undefined' ? process.env : {}
+    const value = (env.WATASU_DEBUG ?? 'false').toLowerCase()
+    return value === 'true' || value === '1'
+  }
+
+  static get apiKey(): string | undefined {
+    const env = typeof process !== 'undefined' ? process.env : {}
+    return env.WATASU_API_KEY ?? env.WATASU_ACCESS_TOKEN
+  }
+
+  static get accessToken(): string | undefined {
+    const env = typeof process !== 'undefined' ? process.env : {}
+    return env.WATASU_ACCESS_TOKEN ?? this.apiKey
+  }
+
   readonly apiKey?: string
   readonly accessToken?: string
   readonly domain: string
@@ -57,16 +88,13 @@ export class ConnectionConfig {
     const token =
       opts.apiKey ??
       opts.accessToken ??
-      env.WATASU_API_KEY ??
-      env.WATASU_ACCESS_TOKEN
+      ConnectionConfig.apiKey ??
+      ConnectionConfig.accessToken
     this.apiKey = token
     this.accessToken = opts.accessToken ?? token
-    this.domain = opts.domain ?? env.WATASU_DOMAIN ?? 'watasu.io'
-    this.apiUrl =
-      opts.apiUrl ?? env.WATASU_API_URL ?? `https://api.${this.domain}/v1`
-    this.sandboxUrl =
-      opts.sandboxUrl ??
-      env.WATASU_SANDBOX_URL
+    this.domain = opts.domain ?? ConnectionConfig.domain
+    this.apiUrl = opts.apiUrl ?? env.WATASU_API_URL ?? `https://api.${this.domain}/v1`
+    this.sandboxUrl = opts.sandboxUrl ?? ConnectionConfig.sandboxUrl
     this.dataPlaneDomain =
       opts.dataPlaneDomain ??
       env.WATASU_DATA_PLANE_DOMAIN ??
@@ -74,7 +102,7 @@ export class ConnectionConfig {
     this.requestTimeoutMs = opts.requestTimeoutMs ?? 60_000
     this.headers = opts.headers ?? {}
     this.apiHeaders = opts.apiHeaders ?? {}
-    this.debug = opts.debug ?? false
+    this.debug = opts.debug ?? ConnectionConfig.debug
     this.logger = opts.logger
     this.signal = opts.signal
     this.proxy = opts.proxy

@@ -65,6 +65,25 @@ import {
 } from '../dist/codeInterpreter.js'
 import DefaultCodeInterpreterSandbox from '../dist/codeInterpreter.js'
 
+function withEnv(overrides, fn) {
+  const previous = {}
+  for (const key of Object.keys(overrides)) {
+    previous[key] = process.env[key]
+    const value = overrides[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+
+  try {
+    return fn()
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
 test('connection config defaults to Watasu hosts', () => {
   const config = new ConnectionConfig({ apiKey: 'key' })
   assert.equal(config.apiUrl, 'https://api.watasu.io/v1')
@@ -73,6 +92,30 @@ test('connection config defaults to Watasu hosts', () => {
   assert.equal(config.accessToken, 'key')
   assert.equal(ConnectionConfig.envdPort, 49983)
 })
+
+test('connection config exposes static environment defaults', () => withEnv({
+  WATASU_ACCESS_TOKEN: 'env-access-token',
+  WATASU_API_KEY: undefined,
+  WATASU_API_URL: 'https://api.dev.watasu.test/v1',
+  WATASU_DEBUG: 'true',
+  WATASU_DOMAIN: 'dev.watasu.test',
+  WATASU_SANDBOX_URL: 'http://127.0.0.1:49983',
+}, () => {
+  assert.equal(ConnectionConfig.accessToken, 'env-access-token')
+  assert.equal(ConnectionConfig.apiKey, 'env-access-token')
+  assert.equal(ConnectionConfig.apiUrl, 'https://api.dev.watasu.test/v1')
+  assert.equal(ConnectionConfig.debug, true)
+  assert.equal(ConnectionConfig.domain, 'dev.watasu.test')
+  assert.equal(ConnectionConfig.sandboxUrl, 'http://127.0.0.1:49983')
+
+  const config = new ConnectionConfig()
+  assert.equal(config.accessToken, 'env-access-token')
+  assert.equal(config.apiKey, 'env-access-token')
+  assert.equal(config.apiUrl, 'https://api.dev.watasu.test/v1')
+  assert.equal(config.debug, true)
+  assert.equal(config.domain, 'dev.watasu.test')
+  assert.equal(config.sandboxUrl, 'http://127.0.0.1:49983')
+}))
 
 test('connection config exposes access token logger and proxy options', () => {
   const logger = { debug() {}, info() {}, warn() {}, error() {} }
@@ -1768,6 +1811,14 @@ test('template builder sends snake_case build payloads and parses status', async
       from_template: 'mcp-gateway',
       setup: ['mcp-gateway pull exa brave'],
     })
+    assert.deepEqual(mcpTemplate.serialize(), {
+      from_template: 'mcp-gateway',
+      setup: ['mcp-gateway pull exa brave'],
+    })
+    assert.deepEqual(JSON.parse(await mcpTemplate.toJSON()), {
+      from_template: 'mcp-gateway',
+      setup: ['mcp-gateway pull exa brave'],
+    })
     assert.equal(waitForPort(8000).getCmd(), 'ss -tuln | grep :8000')
     assert.equal(waitForURL('http://localhost:3000/health').getCmd(), 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health | grep -q "200"')
     assert.equal(waitForProcess('server').getCmd(), 'pgrep server > /dev/null')
@@ -2002,6 +2053,9 @@ test('git helper uses data-plane git routes', async () => {
     await sbx.git.checkoutBranch('/workspace/repo', 'main')
     await sbx.git.remoteAdd('/workspace/repo', 'origin', 'https://git.example/repo.git', { fetch: true, overwrite: true })
     const remoteUrl = await sbx.git.remoteGet('/workspace/repo', 'origin')
+    const remoteUrlAlias = await sbx.git.getRemoteUrl('/workspace/repo', 'origin')
+    const resolvedRemote = await sbx.git.resolveRemoteName('/workspace/repo')
+    const hasUpstream = await sbx.git.hasUpstream('/workspace/repo')
     await sbx.git.setConfig('pull.rebase', 'false', { scope: 'local', path: '/workspace/repo' })
     const configValue = await sbx.git.getConfig('pull.rebase', { scope: 'local', path: '/workspace/repo' })
 
@@ -2013,6 +2067,9 @@ test('git helper uses data-plane git routes', async () => {
     assert.deepEqual(branches.branches, ['main', 'feature/test'])
     assert.equal(branches.currentBranch, 'main')
     assert.equal(remoteUrl, 'https://git.example/repo.git')
+    assert.equal(remoteUrlAlias, 'https://git.example/repo.git')
+    assert.equal(resolvedRemote, 'origin')
+    assert.equal(hasUpstream, true)
     assert.equal(configValue, 'false')
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/clone', { url: 'https://git.example/repo.git', user: 'sandbox', cwd: '/workspace', timeout_seconds: 10, path: '/workspace/repo', branch: 'main', depth: 1 }],
@@ -2033,6 +2090,9 @@ test('git helper uses data-plane git routes', async () => {
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/checkout', { path: '/workspace/repo', ref: 'main' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/remote_add', { path: '/workspace/repo', name: 'origin', url: 'https://git.example/repo.git', fetch: true, overwrite: true }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/remote_get', { path: '/workspace/repo', name: 'origin' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/remote_get', { path: '/workspace/repo', name: 'origin' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/status', { path: '/workspace/repo' }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/status', { path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/set_config', { key: 'pull.rebase', value: 'false', scope: 'local', path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/get_config', { key: 'pull.rebase', scope: 'local', path: '/workspace/repo' }],
     ])

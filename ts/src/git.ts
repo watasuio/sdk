@@ -1,3 +1,4 @@
+import { InvalidArgumentError } from './errors.js'
 import { DataPlaneClient } from './transport.js'
 
 export interface GitCommandResult {
@@ -325,6 +326,31 @@ export class Git {
       ...gitOpts(opts),
     }, opts)
     return String(result.value ?? '')
+  }
+
+  private async getRemoteUrl(path: string, remote: string, opts: GitRequestOpts = {}): Promise<string> {
+    const url = await this.remoteGet(path, remote, opts)
+    if (!url) {
+      throw new InvalidArgumentError(`Remote "${remote}" URL not found in repository.`)
+    }
+    return url
+  }
+
+  private async resolveRemoteName(path: string, remote?: string, opts: GitRequestOpts = {}): Promise<string> {
+    if (remote) return remote
+    const status = await this.status(path, opts)
+    const upstreamRemote = status.upstream?.split('/')[0]
+    if (upstreamRemote) return upstreamRemote
+    throw new InvalidArgumentError('Remote is required when the repository has no upstream remote.')
+  }
+
+  private async hasUpstream(path: string, opts: GitRequestOpts = {}): Promise<boolean> {
+    try {
+      const status = await this.status(path, opts)
+      return Boolean(status.upstream)
+    } catch {
+      return false
+    }
   }
 
   private async run(path: string, json: Record<string, unknown>, opts: { requestTimeoutMs?: number; signal?: AbortSignal }): Promise<GitCommandResult> {

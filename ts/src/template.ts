@@ -317,7 +317,7 @@ export class TemplateBase {
   }
 
   static async toJSON(template: TemplateClass): Promise<string> {
-    return JSON.stringify((template as TemplateBase).toBuildSpec())
+    return (template as TemplateBase).toJSON()
   }
 
   static toDockerfile(template: TemplateClass): string {
@@ -563,6 +563,14 @@ export class TemplateBase {
     if (this.startCmd) spec.start_cmd = this.startCmd
     if (this.readyCmd) spec.ready_cmd = this.readyCmd
     return spec
+  }
+
+  private async toJSON(_computeHashes = true): Promise<string> {
+    return JSON.stringify(this.serialize())
+  }
+
+  private serialize(_steps?: unknown): BuildSpec {
+    return this.toBuildSpec()
   }
 
   private addPackages(manager: string, packages: string[]) {
