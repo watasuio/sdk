@@ -1,6 +1,6 @@
 {
   "name": "@watasu/code-interpreter",
-  "version": "0.1.48",
+  "version": "0.1.49",
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "description": "Code Interpreter SDK for Watasu",
@@ -24,7 +24,7 @@
     "test": "npm run build && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@watasu/sdk": "0.1.48"
+    "@watasu/sdk": "0.1.49"
   },
   "devDependencies": {
     "@types/node": "^24.0.3",

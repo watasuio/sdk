@@ -37,39 +37,51 @@ impl TemplateBuilder {
         self
     }
 
-    /// Start from a Debian public base image.
+    /// Request a Debian public base image.
+    ///
+    /// The Watasu API fails closed until OCI image import is enabled.
     pub fn from_debian_image(self, variant: impl Into<String>) -> Self {
         self.from_image(format!("debian:{}", variant.into()))
     }
 
-    /// Start from an Ubuntu public base image.
+    /// Request an Ubuntu public base image.
+    ///
+    /// The Watasu API fails closed until OCI image import is enabled.
     pub fn from_ubuntu_image(self, variant: impl Into<String>) -> Self {
         self.from_image(format!("ubuntu:{}", variant.into()))
     }
 
-    /// Start from a named Watasu template base.
+    /// Start from a ready Watasu template slug, tag, or version id.
     pub fn from_template(mut self, template: impl Into<String>) -> Self {
         self.base = Some(template.into());
         self.from_image = None;
         self
     }
 
-    /// Start from a Python public base image.
+    /// Request a Python public base image.
+    ///
+    /// The Watasu API fails closed until OCI image import is enabled.
     pub fn from_python_image(self, version: impl Into<String>) -> Self {
         self.from_image(format!("python:{}", version.into()))
     }
 
-    /// Start from a Node.js public base image.
+    /// Request a Node.js public base image.
+    ///
+    /// The Watasu API fails closed until OCI image import is enabled.
     pub fn from_node_image(self, variant: impl Into<String>) -> Self {
         self.from_image(format!("node:{}", variant.into()))
     }
 
-    /// Start from a Bun public base image.
+    /// Request a Bun public base image.
+    ///
+    /// The Watasu API fails closed until OCI image import is enabled.
     pub fn from_bun_image(self, variant: impl Into<String>) -> Self {
         self.from_image(format!("oven/bun:{}", variant.into()))
     }
 
-    /// Start from a public container image reference.
+    /// Request a public container image base.
+    ///
+    /// The Watasu API fails closed until OCI image import is enabled.
     pub fn from_image(mut self, image: impl Into<String>) -> Self {
         self.from_image = Some(image.into());
         self.base = None;

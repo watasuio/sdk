@@ -324,30 +324,37 @@ export class TemplateBase {
     return (template as TemplateBase).toDockerfile()
   }
 
+  /** Request a Debian public base image. The Watasu API fails closed until OCI image import is enabled. */
   fromDebianImage(_variant = 'stable'): TemplateBuilder {
     return this.fromImage(`debian:${_variant}`)
   }
 
+  /** Request an Ubuntu public base image. The Watasu API fails closed until OCI image import is enabled. */
   fromUbuntuImage(_variant = 'latest'): TemplateBuilder {
     return this.fromImage(`ubuntu:${_variant}`)
   }
 
+  /** Request a Python public base image. The Watasu API fails closed until OCI image import is enabled. */
   fromPythonImage(_version = '3'): TemplateBuilder {
     return this.fromImage(`python:${_version}`)
   }
 
+  /** Request a Node.js public base image. The Watasu API fails closed until OCI image import is enabled. */
   fromNodeImage(_variant = 'lts'): TemplateBuilder {
     return this.fromImage(`node:${_variant}`)
   }
 
+  /** Request a Bun public base image. The Watasu API fails closed until OCI image import is enabled. */
   fromBunImage(_variant = 'latest'): TemplateBuilder {
     return this.fromImage(`oven/bun:${_variant}`)
   }
 
+  /** Start from the Watasu platform base template. */
   fromBaseImage(): TemplateBuilder {
     return this.fromTemplate('base')
   }
 
+  /** Request a public container image base. The Watasu API fails closed until OCI image import is enabled. */
   fromImage(baseImage: string, credentials?: { username: string; password: string }): TemplateBuilder {
     if (credentials && (!credentials.username || !credentials.password)) {
       throw new InvalidArgumentError('Both username and password are required when providing registry credentials')
@@ -364,6 +371,7 @@ export class TemplateBase {
     return this
   }
 
+  /** Request an AWS registry image base. The Watasu API fails closed until registry image import is enabled. */
   fromAWSRegistry(image: string, credentials: { accessKeyId: string; secretAccessKey: string; region: string }): TemplateBuilder {
     this.fromImageReference = image
     this.base = undefined
@@ -376,6 +384,7 @@ export class TemplateBase {
     return this
   }
 
+  /** Request a GCP registry image base. The Watasu API fails closed until registry image import is enabled. */
   fromGCPRegistry(image: string, credentials: { serviceAccountJSON: object | string }): TemplateBuilder {
     this.fromImageReference = image
     this.base = undefined
@@ -386,6 +395,7 @@ export class TemplateBase {
     return this
   }
 
+  /** Start from a ready Watasu template slug, tag, or version id. */
   fromTemplate(template: string): TemplateBuilder {
     this.base = template
     this.fromImageReference = undefined

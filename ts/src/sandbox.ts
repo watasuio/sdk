@@ -325,7 +325,7 @@ export class Sandbox {
     this.git = new Git(dataPlane)
   }
 
-  /** Sandbox id alias used by SDK-compatible code. */
+  /** Unique sandbox identifier. */
   get id(): string {
     return this.sandboxId
   }

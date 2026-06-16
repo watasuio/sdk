@@ -164,23 +164,38 @@ class TemplateBase:
         self._force = False
 
     def from_debian_image(self, variant: str = "stable") -> "TemplateBase":
-        """Start from a Debian public base image."""
+        """Request a Debian public base image.
+
+        The Watasu API fails closed until OCI image import is enabled.
+        """
         return self.from_image(f"debian:{variant}")
 
     def from_ubuntu_image(self, variant: str = "latest") -> "TemplateBase":
-        """Start from an Ubuntu public base image."""
+        """Request an Ubuntu public base image.
+
+        The Watasu API fails closed until OCI image import is enabled.
+        """
         return self.from_image(f"ubuntu:{variant}")
 
     def from_python_image(self, version: str = "3") -> "TemplateBase":
-        """Start from a Python public base image."""
+        """Request a Python public base image.
+
+        The Watasu API fails closed until OCI image import is enabled.
+        """
         return self.from_image(f"python:{version}")
 
     def from_node_image(self, variant: str = "lts") -> "TemplateBase":
-        """Start from a Node.js public base image."""
+        """Request a Node.js public base image.
+
+        The Watasu API fails closed until OCI image import is enabled.
+        """
         return self.from_image(f"node:{variant}")
 
     def from_bun_image(self, variant: str = "latest") -> "TemplateBase":
-        """Start from a Bun public base image."""
+        """Request a Bun public base image.
+
+        The Watasu API fails closed until OCI image import is enabled.
+        """
         return self.from_image(f"oven/bun:{variant}")
 
     def from_base_image(self) -> "TemplateBase":
@@ -193,7 +208,10 @@ class TemplateBase:
         username: Optional[str] = None,
         password: Optional[str] = None,
     ) -> "TemplateBase":
-        """Start from a public container image reference."""
+        """Request a public container image base.
+
+        The Watasu API fails closed until OCI image import is enabled.
+        """
         if (username and not password) or (password and not username):
             raise InvalidArgumentException(
                 "Both username and password are required when providing registry credentials"
@@ -216,7 +234,10 @@ class TemplateBase:
         secret_access_key: str,
         region: str,
     ) -> "TemplateBase":
-        """Start from an AWS registry image reference."""
+        """Request an AWS registry image base.
+
+        The Watasu API fails closed until registry image import is enabled.
+        """
         self._from_image = image
         self._base = None
         self._from_image_registry = {
@@ -232,7 +253,10 @@ class TemplateBase:
         image: str,
         service_account_json: Union[str, Dict[str, Any]],
     ) -> "TemplateBase":
-        """Start from a GCP registry image reference."""
+        """Request a GCP registry image base.
+
+        The Watasu API fails closed until registry image import is enabled.
+        """
         self._from_image = image
         self._base = None
         self._from_image_registry = {
@@ -242,7 +266,7 @@ class TemplateBase:
         return self
 
     def from_template(self, template: str) -> "TemplateBase":
-        """Start this build from a named Watasu template base."""
+        """Start this build from a ready Watasu template slug, tag, or version id."""
         self._base = template
         self._from_image = None
         self._from_image_registry = None
