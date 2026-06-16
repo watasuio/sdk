@@ -186,8 +186,6 @@ export type RunCodeLanguage =
 type OutputHandler<T> = (output: T) => Promise<unknown> | unknown
 
 export interface RunCodeOpts {
-  language?: RunCodeLanguage
-  context?: Context | string
   onStdout?: OutputHandler<OutputMessage>
   onStderr?: OutputHandler<OutputMessage>
   onResult?: OutputHandler<Result>
@@ -476,7 +474,12 @@ export class Sandbox extends BaseSandbox {
   }
 
   /** Run Python code in the sandbox and return structured execution output. */
-  async runCode(code: string, opts: RunCodeOpts = {}): Promise<Execution> {
+  async runCode(code: string, opts?: RunCodeOpts & { language?: RunCodeLanguage }): Promise<Execution>
+  async runCode(code: string, opts?: RunCodeOpts & { context?: Context | string }): Promise<Execution>
+  async runCode(
+    code: string,
+    opts: RunCodeOpts & { language?: RunCodeLanguage; context?: Context | string } = {}
+  ): Promise<Execution> {
     if (typeof code !== 'string') throw new InvalidArgumentError('code must be a string')
     if (opts.language !== undefined && opts.context !== undefined) {
       throw new InvalidArgumentError('language and context cannot both be set')

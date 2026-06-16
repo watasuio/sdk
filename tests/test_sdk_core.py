@@ -123,6 +123,8 @@ def test_connection_config_exposes_watasu_sandbox_host_helpers():
 
 
 def test_public_team_ref_signatures_are_explicit():
+    assert AsyncSandbox.mcp_port == Sandbox.mcp_port
+    assert AsyncSandbox.default_sandbox_timeout == Sandbox.default_sandbox_timeout
     assert "team" in inspect.signature(Sandbox.create).parameters
     assert "team" in inspect.signature(Sandbox.list).parameters
     assert "team" in inspect.signature(AsyncSandbox.create).parameters

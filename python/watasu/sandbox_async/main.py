@@ -645,6 +645,8 @@ class AsyncSandboxPaginator:
 class AsyncSandbox:
     """Async Watasu sandbox with sync and async helpers."""
 
+    mcp_port = Sandbox.mcp_port
+    default_sandbox_timeout = Sandbox.default_sandbox_timeout
     default_template = Sandbox.default_template
     default_mcp_template = Sandbox.default_mcp_template
 
