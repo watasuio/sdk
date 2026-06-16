@@ -31,8 +31,10 @@ from watasu import (
 )
 from watasu._transport.data_plane import DataPlaneClient
 from watasu._transport.process_ws import ProcessSocket
+from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.filesystem.filesystem import FileType
 from watasu.sandbox.sandbox_api import sandbox_info_from_api
+from watasu.sandbox_async.main import AsyncCommands, AsyncPty
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
 from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
@@ -334,6 +336,91 @@ def test_command_handle_decodes_pty_frames_as_terminal_output():
 
     assert seen == [b"term\n"]
     assert result.stdout == "term\n"
+
+
+def test_async_command_connect_pumps_configured_output_callbacks():
+    class FakeCommands:
+        def connect(self, pid, timeout=60, request_timeout=None):
+            assert pid == 123
+            assert timeout == 5
+            assert request_timeout == 2
+            frames = iter(
+                [
+                    {"type": "stdout", "data": "connected\n"},
+                    {"type": "stderr", "data": "warning\n"},
+                    {"type": "exit", "exit_code": 0, "error": None},
+                ]
+            )
+            return CommandHandle(pid=pid, handle_kill=lambda: True, events=frames)
+
+    async def scenario():
+        stdout = []
+        stderr = []
+
+        async def on_stdout(chunk):
+            stdout.append(chunk)
+
+        def on_stderr(chunk):
+            stderr.append(chunk)
+
+        handle = await AsyncCommands(FakeCommands()).connect(
+            123,
+            timeout=5,
+            request_timeout=2,
+            on_stdout=on_stdout,
+            on_stderr=on_stderr,
+        )
+        result = await handle.wait()
+        return stdout, stderr, result
+
+    stdout, stderr, result = asyncio.run(scenario())
+
+    assert stdout == ["connected\n"]
+    assert stderr == ["warning\n"]
+    assert result.exit_code == 0
+
+
+def test_async_pty_create_pumps_configured_data_callback():
+    class FakePty:
+        def create(
+            self,
+            size,
+            user=None,
+            cwd=None,
+            envs=None,
+            timeout=60,
+            request_timeout=None,
+        ):
+            assert size == PtySize(rows=24, cols=80)
+            assert timeout == 7
+            assert request_timeout == 3
+            frames = iter(
+                [
+                    {"type": "pty", "data": base64.b64encode(b"$ ").decode("ascii")},
+                    {"type": "exit", "exit_code": 0, "error": None},
+                ]
+            )
+            return CommandHandle(pid=456, handle_kill=lambda: True, events=frames)
+
+    async def scenario():
+        chunks = []
+
+        async def on_data(chunk):
+            chunks.append(chunk)
+
+        handle = await AsyncPty(FakePty()).create(
+            PtySize(rows=24, cols=80),
+            on_data,
+            timeout=7,
+            request_timeout=3,
+        )
+        result = await handle.wait()
+        return chunks, result
+
+    chunks, result = asyncio.run(scenario())
+
+    assert chunks == [b"$ "]
+    assert result.exit_code == 0
 
 
 def test_command_handle_close_stdin_sends_eof_frame():
@@ -2218,6 +2305,19 @@ def test_template_builder_compatibility_serializers_and_mcp_helper(tmp_path):
         "memory_mb",
         "skip_cache",
         "on_build_logs",
+    ]
+    assert list(inspect.signature(AsyncCommands.connect).parameters)[:5] == [
+        "self",
+        "pid",
+        "timeout",
+        "request_timeout",
+        "on_stdout",
+    ]
+    assert list(inspect.signature(AsyncPty.create).parameters)[:4] == [
+        "self",
+        "size",
+        "on_data",
+        "user",
     ]
 
     mcp_template = Template().from_template("mcp-gateway").add_mcp_server(

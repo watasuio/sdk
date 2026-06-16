@@ -62,16 +62,45 @@ class AsyncCommandHandle:
             return None
         return self._handle._result.exit_code
 
-    def __init__(self, handle: CommandHandle):
+    def __init__(
+        self,
+        handle: CommandHandle,
+        on_stdout: Optional[Callable[[Stdout], Any]] = None,
+        on_stderr: Optional[Callable[[Stderr], Any]] = None,
+        on_pty: Optional[Callable[[PtyOutput], Any]] = None,
+    ):
         self._handle = handle
+        self._wait_task: Optional[asyncio.Task] = None
+        if on_stdout is not None or on_stderr is not None or on_pty is not None:
+            loop = asyncio.get_running_loop()
+            self._wait_task = asyncio.create_task(
+                self._wait_with_callbacks(loop, on_stdout, on_stderr, on_pty)
+            )
+
+    async def _wait_with_callbacks(
+        self,
+        loop,
+        on_stdout: Optional[Callable[[Stdout], Any]],
+        on_stderr: Optional[Callable[[Stderr], Any]],
+        on_pty: Optional[Callable[[PtyOutput], Any]],
+    ) -> CommandResult:
+        return await asyncio.to_thread(
+            self._handle.wait,
+            on_pty=_thread_callback(loop, on_pty),
+            on_stdout=_thread_callback(loop, on_stdout),
+            on_stderr=_thread_callback(loop, on_stderr),
+        )
 
     async def wait(
         self,
-        on_pty: Optional[Callable[[PtyOutput], None]] = None,
-        on_stdout: Optional[Callable[[Stdout], None]] = None,
-        on_stderr: Optional[Callable[[Stderr], None]] = None,
+        on_pty: Optional[Callable[[PtyOutput], Any]] = None,
+        on_stdout: Optional[Callable[[Stdout], Any]] = None,
+        on_stderr: Optional[Callable[[Stderr], Any]] = None,
     ) -> CommandResult:
         """Wait for process exit and return captured stdout/stderr."""
+        if self._wait_task is not None:
+            return await self._wait_task
+
         loop = asyncio.get_running_loop()
         return await asyncio.to_thread(
             self._handle.wait,
@@ -97,6 +126,8 @@ class AsyncCommandHandle:
     async def disconnect(self) -> None:
         """Close the local stream attachment without killing the process."""
         await asyncio.to_thread(self._handle.disconnect)
+        if self._wait_task is not None:
+            self._wait_task.cancel()
 
 
 class AsyncCommands:
@@ -127,9 +158,11 @@ class AsyncCommands:
 
     async def connect(
         self,
-        pid,
+        pid: int,
         timeout: Optional[float] = 60,
         request_timeout: Optional[float] = None,
+        on_stdout: Optional[Callable[[Stdout], Any]] = None,
+        on_stderr: Optional[Callable[[Stderr], Any]] = None,
     ) -> AsyncCommandHandle:
         """Reconnect to a live process stream by pid."""
         handle = await asyncio.to_thread(
@@ -138,7 +171,7 @@ class AsyncCommands:
             timeout=timeout,
             request_timeout=request_timeout,
         )
-        return AsyncCommandHandle(handle)
+        return AsyncCommandHandle(handle, on_stdout=on_stdout, on_stderr=on_stderr)
 
     async def run(
         self,
@@ -169,7 +202,7 @@ class AsyncCommands:
             request_timeout=request_timeout,
         )
         if background:
-            return AsyncCommandHandle(result)
+            return AsyncCommandHandle(result, on_stdout=on_stdout, on_stderr=on_stderr)
         return result
 
 
@@ -283,7 +316,8 @@ class AsyncPty:
     async def create(
         self,
         size: PtySize,
-        user=None,
+        on_data: Callable[[PtyOutput], Any],
+        user: Optional[Username] = None,
         cwd: Optional[str] = None,
         envs: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = 60,
@@ -298,11 +332,12 @@ class AsyncPty:
             timeout=timeout,
             request_timeout=request_timeout,
         )
-        return AsyncCommandHandle(handle)
+        return AsyncCommandHandle(handle, on_pty=on_data)
 
     async def connect(
         self,
-        pid,
+        pid: int,
+        on_data: Callable[[PtyOutput], Any],
         timeout: Optional[float] = 60,
         request_timeout: Optional[float] = None,
     ) -> AsyncCommandHandle:
@@ -312,7 +347,7 @@ class AsyncPty:
             timeout=timeout,
             request_timeout=request_timeout,
         )
-        return AsyncCommandHandle(handle)
+        return AsyncCommandHandle(handle, on_pty=on_data)
 
     async def send_stdin(
         self, pid, data: Union[str, bytes], request_timeout: Optional[float] = None
