@@ -219,6 +219,44 @@ def test_code_interpreter_result_matches_chart_and_mapping_helpers():
     assert "application/vnd.custom" in result.formats()
 
 
+def test_code_interpreter_models_use_reference_json_shape():
+    context = watasu_code_interpreter.Context.from_json(
+        {"id": "ctx-1", "language": "python", "cwd": "/workspace"}
+    )
+    assert context.id == "ctx-1"
+    assert context.language == "python"
+    assert context.cwd == "/workspace"
+
+    execution = watasu_code_interpreter.Execution(
+        results=[
+            watasu_code_interpreter.Result(text="ok", is_main_result=True),
+        ],
+        logs=watasu_code_interpreter.Logs(
+            stdout=[watasu_code_interpreter.OutputMessage("hello")],
+            stderr=[watasu_code_interpreter.OutputMessage("warn", error=True)],
+        ),
+        error=watasu_code_interpreter.ExecutionError(
+            name="ValueError",
+            value="bad",
+            traceback="trace",
+        ),
+        execution_count=2,
+    )
+
+    payload = json.loads(execution.to_json())
+    assert payload["results"] == [{"text": "ok"}]
+    assert json.loads(payload["logs"]) == {"stdout": ["hello"], "stderr": ["warn"]}
+    assert json.loads(payload["error"]) == {
+        "name": "ValueError",
+        "value": "bad",
+        "traceback": "trace",
+    }
+    assert "execution_count" not in payload
+    assert json.loads(
+        watasu_code_interpreter.Logs(stdout=["plain"], stderr=["err"]).to_json()
+    ) == {"stdout": ["plain"], "stderr": ["err"]}
+
+
 def test_async_sandbox_forwards_base_connection_properties():
     sync_sandbox = Sandbox(
         "sbx-1",

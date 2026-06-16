@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as jsonlib
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypeVar
@@ -25,12 +26,12 @@ class OutputMessage:
     def __str__(self) -> str:
         return self.line
 
-    def to_json(self) -> Dict[str, Any]:
-        return {
+    def to_json(self) -> str:
+        return jsonlib.dumps({
             "line": self.line,
             "timestamp": self.timestamp,
             "error": self.error,
-        }
+        })
 
 
 @dataclass
@@ -40,11 +41,11 @@ class Logs:
     stdout: List[OutputMessage] = field(default_factory=list)
     stderr: List[OutputMessage] = field(default_factory=list)
 
-    def to_json(self) -> Dict[str, Any]:
-        return {
-            "stdout": [message.to_json() for message in self.stdout],
-            "stderr": [message.to_json() for message in self.stderr],
-        }
+    def to_json(self) -> str:
+        return jsonlib.dumps({
+            "stdout": [_message_line(message) for message in self.stdout],
+            "stderr": [_message_line(message) for message in self.stderr],
+        })
 
 
 @dataclass
@@ -55,12 +56,12 @@ class ExecutionError:
     value: str
     traceback: str
 
-    def to_json(self) -> Dict[str, Any]:
-        return {
+    def to_json(self) -> str:
+        return jsonlib.dumps({
             "name": self.name,
             "value": self.value,
             "traceback": self.traceback,
-        }
+        })
 
 
 @dataclass
@@ -181,13 +182,12 @@ class Execution:
                 return result.text
         return None
 
-    def to_json(self) -> Dict[str, Any]:
-        return {
-            "results": [result.to_json() for result in self.results],
+    def to_json(self) -> str:
+        return jsonlib.dumps({
+            "results": serialize_results(self.results),
             "logs": self.logs.to_json(),
             "error": self.error.to_json() if self.error else None,
-            "execution_count": self.execution_count,
-        }
+        })
 
 
 @dataclass(init=False)
@@ -216,6 +216,32 @@ class Context:
             "language": self.language,
             "cwd": self.cwd,
         }
+
+    @classmethod
+    def from_json(cls, data: Dict[str, str]):
+        return cls(
+            context_id=data.get("id"),
+            language=data.get("language"),
+            cwd=data.get("cwd"),
+        )
+
+
+def serialize_results(results: List[Result]) -> List[Dict[str, Any]]:
+    serialized = []
+    for result in results:
+        item = {}
+        for key in result.formats():
+            if key == "chart" and result.chart is not None:
+                item[key] = result.chart.to_dict()
+            else:
+                item[key] = result[key]
+        item["text"] = result.text
+        serialized.append(item)
+    return serialized
+
+
+def _message_line(message: Any) -> str:
+    return str(message.line) if hasattr(message, "line") else str(message)
 
 
 def execution_from_api(payload: Dict[str, Any]) -> Execution:
