@@ -166,6 +166,29 @@ def test_code_interpreter_result_matches_chart_and_mapping_helpers():
     assert "application/vnd.custom" in result.formats()
 
 
+def test_async_sandbox_forwards_base_connection_properties():
+    sync_sandbox = Sandbox(
+        "sbx-1",
+        connection_config=ConnectionConfig(
+            api_key="key",
+            sandbox_url="https://route.sandbox.watasuhost.com",
+        ),
+        session={
+            "data_plane_url": "https://route.sandbox.watasuhost.com",
+            "token": "data-token",
+            "sandbox_domain": "sandbox.watasuhost.com",
+            "traffic_access_token": "traffic-token",
+        },
+        sandbox={"route_token": "route-token"},
+    )
+    async_sandbox = AsyncSandbox(sync_sandbox=sync_sandbox)
+
+    assert async_sandbox.connection_config is sync_sandbox.connection_config
+    assert async_sandbox.sandbox_domain == "sandbox.watasuhost.com"
+    assert async_sandbox.traffic_access_token == "traffic-token"
+    assert async_sandbox.envd_api_url == "https://route.sandbox.watasuhost.com"
+
+
 def test_commands_list_prefers_stable_process_id_over_guest_os_pid():
     class FakeDataPlane:
         base_url = "http://localhost:49983"

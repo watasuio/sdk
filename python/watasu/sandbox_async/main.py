@@ -659,6 +659,26 @@ class AsyncSandbox:
         return self._sync.sandbox_id
 
     @property
+    def connection_config(self) -> ConnectionConfig:
+        """Connection settings used by this sandbox."""
+        return self._sync.connection_config
+
+    @property
+    def sandbox_domain(self) -> Optional[str]:
+        """Sandbox data-plane domain, when known."""
+        return self._sync.sandbox_domain
+
+    @property
+    def traffic_access_token(self) -> Optional[str]:
+        """Traffic access token for restricted sandbox services, when present."""
+        return self._sync.traffic_access_token
+
+    @property
+    def envd_api_url(self) -> str:
+        """Data-plane API URL."""
+        return self._sync.envd_api_url
+
+    @property
     def files(self) -> AsyncFilesystem:
         """Async filesystem helper."""
         return self._files
