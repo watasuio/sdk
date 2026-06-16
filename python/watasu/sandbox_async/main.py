@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 import datetime
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, IO, List, Literal, Optional, Union
 
 from watasu.connection_config import ApiParams, ConnectionConfig, Username
 from watasu.exceptions import InvalidArgumentException, SandboxException
 from watasu.sandbox.commands.command_handle import CommandResult, PtyOutput, Stderr, Stdout
 from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.commands.main import ProcessInfo
-from watasu.sandbox.filesystem.filesystem import EntryInfo, FilesystemEvent, WriteInfo
+from watasu.sandbox.filesystem.filesystem import (
+    EntryInfo,
+    FilesystemEvent,
+    WriteEntry,
+    WriteInfo,
+)
 from watasu.sandbox.sandbox_api import FileUrlInfo, SandboxInfo, SandboxMetrics, SnapshotInfo
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
 from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
@@ -213,52 +218,162 @@ class AsyncFilesystem:
     def __init__(self, files):
         self._files = files
 
-    async def read(self, *args, **kwargs):
+    async def read(
+        self,
+        path: str,
+        format: Literal["text", "bytes", "stream"] = "text",
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ):
         """Read a file as text, bytes, or stream."""
-        return await asyncio.to_thread(self._files.read, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.read,
+            path,
+            format=format,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def read_bytes(self, *args, **kwargs) -> bytes:
+    async def read_bytes(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> bytes:
         """Read a file as bytes."""
-        return await asyncio.to_thread(self._files.read_bytes, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.read_bytes,
+            path,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def write(self, *args, **kwargs) -> WriteInfo:
+    async def write(
+        self,
+        path: str,
+        data: Union[str, bytes, IO],
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> WriteInfo:
         """Write bytes, text, or a file-like object."""
-        return await asyncio.to_thread(self._files.write, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.write,
+            path,
+            data,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def write_files(self, *args, **kwargs) -> List[WriteInfo]:
+    async def write_files(
+        self,
+        files: List[WriteEntry],
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> List[WriteInfo]:
         """Write several files in one runtime API call."""
-        return await asyncio.to_thread(self._files.write_files, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.write_files,
+            files,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def list(self, *args, **kwargs) -> List[EntryInfo]:
+    async def list(
+        self,
+        path: str,
+        depth: Optional[int] = 1,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> List[EntryInfo]:
         """List directory entries."""
-        return await asyncio.to_thread(self._files.list, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.list,
+            path,
+            depth=depth,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def exists(self, *args, **kwargs) -> bool:
+    async def exists(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> bool:
         """Return whether a file or directory exists."""
-        return await asyncio.to_thread(self._files.exists, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.exists,
+            path,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def get_info(self, *args, **kwargs) -> EntryInfo:
+    async def get_info(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> EntryInfo:
         """Return stat metadata for a file or directory."""
-        return await asyncio.to_thread(self._files.get_info, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.get_info,
+            path,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def remove(self, *args, **kwargs) -> None:
+    async def remove(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> None:
         """Remove a file."""
-        await asyncio.to_thread(self._files.remove, *args, **kwargs)
+        await asyncio.to_thread(
+            self._files.remove,
+            path,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def rename(self, *args, **kwargs) -> EntryInfo:
+    async def rename(
+        self,
+        old_path: str,
+        new_path: str,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> EntryInfo:
         """Move or rename a file."""
-        return await asyncio.to_thread(self._files.rename, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.rename,
+            old_path,
+            new_path,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
-    async def make_dir(self, *args, **kwargs) -> bool:
+    async def make_dir(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> bool:
         """Create a directory."""
-        return await asyncio.to_thread(self._files.make_dir, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._files.make_dir,
+            path,
+            user=user,
+            request_timeout=request_timeout,
+        )
 
     async def watch_dir(
         self,
         path: str,
         on_event: Optional[Callable[[FilesystemEvent], None]] = None,
+        on_exit: Optional[Callable[[Exception], Any]] = None,
         user=None,
         request_timeout: Optional[float] = None,
+        timeout: Optional[float] = 60,
         recursive: bool = False,
         include_entry: bool = False,
     ) -> "AsyncWatchHandle":
@@ -273,7 +388,7 @@ class AsyncFilesystem:
         )
         async_handle = AsyncWatchHandle(handle)
         if on_event is not None:
-            async_handle.start_callback(on_event)
+            async_handle.start_callback(on_event, on_exit=on_exit, timeout=timeout)
         return async_handle
 
 
@@ -294,16 +409,36 @@ class AsyncWatchHandle:
         """Return queued filesystem events."""
         return await asyncio.to_thread(self._handle.get_new_events)
 
-    def start_callback(self, on_event: Callable[[FilesystemEvent], None]) -> None:
+    def start_callback(
+        self,
+        on_event: Callable[[FilesystemEvent], None],
+        on_exit: Optional[Callable[[Exception], Any]] = None,
+        timeout: Optional[float] = 60,
+    ) -> None:
         async def pump():
-            while True:
-                for event in await self.get_new_events():
-                    result = on_event(event)
+            try:
+                while True:
+                    for event in await self.get_new_events():
+                        result = on_event(event)
+                        if inspect.isawaitable(result):
+                            await result
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if on_exit is not None:
+                    result = on_exit(error)
                     if inspect.isawaitable(result):
                         await result
-                await asyncio.sleep(0.1)
+                else:
+                    raise
 
         self._task = asyncio.create_task(pump())
+        self._task.add_done_callback(_observe_background_task_exception)
+        if timeout and timeout > 0:
+            self._task.add_done_callback(lambda _: self._handle.stop())
+            loop = asyncio.get_running_loop()
+            loop.call_later(timeout, self._task.cancel)
 
 
 class AsyncPty:

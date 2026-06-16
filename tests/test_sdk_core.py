@@ -37,7 +37,12 @@ from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.filesystem.filesystem import FileType
 from watasu.sandbox.sandbox_api import sandbox_info_from_api
-from watasu.sandbox_async.main import AsyncCommandHandle, AsyncCommands, AsyncPty
+from watasu.sandbox_async.main import (
+    AsyncCommandHandle,
+    AsyncCommands,
+    AsyncFilesystem,
+    AsyncPty,
+)
 from watasu.sandbox_sync.commands.command import Commands as SyncCommands
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
@@ -2435,6 +2440,30 @@ def test_template_builder_serializers_and_mcp_helper(tmp_path):
         "timeout",
         "request_timeout",
         "on_stdout",
+    ]
+    assert list(inspect.signature(AsyncFilesystem.read).parameters)[:5] == [
+        "self",
+        "path",
+        "format",
+        "user",
+        "request_timeout",
+    ]
+    assert list(inspect.signature(AsyncFilesystem.write).parameters)[:5] == [
+        "self",
+        "path",
+        "data",
+        "user",
+        "request_timeout",
+    ]
+    assert list(inspect.signature(AsyncFilesystem.watch_dir).parameters)[:8] == [
+        "self",
+        "path",
+        "on_event",
+        "on_exit",
+        "user",
+        "request_timeout",
+        "timeout",
+        "recursive",
     ]
     assert list(inspect.signature(AsyncPty.create).parameters)[:4] == [
         "self",
