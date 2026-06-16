@@ -41,7 +41,7 @@ from watasu._transport.data_plane import DataPlaneClient
 from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.filesystem.filesystem import FileType
-from watasu.sandbox.sandbox_api import sandbox_info_from_api
+from watasu.sandbox.sandbox_api import sandbox_info_from_api, sandbox_metrics_from_api
 from watasu.sandbox_async.main import (
     AsyncCommandHandle,
     AsyncCommands,
@@ -1980,13 +1980,51 @@ def test_sandbox_info_parses_lifecycle():
     info = sandbox_info_from_api(
         {
             "id": "sandbox-1",
+            "sandbox_domain": "sandbox.watasuhost.com",
+            "template_id": "base",
             "lifecycle": {"on_timeout": "pause", "auto_resume": True},
+            "cpu_count": 2,
+            "memory_mb": 512,
+            "envd_version": "0.6.3",
+            "envd_access_token": "envd-token",
+            "started_at": "2026-01-01T00:00:00Z",
+            "end_at": "2026-01-01T00:05:00Z",
         }
     )
 
+    assert info.sandbox_domain == "sandbox.watasuhost.com"
+    assert info.template_id == "base"
+    assert info.cpu_count == 2
+    assert info.memory_mb == 512
+    assert info.envd_version == "0.6.3"
+    assert info._envd_access_token == "envd-token"
+    assert info.started_at.isoformat() == "2026-01-01T00:00:00+00:00"
+    assert info.end_at.isoformat() == "2026-01-01T00:05:00+00:00"
     assert info.lifecycle is not None
     assert info.lifecycle.on_timeout == "pause"
     assert info.lifecycle.auto_resume is True
+
+    metrics = sandbox_metrics_from_api(
+        {
+            "sandbox_id": "sandbox-1",
+            "cpu_count": 2,
+            "cpu_used_pct": 12.5,
+            "disk_total": 8192,
+            "disk_used": 4096,
+            "mem_total": 2048,
+            "mem_used": 1024,
+            "timestamp": "2026-01-01T00:00:00Z",
+        }
+    )
+
+    assert metrics.sandbox_id == "sandbox-1"
+    assert metrics.cpu_count == 2
+    assert metrics.cpu_used_pct == 12.5
+    assert metrics.disk_total == 8192
+    assert metrics.disk_used == 4096
+    assert metrics.mem_total == 2048
+    assert metrics.mem_used == 1024
+    assert metrics.timestamp.isoformat() == "2026-01-01T00:00:00+00:00"
 
 
 def test_sandbox_aliases_match_connection_lifecycle_shape(monkeypatch):

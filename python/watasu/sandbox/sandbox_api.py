@@ -4,6 +4,7 @@ import base64
 import hashlib
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
 ALL_TRAFFIC = "0.0.0.0/0"
@@ -58,6 +59,12 @@ class SandboxMetrics:
     node: Optional[str] = None
     backend: Optional[str] = None
     cpu_count: Optional[int] = None
+    cpu_used_pct: Optional[float] = None
+    disk_total: Optional[int] = None
+    disk_used: Optional[int] = None
+    mem_total: Optional[int] = None
+    mem_used: Optional[int] = None
+    timestamp: Optional[datetime] = None
     memory_mb: Optional[int] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
@@ -86,14 +93,19 @@ class FileUrlInfo:
 @dataclass
 class SandboxInfo:
     sandbox_id: str
+    sandbox_domain: Optional[str] = None
     template_id: Optional[str] = None
     name: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    started_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
     state: Optional[str] = None
+    cpu_count: Optional[int] = None
+    memory_mb: Optional[int] = None
+    envd_version: Optional[str] = None
+    _envd_access_token: Optional[str] = None
     lifecycle: Optional[SandboxInfoLifecycle] = None
     volume_mounts: List[Dict[str, str]] = field(default_factory=list)
-    started_at: Optional[str] = None
-    end_at: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -101,6 +113,7 @@ def sandbox_info_from_api(payload: Dict[str, Any]) -> SandboxInfo:
     template = payload.get("template") or payload.get("sandbox_template") or {}
     return SandboxInfo(
         sandbox_id=str(payload.get("id") or payload.get("sandbox_id") or ""),
+        sandbox_domain=_string(_first(payload, "sandbox_domain", "sandboxDomain", "domain")),
         template_id=(
             str(payload.get("template_id"))
             if payload.get("template_id") is not None
@@ -115,14 +128,20 @@ def sandbox_info_from_api(payload: Dict[str, Any]) -> SandboxInfo:
         name=payload.get("name"),
         metadata=payload.get("metadata") or {},
         state=payload.get("state"),
+        cpu_count=_int(_first(payload, "cpu_count", "cpuCount")),
+        memory_mb=_int(_first(payload, "memory_mb", "memoryMB", "memoryMb")),
+        envd_version=_string(_first(payload, "envd_version", "envdVersion")),
+        _envd_access_token=_string(
+            _first(payload, "envd_access_token", "envdAccessToken", "access_token", "token")
+        ),
         lifecycle=sandbox_lifecycle_from_api(payload.get("lifecycle")),
         volume_mounts=sandbox_volume_mounts_from_api(
             payload.get("volume_mounts", payload.get("volumeMounts"))
         ),
-        started_at=payload.get("started_at")
-        or payload.get("created_at")
-        or payload.get("ready_at"),
-        end_at=payload.get("end_at") or payload.get("deadline_at"),
+        started_at=_datetime(
+            _first(payload, "started_at", "startedAt", "created_at", "createdAt", "ready_at", "readyAt")
+        ),
+        end_at=_datetime(_first(payload, "end_at", "endAt", "deadline_at", "deadlineAt")),
         raw=payload,
     )
 
@@ -159,6 +178,12 @@ def sandbox_metrics_from_api(payload: Dict[str, Any]) -> SandboxMetrics:
         node=_string(payload.get("node")),
         backend=_string(payload.get("backend")),
         cpu_count=_int(_first(payload, "cpu_count", "cpuCount")),
+        cpu_used_pct=_float(_first(payload, "cpu_used_pct", "cpuUsedPct", "cpu_pct", "cpuPct")),
+        disk_total=_int(_first(payload, "disk_total", "diskTotal")),
+        disk_used=_int(_first(payload, "disk_used", "diskUsed")),
+        mem_total=_int(_first(payload, "mem_total", "memTotal", "memory_total", "memoryTotal")),
+        mem_used=_int(_first(payload, "mem_used", "memUsed", "memory_used", "memoryUsed")),
+        timestamp=_datetime(_first(payload, "timestamp", "time", "created_at", "createdAt")),
         memory_mb=_int(_first(payload, "memory_mb", "memoryMb")),
         raw=payload,
     )
@@ -214,6 +239,30 @@ def _int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), timezone.utc)
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
 
 
 def _bool(value: Any) -> bool:
