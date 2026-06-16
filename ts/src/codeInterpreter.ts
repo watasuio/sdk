@@ -320,14 +320,6 @@ export class OutputMessage {
   toString(): string {
     return this.line
   }
-
-  toJSON(): Record<string, unknown> {
-    return {
-      line: this.line,
-      timestamp: this.timestamp,
-      error: this.error,
-    }
-  }
 }
 
 /** Structured exception raised by user code inside the sandbox. */
@@ -337,14 +329,6 @@ export class ExecutionError {
     readonly value: string,
     readonly traceback: string
   ) {}
-
-  toJSON(): Record<string, unknown> {
-    return {
-      name: this.name,
-      value: this.value,
-      traceback: this.traceback,
-    }
-  }
 }
 
 /** Rich result produced by the last expression of a code execution. */
@@ -379,7 +363,7 @@ export class Result {
     this.javascript = stringValue(payload.javascript)
     this.data = recordOrUndefined(payload.data)
     this.chart = chartFromApi(payload.chart)
-    this.extra = record(payload.extra)
+    this.extra = resultExtra(payload)
     this.isMainResult = Boolean(isMainResult ?? payload.is_main_result ?? payload.isMainResult)
   }
 
@@ -402,17 +386,14 @@ export class Result {
       latex: this.latex,
       json: this.json,
       javascript: this.javascript,
-      data: this.data,
-      chart: this.chart,
       extra: Object.keys(this.extra).length === 0 ? undefined : this.extra,
-      is_main_result: this.isMainResult,
     })
   }
 }
 
 export interface Logs {
-  stdout: OutputMessage[]
-  stderr: OutputMessage[]
+  stdout: string[]
+  stderr: string[]
 }
 
 /** Complete result of a sandbox code execution. */
@@ -431,13 +412,9 @@ export class Execution {
 
   toJSON(): Record<string, unknown> {
     return {
-      results: this.results.map((result) => result.toJSON()),
-      logs: {
-        stdout: this.logs.stdout.map((message) => message.toJSON()),
-        stderr: this.logs.stderr.map((message) => message.toJSON()),
-      },
-      error: this.error?.toJSON() ?? null,
-      execution_count: this.executionCount,
+      results: this.results,
+      logs: this.logs,
+      error: this.error,
     }
   }
 }
@@ -449,14 +426,6 @@ export class Context {
     readonly language: string = '',
     readonly cwd: string = ''
   ) {}
-
-  toJSON(): Record<string, unknown> {
-    return compactRecord({
-      id: this.id,
-      language: this.language,
-      cwd: this.cwd,
-    })
-  }
 }
 
 /** Sandbox specialized for running Python code. */
@@ -557,24 +526,20 @@ function executionFromApi(payload: Record<string, unknown>): Execution {
   return new Execution(
     arrayOfRecords(execution.results).map((item) => new Result(item)),
     {
-      stdout: arrayOfUnknown(logs.stdout).map((item) => outputMessageFromApi(item, false)),
-      stderr: arrayOfUnknown(logs.stderr).map((item) => outputMessageFromApi(item, true)),
+      stdout: arrayOfUnknown(logs.stdout).map(outputLineFromApi),
+      stderr: arrayOfUnknown(logs.stderr).map(outputLineFromApi),
     },
     executionErrorFromApi(execution.error),
     numberValue(execution.execution_count ?? execution.executionCount)
   )
 }
 
-function outputMessageFromApi(value: unknown, error: boolean): OutputMessage {
+function outputLineFromApi(value: unknown): string {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const item = value as Record<string, unknown>
-    return new OutputMessage(
-      String(item.line ?? ''),
-      numberValue(item.timestamp) ?? Date.now() / 1000,
-      Boolean(item.error ?? error)
-    )
+    return String(item.line ?? item.text ?? '')
   }
-  return new OutputMessage(String(value), Date.now() / 1000, error)
+  return String(value)
 }
 
 function executionErrorFromApi(value: unknown): ExecutionError | undefined {
@@ -588,8 +553,8 @@ function executionErrorFromApi(value: unknown): ExecutionError | undefined {
 }
 
 async function emitCallbacks(execution: Execution, opts: RunCodeOpts): Promise<void> {
-  for (const message of execution.logs.stdout) await opts.onStdout?.(message)
-  for (const message of execution.logs.stderr) await opts.onStderr?.(message)
+  for (const message of execution.logs.stdout) await opts.onStdout?.(new OutputMessage(message, Date.now() / 1000, false))
+  for (const message of execution.logs.stderr) await opts.onStderr?.(new OutputMessage(message, Date.now() / 1000, true))
   for (const result of execution.results) await opts.onResult?.(result)
   if (execution.error !== undefined) await opts.onError?.(execution.error)
 }
@@ -619,6 +584,34 @@ function compactRecord(payload: Record<string, unknown>): Record<string, unknown
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
+
+function resultExtra(payload: Record<string, unknown>): Record<string, unknown> {
+  const extra = record(payload.extra)
+  for (const [key, value] of Object.entries(payload)) {
+    if (!knownResultKeys.has(key)) extra[key] = value
+  }
+  return extra
+}
+
+const knownResultKeys = new Set([
+  'plain',
+  'text',
+  'html',
+  'markdown',
+  'svg',
+  'png',
+  'jpeg',
+  'pdf',
+  'latex',
+  'json',
+  'javascript',
+  'data',
+  'chart',
+  'extra',
+  'type',
+  'is_main_result',
+  'isMainResult',
+])
 
 function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined

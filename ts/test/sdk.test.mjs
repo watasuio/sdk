@@ -194,6 +194,10 @@ test('code interpreter models expose chart enums and raw result payloads', () =>
   assert.equal(result.chart.type, ChartType.BAR)
   assert.equal(result.isMainResult, true)
   assert.deepEqual(result.formats(), ['text', 'chart', 'application/vnd.custom'])
+  assert.deepEqual(result.toJSON(), {
+    text: 'summary',
+    extra: { 'application/vnd.custom': { ok: true } },
+  })
 })
 
 test('connection config accepts access token alias', () => {
@@ -1142,6 +1146,11 @@ test('code interpreter runCode uses runtime API and parses callbacks', async () 
 
     assert.equal(execution.text, '5')
     assert.equal(asyncResultCallbackDone, true)
+    assert.deepEqual(execution.logs, { stdout: ['hello'], stderr: ['warn'] })
+    assert.deepEqual(JSON.parse(JSON.stringify(execution.toJSON())), {
+      results: [{ text: '5', json: 5 }],
+      logs: { stdout: ['hello'], stderr: ['warn'] },
+    })
     assert.equal(stdout[0].line, 'hello')
     assert.equal(stderr[0].line, 'warn')
     assert.equal(stderr[0].error, true)
