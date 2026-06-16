@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { gunzipSync } from 'node:zlib'
 
 import {
   ALL_TRAFFIC,
@@ -522,6 +523,37 @@ test('filesystem write overload accepts batches and browser data objects', async
       },
     }],
   ])
+})
+
+test('filesystem gzip writes mark compressed upload payloads', async () => {
+  const calls = []
+  const fs = new Filesystem({
+    putJson(path, body, opts) {
+      calls.push(['put', path, body, opts])
+      return Promise.resolve({ file: { path: '/tmp/a.txt', name: 'a.txt', type: 'file', bytes: 3 } })
+    },
+    postJson(path, opts) {
+      calls.push(['post', path, opts])
+      return Promise.resolve({
+        files: opts.json.files.map((file) => ({
+          path: file.path,
+          name: file.path.split('/').pop(),
+          type: 'file',
+          bytes: 3,
+        })),
+      })
+    },
+  })
+
+  await fs.write('/tmp/a.txt', 'abc', { gzip: true })
+  await fs.writeFiles([{ path: '/tmp/b.txt', data: 'xyz' }], { gzip: true })
+
+  assert.equal(calls[0][1], '/runtime/v1/files?path=%2Ftmp%2Fa.txt&gzip=true')
+  assert.equal(calls[0][3].headers['content-encoding'], 'gzip')
+  assert.equal(gunzipSync(calls[0][2]).toString('utf8'), 'abc')
+  assert.equal(calls[1][1], '/runtime/v1/files/write_files')
+  assert.equal(calls[1][2].json.files[0].gzip, true)
+  assert.equal(gunzipSync(Buffer.from(calls[1][2].json.files[0].data_base64, 'base64')).toString('utf8'), 'xyz')
 })
 
 test('filesystem read supports blob and readable stream formats', async () => {

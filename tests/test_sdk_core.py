@@ -833,7 +833,14 @@ def test_filesystem_maps_watasu_file_entries():
     assert fs._data_plane.calls[-1][1]["json"]["files"][0]["data_base64"] == "YWJj"
     assert fs.read_bytes("/home/user/d.bin") == b"hello"
 
+    fs.write("/home/user/e.txt", "abc", gzip=True)
+    assert fs._data_plane.calls[-1][1]["params"] == {
+        "path": "/home/user/e.txt",
+        "gzip": "true",
+    }
+
     fs.write_files([{"path": "/home/user/e.txt", "data": "abc"}], gzip=True)
+    assert fs._data_plane.calls[-1][1]["json"]["files"][0]["gzip"] is True
     compressed = base64.b64decode(
         fs._data_plane.calls[-1][1]["json"]["files"][0]["data_base64"]
     )

@@ -90,7 +90,7 @@ class Filesystem:
             raw = gzip_module.compress(raw)
         payload = self._data_plane.put_json(
             "/runtime/v1/files",
-            params={"path": path},
+            params={"path": path, "gzip": "true"} if gzip else {"path": path},
             data=raw,
             request_timeout=request_timeout,
             resource="file",
@@ -119,6 +119,7 @@ class Filesystem:
                         "data_base64": base64.b64encode(
                             _maybe_gzip(_to_bytes(file["data"]), gzip)
                         ).decode("ascii"),
+                        **({"gzip": True} if gzip else {}),
                     }
                     for file in files
                 ]

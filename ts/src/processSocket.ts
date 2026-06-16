@@ -7,12 +7,20 @@ import { SandboxError, TimeoutError } from './errors.js'
 
 export type ProcessFrame = Record<string, unknown>
 
+type ControlAckWaiter = {
+  resolve: () => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+  signal?: AbortSignal
+  abort?: () => void
+}
+
 /** Streaming WebSocket connection to the sandbox process runtime. */
 export class ProcessSocket implements AsyncIterable<ProcessFrame> {
   private ws?: WebSocket
   private queue: ProcessFrame[] = []
   private waiters: Array<(value: IteratorResult<ProcessFrame>) => void> = []
-  private ackWaiters = new Map<string, Array<{ resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>>()
+  private ackWaiters = new Map<string, ControlAckWaiter[]>()
   private closed = false
   private keepalive?: ReturnType<typeof setInterval>
 
@@ -66,9 +74,9 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     })
   }
 
-  async sendStdin(data: string | Uint8Array): Promise<void> {
+  async sendStdin(data: string | Uint8Array, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<void> {
     const raw = typeof data === 'string' ? new TextEncoder().encode(data) : data
-    const ack = this.waitForControlAck('stdin_ack')
+    const ack = this.waitForControlAck('stdin_ack', opts)
     try {
       await this.sendJson({ type: 'stdin', data: base64Encode(raw) })
       await ack.promise
@@ -78,8 +86,8 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     }
   }
 
-  async closeStdin(): Promise<void> {
-    const ack = this.waitForControlAck('close_stdin_ack')
+  async closeStdin(opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<void> {
+    const ack = this.waitForControlAck('close_stdin_ack', opts)
     try {
       await this.sendJson({ type: 'close_stdin' })
       await ack.promise
@@ -150,14 +158,34 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     }
   }
 
-  private waitForControlAck(type: string): { promise: Promise<void>; cancel: () => void } {
-    let entry: { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+  private waitForControlAck(
+    type: string,
+    opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}
+  ): { promise: Promise<void>; cancel: () => void } {
+    if (opts.signal?.aborted) {
+      return {
+        promise: Promise.reject(new SandboxError('process control acknowledgement aborted')),
+        cancel: () => {},
+      }
+    }
+
+    let entry: ControlAckWaiter
     const promise = new Promise<void>((resolve, reject) => {
+      const rejectWithAbort = () => {
+        this.removeControlAck(type, entry)
+        clearTimeout(entry.timer)
+        reject(new SandboxError('process control acknowledgement aborted'))
+      }
       const timer = setTimeout(() => {
         this.removeControlAck(type, entry)
+        this.removeSignalListener(entry)
         reject(new TimeoutError())
-      }, this.requestTimeoutMs)
-      entry = { resolve, reject, timer }
+      }, opts.requestTimeoutMs ?? this.requestTimeoutMs)
+      entry = { resolve, reject, timer, signal: opts.signal }
+      if (opts.signal) {
+        entry.abort = rejectWithAbort
+        opts.signal.addEventListener('abort', rejectWithAbort, { once: true })
+      }
       const waiters = this.ackWaiters.get(type) ?? []
       waiters.push(entry)
       this.ackWaiters.set(type, waiters)
@@ -168,6 +196,7 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
       cancel: () => {
         this.removeControlAck(type, entry)
         clearTimeout(entry.timer)
+        if (entry.abort) opts.signal?.removeEventListener('abort', entry.abort)
       },
     }
   }
@@ -176,6 +205,7 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     const entry = this.ackWaiters.get(type)?.shift()
     if (!entry) return
     clearTimeout(entry.timer)
+    if (entry.abort) this.removeSignalListener(entry)
     entry.resolve()
   }
 
@@ -183,6 +213,7 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     for (const waiters of this.ackWaiters.values()) {
       for (const entry of waiters.splice(0)) {
         clearTimeout(entry.timer)
+        if (entry.abort) this.removeSignalListener(entry)
         entry.reject(error)
       }
     }
@@ -195,6 +226,11 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     const index = waiters.indexOf(entry as { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> })
     if (index !== -1) waiters.splice(index, 1)
     if (waiters.length === 0) this.ackWaiters.delete(type)
+  }
+
+  private removeSignalListener(entry: ControlAckWaiter): void {
+    if (entry.abort) entry.signal?.removeEventListener('abort', entry.abort)
+    entry.abort = undefined
   }
 }
 

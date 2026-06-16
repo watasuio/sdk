@@ -1,3 +1,5 @@
+import { gzipSync } from 'node:zlib'
+
 import { DataPlaneClient, withQuery } from './transport.js'
 import { FileNotFoundError, InvalidArgumentError } from './errors.js'
 import { ProcessFrame, ProcessSocket, base64Encode } from './processSocket.js'
@@ -52,7 +54,10 @@ export interface FilesystemEvent {
 export interface WatchOpts {
   recursive?: boolean
   includeEntry?: boolean
+  allowNetworkMounts?: boolean
   requestTimeoutMs?: number
+  signal?: AbortSignal
+  user?: string
   onExit?: (error?: Error) => void | Promise<void>
 }
 
@@ -68,6 +73,7 @@ export interface FilesystemReadOpts extends FilesystemRequestOpts {
 
 export interface FilesystemWriteOpts extends FilesystemRequestOpts {
   gzip?: boolean
+  useOctetStream?: boolean
   metadata?: Record<string, string>
 }
 
@@ -133,7 +139,12 @@ export class FilesystemWatcher {
     const socket = await new ProcessSocket(
       this.dataPlane.baseUrl,
       this.dataPlane.token,
-      withQuery('/runtime/v1/files/watch', { path: this.path, recursive: nextOpts.recursive ?? false, include_entry: nextOpts.includeEntry }),
+      withQuery('/runtime/v1/files/watch', {
+        path: this.path,
+        recursive: nextOpts.recursive ?? false,
+        include_entry: nextOpts.includeEntry,
+        allow_network_mounts: nextOpts.allowNetworkMounts,
+      }),
       nextOpts.requestTimeoutMs,
       this.dataPlane.headers
     ).connect()
@@ -210,8 +221,12 @@ export class Filesystem {
       return this.writeFiles(pathOrFiles, dataOrOpts as FilesystemWriteOpts | undefined)
     }
 
-    const body = await writeDataToBytes(dataOrOpts as WriteData)
-    const payload = await this.dataPlane.putJson(withQuery('/runtime/v1/files', { path: pathOrFiles, gzip: opts.gzip }), body, opts)
+    const body = maybeGzip(await writeDataToBytes(dataOrOpts as WriteData), opts.gzip)
+    const payload = await this.dataPlane.putJson(
+      withQuery('/runtime/v1/files', { path: pathOrFiles, gzip: opts.gzip }),
+      body,
+      requestOpts(opts, opts.gzip ? { 'content-encoding': 'gzip' } : undefined)
+    )
     return entryInfo(payload.file ?? payload)
   }
 
@@ -224,11 +239,12 @@ export class Filesystem {
   async writeFiles(files: WriteEntry[], opts: FilesystemWriteOpts = {}): Promise<WriteInfo[]> {
     if (files.length === 0) return []
     const payload = await this.dataPlane.postJson('/runtime/v1/files/write_files', {
-      ...opts,
+      ...requestOpts(opts),
       json: {
         files: await Promise.all(files.map(async (file) => ({
           path: file.path,
-          data_base64: base64Encode(await writeDataToBytes(file.data)),
+          data_base64: base64Encode(maybeGzip(await writeDataToBytes(file.data), opts.gzip)),
+          ...(opts.gzip ? { gzip: true } : {}),
         }))),
       },
     })
@@ -307,6 +323,18 @@ async function writeDataToBytes(data: WriteData): Promise<Uint8Array> {
   if (typeof Blob !== 'undefined' && data instanceof Blob) return new Uint8Array(await data.arrayBuffer())
   if (isReadableStream(data)) return readStreamToBytes(data)
   throw new InvalidArgumentError(`Unsupported file data type: ${Object.prototype.toString.call(data)}`)
+}
+
+function requestOpts(opts: FilesystemRequestOpts, headers?: Record<string, string>) {
+  const out: { requestTimeoutMs?: number; signal?: AbortSignal; headers?: Record<string, string> } = {}
+  if (opts.requestTimeoutMs !== undefined) out.requestTimeoutMs = opts.requestTimeoutMs
+  if (opts.signal !== undefined) out.signal = opts.signal
+  if (headers !== undefined) out.headers = headers
+  return out
+}
+
+function maybeGzip(bytes: Uint8Array, enabled?: boolean): Uint8Array {
+  return enabled ? new Uint8Array(gzipSync(bytes)) : bytes
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

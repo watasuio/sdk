@@ -103,13 +103,13 @@ export class CommandHandle implements Partial<CommandResult> {
   }
 
   /** Send stdin bytes or text to the process. */
-  async sendStdin(data: string | Uint8Array): Promise<void> {
-    await this.socket.sendStdin(data)
+  async sendStdin(data: string | Uint8Array, opts: CommandRequestOpts = {}): Promise<void> {
+    await this.socket.sendStdin(data, opts)
   }
 
   /** Close the stdin stream and signal EOF to the process. */
-  async closeStdin(): Promise<void> {
-    await this.socket.closeStdin()
+  async closeStdin(opts: CommandRequestOpts = {}): Promise<void> {
+    await this.socket.closeStdin(opts)
   }
 
   /** Resize the attached PTY stream when this handle was created as a PTY. */
@@ -193,7 +193,7 @@ export class Commands {
   async sendStdin(pid: number | string, data: string | Uint8Array, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}) {
     const handle = await this.connect(pid, opts)
     try {
-      await handle.sendStdin(data)
+      await handle.sendStdin(data, opts)
     } finally {
       await handle.disconnect()
     }
@@ -203,7 +203,7 @@ export class Commands {
   async closeStdin(pid: number | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}) {
     const handle = await this.connect(pid, opts)
     try {
-      await handle.closeStdin()
+      await handle.closeStdin(opts)
     } finally {
       await handle.disconnect()
     }
