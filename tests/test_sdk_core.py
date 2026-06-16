@@ -1392,8 +1392,8 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
 
     assert sbx.sandbox_id == "42"
     assert captured["path"] == "/sandboxes"
-    assert captured["kwargs"]["json"]["template_id"] == "base:82"
-    assert captured["kwargs"]["json"]["env_vars"] == {"HELLO": "world"}
+    assert captured["kwargs"]["json"]["template"] == "base:82"
+    assert captured["kwargs"]["json"]["envs"] == {"HELLO": "world"}
     assert captured["kwargs"]["json"]["lifecycle"] == {
         "on_timeout": "pause",
         "auto_resume": True,
@@ -1449,7 +1449,7 @@ def test_code_interpreter_sandbox_uses_code_interpreter_template(monkeypatch):
 
     assert sbx.sandbox_id == "code-created"
     assert captured["path"] == "/sandboxes"
-    assert captured["kwargs"]["json"]["template_id"] == "code-interpreter"
+    assert captured["kwargs"]["json"]["template"] == "code-interpreter"
 
 
 def test_code_interpreter_run_code_uses_runtime_api_and_callbacks():
@@ -1689,7 +1689,7 @@ def test_sandbox_create_with_mcp_sends_config_to_api_without_sdk_bootstrap(monke
     assert captured["kwargs"]["json"] == {
         "timeout": 300,
         "metadata": {},
-        "env_vars": {},
+        "envs": {},
         "secure": True,
         "allow_internet_access": True,
         "mcp": {"server": "it's-fine", "config": {"enabled": True}},
@@ -1944,7 +1944,7 @@ def test_sandbox_constructor_creates_with_default_template(monkeypatch):
 
     assert sbx.sandbox_id == "new-sandbox"
     assert captured["path"] == "/sandboxes"
-    assert captured["kwargs"]["json"]["template_id"] == "base"
+    assert captured["kwargs"]["json"]["template"] == "base"
     assert captured["kwargs"]["json"]["metadata"] == {"purpose": "compat"}
 
 
@@ -1974,7 +1974,7 @@ def test_sandbox_beta_create_uses_auto_pause_payload(monkeypatch):
 
     assert sbx.sandbox_id == "beta-created"
     assert captured["path"] == "/sandboxes"
-    assert captured["kwargs"]["json"]["template_id"] == "base"
+    assert captured["kwargs"]["json"]["template"] == "base"
     assert captured["kwargs"]["json"]["timeout"] == 60
     assert captured["kwargs"]["json"]["auto_pause"] is True
     assert captured["kwargs"]["json"]["team"] == "watasu"
@@ -2571,10 +2571,10 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
             "/sandboxes",
             {
                 "json": {
-                    "template_id": "base",
+                    "template": "base",
                     "timeout": 300,
                     "metadata": {},
-                    "env_vars": {},
+                    "envs": {},
                     "secure": True,
                     "allow_internet_access": True,
                 },

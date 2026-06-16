@@ -759,10 +759,10 @@ test('sandbox create uses root snake_case API payload', async () => {
 
     assert.equal(sbx.sandboxId, 'created')
     assert.deepEqual(requests[0].body, {
-      template_id: 'base:82',
+      template: 'base:82',
       timeout: 120,
       metadata: { purpose: 'compat' },
-      env_vars: { HELLO: 'world' },
+      envs: { HELLO: 'world' },
       secure: true,
       allow_internet_access: true,
       lifecycle: { on_timeout: 'pause', auto_resume: true },
@@ -865,10 +865,10 @@ test('sandbox protected create and connect helpers expose session details', asyn
         body: {
           timeout: 60,
           metadata: {},
-          env_vars: { HELLO: 'world' },
+          envs: { HELLO: 'world' },
           secure: true,
           allow_internet_access: true,
-          template_id: 'base',
+          template: 'base',
           team: 'watasu',
         },
       },
@@ -1071,7 +1071,7 @@ test('code interpreter sandbox create defaults to code-interpreter template', as
 
     assert.ok(sbx instanceof CodeInterpreterSandbox)
     assert.equal(sbx.sandboxId, 'code-created')
-    assert.equal(requests[0].body.template_id, 'code-interpreter')
+    assert.equal(requests[0].body.template, 'code-interpreter')
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -1269,7 +1269,7 @@ test('sandbox create with mcp sends config to API without SDK-side bootstrap', a
     assert.deepEqual(requests[0].body, {
       timeout: 300,
       metadata: {},
-      env_vars: {},
+      envs: {},
       secure: true,
       allow_internet_access: true,
       mcp: { server: "it's-fine", config: { enabled: true } },

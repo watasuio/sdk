@@ -407,11 +407,11 @@ export class Sandbox {
     const sandboxPayload: Record<string, unknown> = {
       timeout: Math.ceil(timeoutMs / 1000),
       metadata: opts.metadata ?? {},
-      env_vars: opts.envs ?? {},
+      envs: opts.envs ?? {},
       secure: opts.secure ?? true,
       allow_internet_access: opts.allowInternetAccess ?? true,
     }
-    putIfPresent(sandboxPayload, 'template_id', template)
+    putIfPresent(sandboxPayload, 'template', template)
     putIfPresent(sandboxPayload, 'mcp', opts.mcp)
     putIfPresent(sandboxPayload, 'lifecycle', lifecyclePayload(opts.lifecycle))
     putIfPresent(sandboxPayload, 'volume_mounts', volumeMountsPayload(opts.volumeMounts))

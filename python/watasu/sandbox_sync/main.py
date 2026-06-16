@@ -192,14 +192,14 @@ class Sandbox(SandboxBase):
         sandbox_params = {
             "timeout": timeout or 300,
             "metadata": metadata or {},
-            "env_vars": envs or {},
+            "envs": envs or {},
             "secure": secure,
             "allow_internet_access": allow_internet_access,
         }
         if template is not None:
-            sandbox_params["template_id"] = template
+            sandbox_params["template"] = template
         elif mcp is None:
-            sandbox_params["template_id"] = cls.default_template
+            sandbox_params["template"] = cls.default_template
         if mcp is not None:
             sandbox_params["mcp"] = mcp
         if auto_pause is not None:

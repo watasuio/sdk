@@ -23,7 +23,7 @@ pub struct CreateOptions {
     pub envs: serde_json::Map<String, Value>,
     /// Whether the sandbox may access the public internet.
     pub allow_internet_access: bool,
-    /// Explicit template version id. Encoded as a `template_id` pin on the wire.
+    /// Explicit template version id. Encoded in the template ref on the wire.
     pub template_version_id: Option<u64>,
     /// Team slug to create the sandbox under.
     pub team: Option<String>,
@@ -343,10 +343,10 @@ impl Sandbox {
             Some(version_id) => format!("{}:{version_id}", opts.template),
             None => opts.template,
         };
-        sandbox.insert("template_id".into(), Value::String(template_id));
+        sandbox.insert("template".into(), Value::String(template_id));
         sandbox.insert("timeout".into(), Value::from(opts.timeout_seconds));
         sandbox.insert("metadata".into(), Value::Object(opts.metadata));
-        sandbox.insert("env_vars".into(), Value::Object(opts.envs.clone()));
+        sandbox.insert("envs".into(), Value::Object(opts.envs.clone()));
         sandbox.insert(
             "allow_internet_access".into(),
             Value::Bool(opts.allow_internet_access),
