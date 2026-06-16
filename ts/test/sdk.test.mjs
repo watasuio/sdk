@@ -35,8 +35,11 @@ import {
 import { errorFromResponse } from '../dist/errors.js'
 import {
   ConnectionConfig as CodeInterpreterConnectionConfig,
+  ChartType,
   Pty as CodeInterpreterPty,
+  Result as CodeInterpreterResult,
   Sandbox as CodeInterpreterSandbox,
+  ScaleType,
   Template as CodeInterpreterTemplate,
 } from '../dist/codeInterpreter.js'
 
@@ -45,6 +48,29 @@ test('connection config defaults to Watasu hosts', () => {
   assert.equal(config.apiUrl, 'https://api.watasu.io/v1')
   assert.equal(config.dataPlaneDomain, 'watasuhost.com')
   assert.equal(config.authHeaders.Authorization, 'Bearer key')
+})
+
+test('code interpreter models expose chart enums and raw result payloads', () => {
+  assert.equal(ChartType.BAR, 'bar')
+  assert.equal(ScaleType.LINEAR, 'linear')
+
+  const raw = {
+    text: 'summary',
+    chart: {
+      type: ChartType.BAR,
+      title: 'Builds',
+      elements: [{ label: 'Mon', value: '4', group: 'week' }],
+    },
+    extra: { 'application/vnd.custom': { ok: true } },
+    is_main_result: true,
+  }
+  const result = new CodeInterpreterResult(raw)
+
+  assert.equal(result.raw, raw)
+  assert.equal(result.text, 'summary')
+  assert.equal(result.chart.type, ChartType.BAR)
+  assert.equal(result.isMainResult, true)
+  assert.deepEqual(result.formats(), ['text', 'chart', 'application/vnd.custom'])
 })
 
 test('connection config accepts access token alias', () => {

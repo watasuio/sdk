@@ -146,6 +146,112 @@ export interface CreateCodeContextOpts {
   signal?: AbortSignal
 }
 
+/** Chart types returned by code execution results. */
+export enum ChartType {
+  LINE = 'line',
+  SCATTER = 'scatter',
+  BAR = 'bar',
+  PIE = 'pie',
+  BOX_AND_WHISKER = 'box_and_whisker',
+  SUPERCHART = 'superchart',
+  UNKNOWN = 'unknown',
+}
+
+/** Axis scale types returned by chart results. */
+export enum ScaleType {
+  LINEAR = 'linear',
+  DATETIME = 'datetime',
+  CATEGORICAL = 'categorical',
+  LOG = 'log',
+  SYMLOG = 'symlog',
+  LOGIT = 'logit',
+  FUNCTION = 'function',
+  FUNCTIONLOG = 'functionlog',
+  ASINH = 'asinh',
+}
+
+export type Chart = {
+  type: ChartType
+  title: string
+  elements: unknown[]
+}
+
+export type Chart2D = Chart & {
+  x_label?: string
+  y_label?: string
+  x_unit?: string
+  y_unit?: string
+}
+
+export type PointData = {
+  label: string
+  points: [number | string, number | string][]
+}
+
+export type PointChart = Chart2D & {
+  x_ticks: (number | string)[]
+  x_scale: ScaleType
+  x_tick_labels: string[]
+  y_ticks: (number | string)[]
+  y_scale: ScaleType
+  y_tick_labels: string[]
+  elements: PointData[]
+}
+
+export type LineChart = PointChart & {
+  type: ChartType.LINE
+}
+
+export type ScatterChart = PointChart & {
+  type: ChartType.SCATTER
+}
+
+export type BarData = {
+  label: string
+  value: string
+  group: string
+}
+
+export type BarChart = Chart2D & {
+  type: ChartType.BAR
+  elements: BarData[]
+}
+
+export type PieData = {
+  label: string
+  angle: number
+  radius: number
+}
+
+export type PieChart = Chart & {
+  type: ChartType.PIE
+  elements: PieData[]
+}
+
+export type BoxAndWhiskerData = {
+  label: string
+  min: number
+  first_quartile: number
+  median: number
+  third_quartile: number
+  max: number
+  outliers: number[]
+}
+
+export type BoxAndWhiskerChart = Chart2D & {
+  type: ChartType.BOX_AND_WHISKER
+  elements: BoxAndWhiskerData[]
+}
+
+export type SuperChart = Chart & {
+  type: ChartType.SUPERCHART
+  elements: Chart[]
+}
+
+export type ChartTypes = LineChart | ScatterChart | BarChart | PieChart | BoxAndWhiskerChart | SuperChart
+export type MIMEType = string
+export type RawData = Record<string, unknown>
+
 /** One stdout or stderr line emitted by code execution. */
 export class OutputMessage {
   constructor(
@@ -186,6 +292,7 @@ export class ExecutionError {
 
 /** Rich result produced by the last expression of a code execution. */
 export class Result {
+  readonly raw: RawData
   readonly text?: string
   readonly html?: string
   readonly markdown?: string
@@ -196,12 +303,13 @@ export class Result {
   readonly latex?: string
   readonly json?: unknown
   readonly javascript?: string
-  readonly data?: unknown
-  readonly chart?: unknown
+  readonly data?: Record<string, unknown>
+  readonly chart?: ChartTypes
   readonly extra: Record<string, unknown>
   readonly isMainResult: boolean
 
-  constructor(payload: Record<string, unknown> = {}) {
+  constructor(payload: RawData = {}, isMainResult?: boolean) {
+    this.raw = payload
     this.text = stringValue(payload.text)
     this.html = stringValue(payload.html)
     this.markdown = stringValue(payload.markdown)
@@ -212,15 +320,17 @@ export class Result {
     this.latex = stringValue(payload.latex)
     this.json = payload.json
     this.javascript = stringValue(payload.javascript)
-    this.data = payload.data
-    this.chart = payload.chart
+    this.data = recordOrUndefined(payload.data)
+    this.chart = chartFromApi(payload.chart)
     this.extra = record(payload.extra)
-    this.isMainResult = Boolean(payload.is_main_result ?? payload.isMainResult)
+    this.isMainResult = Boolean(isMainResult ?? payload.is_main_result ?? payload.isMainResult)
   }
 
   formats(): string[] {
     const names = ['text', 'html', 'markdown', 'svg', 'png', 'jpeg', 'pdf', 'latex', 'json', 'javascript', 'data', 'chart']
-    return names.filter((name) => (this as unknown as Record<string, unknown>)[name] !== undefined)
+    const formats = names.filter((name) => (this as unknown as Record<string, unknown>)[name] !== undefined)
+    formats.push(...Object.keys(this.extra))
+    return formats
   }
 
   toJSON(): Record<string, unknown> {
@@ -435,6 +545,16 @@ function compactRecord(payload: Record<string, unknown>): Record<string, unknown
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function chartFromApi(value: unknown): ChartTypes | undefined {
+  const item = recordOrUndefined(value)
+  if (item === undefined) return undefined
+  return item as ChartTypes
 }
 
 function arrayOfRecords(value: unknown): Record<string, unknown>[] {

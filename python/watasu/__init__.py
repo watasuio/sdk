@@ -67,6 +67,7 @@ from .sandbox.sandbox_api import (
 )
 from .sandbox.main import SandboxBase, SandboxOpts
 from .sandbox_async.main import (
+    AsyncCommandHandle,
     AsyncGit,
     AsyncPty,
     AsyncSandbox,
@@ -129,6 +130,7 @@ __all__ = [
     "AsyncWatchHandle",
     "AsyncGit",
     "AsyncPty",
+    "AsyncCommandHandle",
     "AuthenticationException",
     "AsyncSandboxPaginator",
     "BuildException",

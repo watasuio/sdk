@@ -4,7 +4,16 @@ from watasu import *  # noqa: F403
 from watasu import __all__ as _watasu_all
 
 from .main import AsyncSandbox, Sandbox
-from .models import Context, Execution, ExecutionError, Logs, OutputMessage, Result
+from .models import (
+    Context,
+    Execution,
+    ExecutionError,
+    Logs,
+    MIMEType,
+    OutputHandler,
+    OutputMessage,
+    Result,
+)
 
 _code_interpreter_all = [
     "AsyncSandbox",
@@ -12,6 +21,8 @@ _code_interpreter_all = [
     "Execution",
     "ExecutionError",
     "Logs",
+    "MIMEType",
+    "OutputHandler",
     "OutputMessage",
     "Result",
     "Sandbox",

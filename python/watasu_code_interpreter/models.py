@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypeVar
+
+from .charts import ChartTypes, _deserialize_chart
+
+T = TypeVar("T")
+OutputHandler = Callable[[T], Any]
+
+
+class MIMEType(str):
+    """MIME type marker used by code execution results."""
 
 
 @dataclass
@@ -69,9 +78,16 @@ class Result:
     json: Any = None
     javascript: Optional[str] = None
     data: Any = None
-    chart: Any = None
+    chart: Optional[ChartTypes] = None
     extra: Dict[str, Any] = field(default_factory=dict)
     is_main_result: bool = False
+
+    def __post_init__(self) -> None:
+        if isinstance(self.chart, dict):
+            self.chart = _deserialize_chart(self.chart)
+
+    def __getitem__(self, item):
+        return getattr(self, item)
 
     def formats(self) -> List[str]:
         """Return available display formats for this result."""
@@ -90,7 +106,10 @@ class Result:
             "data",
             "chart",
         ]
-        return [name for name in names if getattr(self, name) is not None]
+        formats = [name for name in names if getattr(self, name) is not None]
+        if self.extra:
+            formats.extend(self.extra)
+        return formats
 
     def to_json(self) -> Dict[str, Any]:
         payload = {
@@ -112,7 +131,33 @@ class Result:
         return {key: value for key, value in payload.items() if value is not None}
 
     def __repr__(self) -> str:
-        return self.text or super().__repr__()
+        if self.text:
+            return f"Result({self.text})"
+        return "Result(Formats: " + ", ".join(self.formats()) + ")"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+    def _repr_html_(self) -> Optional[str]:
+        return self.html
+
+    def _repr_markdown_(self) -> Optional[str]:
+        return self.markdown
+
+    def _repr_svg_(self) -> Optional[str]:
+        return self.svg
+
+    def _repr_png_(self) -> Optional[str]:
+        return self.png
+
+    def _repr_jpeg_(self) -> Optional[str]:
+        return self.jpeg
+
+    def _repr_pdf_(self) -> Optional[str]:
+        return self.pdf
+
+    def _repr_latex_(self) -> Optional[str]:
+        return self.latex
 
 
 @dataclass
@@ -230,7 +275,7 @@ def result_from_api(payload: Dict[str, Any]) -> Result:
         json=payload.get("json"),
         javascript=payload.get("javascript"),
         data=payload.get("data"),
-        chart=payload.get("chart"),
+        chart=_deserialize_chart(payload.get("chart")),
         extra=payload.get("extra") or {
             key: value for key, value in payload.items() if key not in known
         },

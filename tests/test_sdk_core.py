@@ -12,6 +12,7 @@ import watasu
 import watasu_code_interpreter
 from watasu import (
     ALL_TRAFFIC,
+    AsyncCommandHandle as TopLevelAsyncCommandHandle,
     AsyncSandbox,
     AsyncTemplate,
     BuildException,
@@ -47,6 +48,7 @@ from watasu.template_async.main import AsyncTemplate as TemplateAsyncMain
 from watasu.template_sync import Template as TemplateSyncExport
 from watasu.template_sync.main import Template as TemplateSyncMain
 from watasu_code_interpreter import Sandbox as CodeInterpreterSandbox
+from watasu_code_interpreter.charts import BarChart, ChartType
 
 
 def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
@@ -130,6 +132,33 @@ def test_code_interpreter_package_re_exports_core_sdk_helpers():
     assert watasu_code_interpreter.ConnectionConfig is watasu.ConnectionConfig
     assert watasu_code_interpreter.Template is watasu.Template
     assert watasu_code_interpreter.PtySize is watasu.PtySize
+    assert watasu.AsyncCommandHandle is TopLevelAsyncCommandHandle
+    assert watasu.AsyncCommandHandle is AsyncCommandHandle
+    assert issubclass(watasu_code_interpreter.MIMEType, str)
+    assert callable(watasu_code_interpreter.OutputHandler)
+
+
+def test_code_interpreter_result_matches_chart_and_mapping_helpers():
+    result = watasu_code_interpreter.Result(
+        text="summary",
+        chart={
+            "type": "bar",
+            "title": "Builds",
+            "x_label": "day",
+            "y_label": "count",
+            "elements": [{"label": "Mon", "value": "4", "group": "week"}],
+        },
+        extra={"application/vnd.custom": {"ok": True}},
+    )
+
+    assert result["text"] == "summary"
+    assert repr(result) == "Result(summary)"
+    assert result.chart is not None
+    assert isinstance(result.chart, BarChart)
+    assert result.chart.type == ChartType.BAR
+    assert result.chart.elements[0].label == "Mon"
+    assert "chart" in result.formats()
+    assert "application/vnd.custom" in result.formats()
 
 
 def test_commands_list_prefers_stable_process_id_over_guest_os_pid():
