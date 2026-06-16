@@ -75,6 +75,26 @@ def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
     assert config.auth_headers["Authorization"] == "Bearer key"
 
 
+def test_envd_namespace_imports_are_explicit_compatibility_stubs():
+    import watasu.envd as envd
+    import watasu.envd.api as api
+    import watasu.envd.filesystem as filesystem
+    import watasu.envd.process as process
+    import watasu.envd.rpc as rpc
+    import watasu.envd.versions as versions
+
+    assert watasu.envd is envd
+    assert envd.__all__ == ["api", "filesystem", "process", "rpc", "versions"]
+    assert envd.api is api
+    assert envd.filesystem is filesystem
+    assert envd.process is process
+    assert envd.rpc is rpc
+    assert envd.versions is versions
+
+    with pytest.raises(NotImplementedError, match="compatibility namespace only"):
+        api.Client
+
+
 def test_connection_config_accepts_access_token_alias(monkeypatch):
     monkeypatch.delenv("WATASU_API_KEY", raising=False)
 

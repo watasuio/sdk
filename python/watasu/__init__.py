@@ -3,7 +3,7 @@
 The public sync surface talks to Watasu REST and WebSocket runtime endpoints.
 """
 
-from . import template_async, template_sync
+from . import envd, template_async, template_sync
 from .api import ApiClient, client
 from .connection_config import ApiParams, ConnectionConfig, ProxyTypes, Username
 from .exceptions import (
@@ -142,6 +142,7 @@ __all__ = [
     "ConflictException",
     "CopyItem",
     "EntryInfo",
+    "envd",
     "FileUrlInfo",
     "FileNotFoundException",
     "FileType",
