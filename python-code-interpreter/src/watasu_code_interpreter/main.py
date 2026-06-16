@@ -46,7 +46,7 @@ class Sandbox(BaseSandbox):
                 "code": code,
                 "language": language,
                 "context_id": _context_id(context),
-                "env_vars": envs,
+                "envs": envs,
                 "timeout_seconds": timeout,
             }
         )

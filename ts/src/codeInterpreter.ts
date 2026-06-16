@@ -464,7 +464,7 @@ export class Sandbox extends BaseSandbox {
       code,
       language: opts.language,
       context_id: contextId(opts.context),
-      env_vars: opts.envs,
+      envs: opts.envs,
       timeout_ms: opts.timeoutMs,
     })
     const response = await this.runtimePostJson('/runtime/v1/code/run', payload, {

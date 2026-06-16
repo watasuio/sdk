@@ -639,7 +639,7 @@ fn put_request_options(
     timeout_seconds: Option<u64>,
 ) {
     if !envs.is_empty() {
-        body.insert("env_vars".into(), Value::Object(envs));
+        body.insert("envs".into(), Value::Object(envs));
     }
     put_if_some_u64(body, "timeout_seconds", timeout_seconds);
 }
@@ -783,7 +783,7 @@ fn object_from(value: Value) -> serde_json::Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{git_result, parse_status};
+    use super::{git_result, parse_status, put_request_options};
     use serde_json::json;
 
     #[test]
@@ -803,5 +803,18 @@ mod tests {
         assert!(status.has_changes());
         assert!(status.has_untracked());
         assert_eq!(status.total_count(), 2);
+    }
+
+    #[test]
+    fn request_options_use_envs_payload_key() {
+        let mut body = serde_json::Map::new();
+        let mut envs = serde_json::Map::new();
+        envs.insert("GIT_TRACE".to_string(), json!("1"));
+
+        put_request_options(&mut body, envs, Some(10));
+
+        assert_eq!(body.get("envs"), Some(&json!({"GIT_TRACE": "1"})));
+        assert_eq!(body.get("timeout_seconds"), Some(&json!(10)));
+        assert!(body.get("env_vars").is_none());
     }
 }

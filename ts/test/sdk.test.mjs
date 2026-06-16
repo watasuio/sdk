@@ -1162,7 +1162,7 @@ test('code interpreter runCode uses runtime API and parses callbacks', async () 
         body: {
           code: "print('hello')\n2 + 3",
           language: 'python',
-          env_vars: { A: 'B' },
+          envs: { A: 'B' },
           timeout_ms: 5000,
         },
       },
@@ -2108,7 +2108,7 @@ test('git helper uses data-plane git routes', async () => {
       sandbox: { route_token: 'route-token' },
     })
 
-    const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, user: 'sandbox', cwd: '/workspace', timeoutMs: 10_000 })
+    const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, envs: { GIT_TRACE: '1' }, user: 'sandbox', cwd: '/workspace', timeoutMs: 10_000 })
     await sbx.git.dangerouslyAuthenticate({ username: 'user', password: 'token', host: 'git.example.com', protocol: 'https', timeoutMs: 5_000 })
     await sbx.git.configureUser('Watasu Test', 'test@watasu.local', { scope: 'local', path: '/workspace/repo' })
     await sbx.git.init('/workspace/repo', { initialBranch: 'main' })
@@ -2145,7 +2145,7 @@ test('git helper uses data-plane git routes', async () => {
     assert.equal(hasUpstream, true)
     assert.equal(configValue, 'false')
     assert.deepEqual(requests.map((request) => [request.method, request.url, request.body]), [
-      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/clone', { url: 'https://git.example/repo.git', user: 'sandbox', cwd: '/workspace', timeout_seconds: 10, path: '/workspace/repo', branch: 'main', depth: 1 }],
+      ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/clone', { url: 'https://git.example/repo.git', envs: { GIT_TRACE: '1' }, user: 'sandbox', cwd: '/workspace', timeout_seconds: 10, path: '/workspace/repo', branch: 'main', depth: 1 }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/dangerously_authenticate', { timeout_seconds: 5, username: 'user', password: 'token', host: 'git.example.com', protocol: 'https' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/configure_user', { name: 'Watasu Test', email: 'test@watasu.local', scope: 'local', path: '/workspace/repo' }],
       ['POST', 'https://route.sandbox.watasuhost.com/runtime/v1/git/init', { path: '/workspace/repo', initial_branch: 'main' }],

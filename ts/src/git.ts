@@ -365,7 +365,7 @@ export class Git {
 
 function gitOpts(opts: GitRequestOpts): Record<string, unknown> {
   return {
-    env_vars: opts.envs,
+    envs: opts.envs,
     user: opts.user,
     cwd: opts.cwd,
     timeout_seconds: opts.timeoutMs === undefined ? undefined : Math.ceil(opts.timeoutMs / 1000),
