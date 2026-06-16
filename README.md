@@ -6,7 +6,9 @@ Each package has a registry-specific README so package managers show examples in
 the language the user is installing:
 
 - Python: [python/README.md](python/README.md)
+- Python Code Interpreter: [python-code-interpreter/README.md](python-code-interpreter/README.md)
 - TypeScript: [ts/README.md](ts/README.md)
+- TypeScript Code Interpreter: [ts-code-interpreter/README.md](ts-code-interpreter/README.md)
 - Rust: [rust/README.md](rust/README.md)
 
 `Sandbox.create` and `Sandbox.connect` are single provider operations: the

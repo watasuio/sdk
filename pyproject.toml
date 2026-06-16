@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "watasu"
-version = "0.1.46"
+version = "0.1.47"
 description = "Python SDK for Watasu"
 readme = "python/README.md"
 requires-python = ">=3.9"
@@ -20,11 +20,11 @@ test = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["python/watasu", "python/watasu_code_interpreter"]
+packages = ["python/watasu"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["python"]
+pythonpath = ["python", "python-code-interpreter/src"]
 
 [project.urls]
 Repository = "https://github.com/watasuio/sdk"

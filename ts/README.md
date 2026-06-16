@@ -71,7 +71,7 @@ await volume.destroy()
 ## Code Interpreter
 
 ```ts
-import { Sandbox } from '@watasu/sdk/code-interpreter'
+import { Sandbox } from '@watasu/code-interpreter'
 
 const sbx = await Sandbox.create()
 const context = await sbx.createCodeContext()
@@ -85,7 +85,7 @@ await sbx.removeCodeContext(context)
 await sbx.kill()
 ```
 
-`@watasu/sdk/code-interpreter` starts the `code-interpreter` template by default.
+`@watasu/code-interpreter` starts the `code-interpreter` template by default.
 Code runs in persistent Python contexts and returns structured `results`, `logs`,
 and `error` fields for each execution.
 

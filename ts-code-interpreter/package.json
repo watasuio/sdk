@@ -1,0 +1,38 @@
+{
+  "name": "@watasu/code-interpreter",
+  "version": "0.1.44",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "description": "Code Interpreter SDK for Watasu",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@watasu/sdk": "0.1.44"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.3",
+    "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/watasuio/sdk.git",
+    "directory": "ts-code-interpreter"
+  }
+}

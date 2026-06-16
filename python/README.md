@@ -81,6 +81,10 @@ Leaving the context manager calls `kill()`.
 
 ## Code Interpreter
 
+```bash
+pip install watasu-code-interpreter
+```
+
 ```python
 from watasu_code_interpreter import Sandbox
 

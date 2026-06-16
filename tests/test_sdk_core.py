@@ -652,6 +652,7 @@ def test_data_plane_client_uses_sandbox_headers():
     data_plane = DataPlaneClient("https://sandbox.example", "data-token", config)
 
     assert data_plane.headers == {
+        "Connection": "close",
         "x-shared": "shared",
         "x-sandbox": "sandbox",
         "Authorization": "Bearer data-token",

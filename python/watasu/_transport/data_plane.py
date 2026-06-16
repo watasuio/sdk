@@ -25,6 +25,7 @@ class DataPlaneClient:
     @property
     def headers(self) -> Dict[str, str]:
         return {
+            "Connection": "close",
             **self.config.sandbox_headers,
             "Authorization": f"Bearer {self.token}",
         }
