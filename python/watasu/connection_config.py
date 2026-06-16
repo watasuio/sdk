@@ -19,6 +19,7 @@ class ApiParams(TypedDict, total=False):
     headers: Optional[Dict[str, str]]
     proxy: Optional[ProxyTypes]
     api_url: Optional[str]
+    sandbox_url: Optional[str]
     data_plane_domain: Optional[str]
     debug: Optional[bool]
 
@@ -29,8 +30,10 @@ class ConnectionConfig:
 
     Most users only need to set ``WATASU_API_KEY``. ``domain`` defaults to
     ``watasu.io`` and produces ``https://api.watasu.io/v1`` for control-plane
-    calls. Data-plane URLs and tokens are always taken from the sandbox
-    ``session`` returned by ``Sandbox.create`` or ``Sandbox.connect``.
+    calls. Data-plane URLs and tokens are taken from the sandbox ``session``
+    returned by ``Sandbox.create`` or ``Sandbox.connect`` unless
+    ``sandbox_url`` is set to override the data-plane base URL, primarily for
+    local runtimes.
     """
 
     api_key: Optional[str] = None
@@ -39,6 +42,7 @@ class ConnectionConfig:
     headers: Dict[str, str] = field(default_factory=dict)
     proxy: Optional[ProxyTypes] = None
     api_url: Optional[str] = None
+    sandbox_url: Optional[str] = None
     data_plane_domain: Optional[str] = None
     debug: bool = False
 
@@ -51,6 +55,7 @@ class ConnectionConfig:
         headers: Optional[Dict[str, str]] = None,
         proxy: Optional[ProxyTypes] = None,
         api_url: Optional[str] = None,
+        sandbox_url: Optional[str] = None,
         data_plane_domain: Optional[str] = None,
         debug: Optional[bool] = None,
         **_: Any,
@@ -67,6 +72,9 @@ class ConnectionConfig:
             or os.environ.get("WATASU_API_URL")
             or f"https://api.{self.domain}/v1"
         ).rstrip("/")
+        self.sandbox_url = (
+            sandbox_url or os.environ.get("WATASU_SANDBOX_URL") or None
+        )
         self.request_timeout = (
             float(request_timeout)
             if request_timeout is not None
@@ -96,6 +104,7 @@ class ConnectionConfig:
             "headers": dict(self.headers),
             "proxy": self.proxy,
             "api_url": self.api_url,
+            "sandbox_url": self.sandbox_url,
             "data_plane_domain": self.data_plane_domain,
             "debug": self.debug,
         }

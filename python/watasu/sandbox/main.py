@@ -70,7 +70,7 @@ class SandboxBase:
     @property
     def envd_api_url(self) -> str:
         """Data-plane API URL used by compatibility callers."""
-        return self._sandbox_url or ""
+        return self.connection_config.sandbox_url or self._sandbox_url or ""
 
     @property
     def _envd_access_token(self) -> Optional[str]:

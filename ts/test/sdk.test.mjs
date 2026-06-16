@@ -49,6 +49,7 @@ test('connection config keeps API headers and caller signal', () => {
   const controller = new AbortController()
   const config = new ConnectionConfig({
     apiKey: 'key',
+    sandboxUrl: 'http://localhost:49983',
     headers: { 'x-shared': 'shared' },
     apiHeaders: { 'x-api': 'api' },
     debug: true,
@@ -58,6 +59,7 @@ test('connection config keeps API headers and caller signal', () => {
   assert.equal(config.authHeaders.Authorization, 'Bearer key')
   assert.equal(config.authHeaders['x-shared'], 'shared')
   assert.equal(config.authHeaders['x-api'], 'api')
+  assert.equal(config.sandboxUrl, 'http://localhost:49983')
   assert.equal(config.debug, true)
   assert.equal(config.signal, controller.signal)
 })
@@ -203,6 +205,21 @@ test('sandbox getHost derives route token from data-plane URL', () => {
   })
 
   assert.equal(sbx.getHost(3000), 'p3000-derived-token.sandbox.watasuhost.com')
+})
+
+test('sandboxUrl overrides the data-plane URL without changing public hosts', () => {
+  const sbx = new Sandbox({
+    sandboxId: '1',
+    connectionConfig: new ConnectionConfig({
+      apiKey: 'key',
+      sandboxUrl: 'http://localhost:49983',
+    }),
+    session: { data_plane_url: 'https://remote-token.sandbox.watasuhost.com', token: 'data' },
+    sandbox: { route_token: 'remote-token' },
+  })
+
+  assert.equal(sbx.getHostname(), 'localhost:49983')
+  assert.equal(sbx.getHost(3000), 'p3000-remote-token.sandbox.watasuhost.com')
 })
 
 test('sandbox exposes compatibility aliases without destroying local state', async () => {

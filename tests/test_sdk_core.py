@@ -63,6 +63,15 @@ def test_connection_config_accepts_access_token_alias(monkeypatch):
     assert config.auth_headers["Authorization"] == "Bearer alias-key"
 
 
+def test_connection_config_accepts_sandbox_url_override(monkeypatch):
+    monkeypatch.delenv("WATASU_SANDBOX_URL", raising=False)
+
+    config = ConnectionConfig(api_key="key", sandbox_url="http://localhost:49983")
+
+    assert config.sandbox_url == "http://localhost:49983"
+    assert config.get_api_params()["sandbox_url"] == "http://localhost:49983"
+
+
 def test_public_team_ref_signatures_are_explicit():
     assert "team" in inspect.signature(Sandbox.create).parameters
     assert "team" in inspect.signature(Sandbox.list).parameters
@@ -352,6 +361,34 @@ def test_get_host_returns_host_only():
         sandbox={},
     )
 
+    assert sbx.get_host(8000) == "p8000-token.sandbox.watasuhost.com"
+    assert calls == ["/sandboxes/123/ports/8000"]
+
+
+def test_sandbox_url_override_replaces_data_plane_url_without_changing_public_hosts():
+    config = ConnectionConfig(api_key="key", sandbox_url="http://localhost:49983")
+    calls = []
+
+    class Control:
+        def get(self, path, **kwargs):
+            calls.append(path)
+            return {
+                "sandbox_port": {"url": "https://p8000-token.sandbox.watasuhost.com"}
+            }
+
+    sbx = Sandbox(
+        "123",
+        connection_config=config,
+        control=Control(),
+        session={
+            "data_plane_url": "https://token.sandbox.watasuhost.com",
+            "token": "data",
+        },
+        sandbox={},
+    )
+
+    assert sbx.envd_api_url == "http://localhost:49983"
+    assert sbx._require_data_plane().base_url == "http://localhost:49983"
     assert sbx.get_host(8000) == "p8000-token.sandbox.watasuhost.com"
     assert calls == ["/sandboxes/123/ports/8000"]
 

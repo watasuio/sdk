@@ -724,6 +724,7 @@ export class Sandbox {
     return {
       apiKey: this.config.apiKey,
       apiUrl: this.config.apiUrl,
+      sandboxUrl: this.config.sandboxUrl,
       dataPlaneDomain: this.config.dataPlaneDomain,
       requestTimeoutMs: this.config.requestTimeoutMs,
       headers: this.config.headers,
@@ -738,7 +739,7 @@ export class Sandbox {
 function dataPlaneFromSession(session: unknown, config: ConnectionConfig): DataPlaneClient {
   const item = record(session)
   const token = item.token ?? item.access_token
-  const url = item.data_plane_url
+  const url = config.sandboxUrl ?? item.data_plane_url
   if (!session) throw new SandboxError('sandbox session is required for data-plane operations')
   if (typeof token !== 'string' || typeof url !== 'string') {
     throw new SandboxError('sandbox session did not include data_plane_url and token')

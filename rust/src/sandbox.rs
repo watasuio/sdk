@@ -886,12 +886,13 @@ fn data_plane_from_session(
         .ok_or_else(|| {
             Error::Sandbox("sandbox session did not include data_plane_url and token".into())
         })?;
-    let url = session
+    let session_url = session
         .get("data_plane_url")
         .and_then(Value::as_str)
-        .ok_or_else(|| {
-            Error::Sandbox("sandbox session did not include data_plane_url and token".into())
-        })?;
+        .map(str::to_string);
+    let url = config.sandbox_url.clone().or(session_url).ok_or_else(|| {
+        Error::Sandbox("sandbox session did not include data_plane_url and token".into())
+    })?;
     DataPlaneClient::new(url.to_string(), token.to_string(), config)
 }
 
@@ -1173,12 +1174,13 @@ fn host_only(value: &str) -> String {
 mod tests {
     use serde_json::{json, Value};
 
+    use crate::config::{ConnectionConfig, ConnectionOptions};
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
     use super::{
-        metrics_list, network_payload, put_if_non_empty_volume_mounts, sandbox_info,
-        sandbox_list_path, sandbox_network_path, snapshot_info, snapshot_list_path, ListOptions,
-        NetworkUpdateOptions, SandboxListQuery, SnapshotListOptions, VolumeMount,
+        data_plane_from_session, metrics_list, network_payload, put_if_non_empty_volume_mounts,
+        sandbox_info, sandbox_list_path, sandbox_network_path, snapshot_info, snapshot_list_path,
+        ListOptions, NetworkUpdateOptions, SandboxListQuery, SnapshotListOptions, VolumeMount,
     };
 
     #[test]
@@ -1302,6 +1304,24 @@ mod tests {
             path,
             "/sandboxes?team=watasu&limit=1&next_token=2&query%5Bmetadata%5D%5Bpurpose%5D=ci&query%5Bstate%5D%5B%5D=running"
         );
+    }
+
+    #[test]
+    fn sandbox_url_override_replaces_session_data_plane_url() {
+        let config = ConnectionConfig::new(ConnectionOptions {
+            sandbox_url: Some("http://localhost:49983".to_string()),
+            ..Default::default()
+        });
+        let client = data_plane_from_session(
+            Some(&json!({
+                "data_plane_url": "https://token.sandbox.watasuhost.com",
+                "token": "data"
+            })),
+            &config,
+        )
+        .expect("data-plane client");
+
+        assert_eq!(client.base_url, "http://localhost:49983");
     }
 
     #[test]

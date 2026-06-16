@@ -13,6 +13,8 @@ export interface ConnectionOpts {
   accessToken?: string
   domain?: string
   apiUrl?: string
+  /** Absolute sandbox data-plane URL override, primarily for local runtimes. */
+  sandboxUrl?: string
   dataPlaneDomain?: string
   requestTimeoutMs?: number
   headers?: Record<string, string>
@@ -27,6 +29,8 @@ export class ConnectionConfig {
   readonly apiKey?: string
   readonly domain: string
   readonly apiUrl: string
+  /** Absolute sandbox data-plane URL override, primarily for local runtimes. */
+  readonly sandboxUrl?: string
   readonly dataPlaneDomain: string
   readonly requestTimeoutMs: number
   readonly headers: Record<string, string>
@@ -44,6 +48,9 @@ export class ConnectionConfig {
     this.domain = opts.domain ?? env.WATASU_DOMAIN ?? 'watasu.io'
     this.apiUrl =
       opts.apiUrl ?? env.WATASU_API_URL ?? `https://api.${this.domain}/v1`
+    this.sandboxUrl =
+      opts.sandboxUrl ??
+      env.WATASU_SANDBOX_URL
     this.dataPlaneDomain =
       opts.dataPlaneDomain ??
       env.WATASU_DATA_PLANE_DOMAIN ??

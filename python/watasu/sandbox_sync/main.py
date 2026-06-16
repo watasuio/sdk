@@ -808,7 +808,7 @@ class Sandbox(SandboxBase):
                 "sandbox session is required for data-plane operations"
             )
         token = session.get("token") or session.get("access_token")
-        url = session.get("data_plane_url")
+        url = self.connection_config.sandbox_url or session.get("data_plane_url")
         if not token or not url:
             raise SandboxException(
                 "sandbox session did not include data_plane_url and token"
