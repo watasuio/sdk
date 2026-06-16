@@ -21,6 +21,7 @@ export type TerminalOpts = {
   cwd?: string
   envs?: Record<string, string>
   timeoutMs?: number
+  requestTimeoutMs?: number
 }
 
 /** A running terminal session in a sandbox. */
@@ -50,7 +51,9 @@ export class Terminal {
   }
 
   private async waitOnce(): Promise<TerminalOutput> {
-    await this.handle.wait().catch((error) => {
+    await this.handle.wait().then((result) => {
+      if (this.output.data.length === 0 && result.stdout) this.output.addData(result.stdout)
+    }).catch((error) => {
       if (typeof error?.stdout === 'string') this.output.addData(error.stdout)
       else throw error
     })
@@ -79,6 +82,7 @@ export class TerminalManager {
       envs: opts.envs,
       size: opts.size,
       timeoutMs: opts.timeoutMs,
+      requestTimeoutMs: opts.requestTimeoutMs,
       onData: async (bytes) => {
         const data = new TextDecoder().decode(bytes)
         output.addData(data)

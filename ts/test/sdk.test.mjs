@@ -35,6 +35,7 @@ import {
   WatchHandle,
   ReadyCmd,
   Template,
+  TerminalManager,
   TemplateError,
   Volume,
   VolumeConnectionConfig,
@@ -260,6 +261,21 @@ test('command handle treats pty frames as terminal output', async () => {
 
   assert.equal(result.stdout, 'term\n')
   assert.deepEqual(seen, ['term\n'])
+})
+
+test('terminal manager preserves captured handle stdout', async () => {
+  async function* frames() {
+    yield { type: 'stdout', data: base64Encode('terminal-ok') }
+    yield { type: 'exit', exit_code: 0 }
+  }
+  const socket = { close() {} }
+  const pty = {
+    create: async () => new CommandHandle(123, socket, async () => true, frames()),
+  }
+
+  const terminal = await new TerminalManager(pty).start({ cmd: 'printf terminal-ok' })
+
+  assert.equal((await terminal.wait()).data, 'terminal-ok')
 })
 
 test('command handle can close stdin without disconnecting', async () => {
