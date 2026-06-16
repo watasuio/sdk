@@ -174,6 +174,7 @@ export type {
   TemplateTag,
   TemplateTagInfo,
 } from './template.js'
+export type { components, paths } from './index.js'
 
 export type RunCodeLanguage =
   | 'python'
@@ -539,6 +540,8 @@ export class Sandbox extends BaseSandbox {
     })
   }
 }
+
+export { Sandbox as default }
 
 function executionFromApi(payload: Record<string, unknown>): Execution {
   const execution = record(payload.execution ?? payload)

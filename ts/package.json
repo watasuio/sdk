@@ -1,6 +1,6 @@
 {
   "name": "@watasu/sdk",
-  "version": "0.1.43",
+  "version": "0.1.44",
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "description": "TypeScript SDK for Watasu",
@@ -23,7 +23,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/*.mjs"
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test test/*.mjs"
   },
   "dependencies": {
     "ws": "^8.18.3"

@@ -49,6 +49,7 @@ import {
   waitForTimeout,
   waitForURL,
 } from '../dist/index.js'
+import DefaultSandbox from '../dist/index.js'
 import { errorFromResponse } from '../dist/errors.js'
 import {
   ConnectionConfig as CodeInterpreterConnectionConfig,
@@ -60,6 +61,7 @@ import {
   ScaleType,
   Template as CodeInterpreterTemplate,
 } from '../dist/codeInterpreter.js'
+import DefaultCodeInterpreterSandbox from '../dist/codeInterpreter.js'
 
 test('connection config defaults to Watasu hosts', () => {
   const config = new ConnectionConfig({ apiKey: 'key' })
@@ -70,6 +72,7 @@ test('connection config defaults to Watasu hosts', () => {
 
 test('core package exposes reference-compatible runtime symbols', async () => {
   assert.equal(ALL_TRAFFIC, '0.0.0.0/0')
+  assert.equal(DefaultSandbox, Sandbox)
   assert.equal(FilesystemEventType.WRITE, 'write')
   assert.equal(VolumeFileType.FILE, 'file')
   assert.equal(VolumeConnectionConfig, ConnectionConfig)
@@ -773,6 +776,7 @@ test('code interpreter sandbox create defaults to code-interpreter template', as
 
 test('code interpreter package re-exports core SDK helpers', () => {
   assert.equal(CodeInterpreterConnectionConfig, ConnectionConfig)
+  assert.equal(DefaultCodeInterpreterSandbox, CodeInterpreterSandbox)
   assert.equal(CodeInterpreterTemplate, Template)
   assert.equal(CodeInterpreterPty, Pty)
   assert.equal(CodeInterpreterSandbox.defaultTemplate, 'code-interpreter')

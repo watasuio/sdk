@@ -186,3 +186,16 @@ export type {
   TemplateTag,
   TemplateTagInfo,
 } from './template.js'
+
+export interface components {
+  schemas: Record<string, unknown>
+  responses: Record<string, unknown>
+  parameters: Record<string, unknown>
+  requestBodies: Record<string, unknown>
+  headers: Record<string, unknown>
+  pathItems: Record<string, unknown>
+}
+
+export type paths = Record<string, unknown>
+
+export { Sandbox as default } from './sandbox.js'
