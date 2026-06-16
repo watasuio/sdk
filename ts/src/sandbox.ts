@@ -585,11 +585,6 @@ export class Sandbox {
     return Sandbox.deleteSnapshot(snapshotId, { ...this.configOptions(), ...opts })
   }
 
-  /** Watasu-native alias for `createSnapshot`. */
-  async checkpoint(opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
-    return this.createSnapshot(opts)
-  }
-
   /** List checkpoints for this sandbox using snapshot naming. */
   listSnapshots(opts: Omit<SnapshotListOpts, 'sandboxId'> = {}): SnapshotPaginator {
     return Sandbox.listSnapshots({ ...this.configOptions(), ...opts, sandboxId: this.sandboxId })

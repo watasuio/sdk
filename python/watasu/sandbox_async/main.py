@@ -1395,10 +1395,6 @@ class AsyncSandbox:
         _create_snapshot_instance, _create_snapshot_class
     )
 
-    async def checkpoint(self, *args, **kwargs) -> SnapshotInfo:
-        """Watasu-native alias for ``create_snapshot``."""
-        return await self.create_snapshot(*args, **kwargs)
-
     def _list_snapshots_instance(self, **opts: ApiParams) -> AsyncSnapshotPaginator:
         """List checkpoints for this sandbox using snapshot naming."""
         return AsyncSnapshotPaginator(lambda: self._sync.list_snapshots(**opts))

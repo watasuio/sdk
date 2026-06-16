@@ -416,6 +416,7 @@ test('sandbox exposes helper modules without destroying local state', () => {
   assert.equal(sbx.id, '1')
   assert.equal(typeof sbx.process.start, 'function')
   assert.equal(typeof sbx.terminal.start, 'function')
+  assert.equal('checkpoint' in sbx, false)
   assert.equal(sbx.getHost(8080), 'p8080-derived-token.sandbox.watasuhost.com')
 })
 

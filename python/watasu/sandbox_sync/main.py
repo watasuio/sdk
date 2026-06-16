@@ -518,10 +518,6 @@ class Sandbox(SandboxBase):
 
     create_snapshot = _DualMethod(_create_snapshot_instance, _create_snapshot_class)
 
-    def checkpoint(self, *args, **kwargs):
-        """Watasu-native alias for ``create_snapshot``."""
-        return self.create_snapshot(*args, **kwargs)
-
     def _list_snapshots_instance(
         self,
         limit: Optional[int] = None,

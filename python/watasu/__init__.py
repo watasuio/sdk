@@ -82,18 +82,16 @@ from .sandbox_sync.filesystem.watch_handle import WatchHandle
 from .sandbox_sync.git import Git, GitBranches, GitCommandResult, GitFileStatus, GitStatus
 from .sandbox_sync.main import Sandbox
 from .sandbox_sync.paginator import SandboxPaginator, SnapshotPaginator
-from .stubs import (
-    CopyItem,
-    LogEntryEnd,
-    LogEntryLevel,
-    LogEntryStart,
-    OutputHandler,
-)
 from .template import (
     AsyncTemplate,
     BuildInfo,
     BuildStatusReason,
+    CopyItem,
     LogEntry,
+    LogEntryEnd,
+    LogEntryLevel,
+    LogEntryStart,
+    OutputHandler,
     ReadyCmd,
     Template,
     TemplateBase,

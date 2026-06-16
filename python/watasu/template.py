@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, TypedDict, Union
 
 from watasu._transport.control import ControlClient
 from watasu.connection_config import ApiParams, ConnectionConfig
@@ -34,6 +34,49 @@ class LogEntry:
     timestamp: Optional[datetime]
     level: str
     message: str
+
+    def __str__(self) -> str:
+        timestamp = self.timestamp.isoformat() if self.timestamp else ""
+        return f"[{timestamp}] [{self.level}] {self.message}"
+
+
+class LogEntryStart(LogEntry):
+    """Log entry emitted when a blocking template build starts."""
+
+    def __init__(
+        self,
+        timestamp: Optional[datetime] = None,
+        message: str = "Build started",
+    ):
+        super().__init__(timestamp or datetime.now(), "debug", message)
+
+
+class LogEntryEnd(LogEntry):
+    """Log entry emitted when a blocking template build finishes."""
+
+    def __init__(
+        self,
+        timestamp: Optional[datetime] = None,
+        message: str = "Build finished",
+    ):
+        super().__init__(timestamp or datetime.now(), "debug", message)
+
+
+LogEntryLevel = str
+OutputHandler = Callable[[Any], Any]
+
+
+class CopyItem(TypedDict, total=False):
+    """Copy item accepted by ``Template.copy_items``."""
+
+    src: Union[str, List[str]]
+    dest: str
+    force_upload: bool
+    forceUpload: bool
+    user: str
+    mode: int
+    resolve_symlinks: bool
+    resolveSymlinks: bool
 
 
 @dataclass
@@ -509,17 +552,23 @@ class Template(TemplateBase):
         **opts: ApiParams,
     ) -> BuildInfo:
         """Build a Watasu template and wait until the build finishes."""
-        build_info = Template.build_in_background(
-            template,
-            alias,
-            cpu_count=cpu_count,
-            memory_mb=memory_mb,
-            skip_cache=skip_cache,
-            on_build_logs=on_build_logs,
-            **opts,
-        )
-        _wait_for_build_finish(build_info, on_build_logs=on_build_logs, **opts)
-        return build_info
+        if on_build_logs:
+            on_build_logs(LogEntryStart())
+        try:
+            build_info = Template.build_in_background(
+                template,
+                alias,
+                cpu_count=cpu_count,
+                memory_mb=memory_mb,
+                skip_cache=skip_cache,
+                on_build_logs=on_build_logs,
+                **opts,
+            )
+            _wait_for_build_finish(build_info, on_build_logs=on_build_logs, **opts)
+            return build_info
+        finally:
+            if on_build_logs:
+                on_build_logs(LogEntryEnd())
 
     @staticmethod
     def build_in_background(
@@ -737,9 +786,20 @@ def wait_for_url(url: str, status_code: int = 200) -> ReadyCmd:
     )
 
 
-def default_build_logger(entry: LogEntry) -> None:
-    """Print a build log entry."""
-    print(f"[{entry.level}] {entry.message}")
+def default_build_logger(
+    min_level: Optional[LogEntryLevel] = None,
+) -> Callable[[LogEntry], None]:
+    """Return a logger function for template build log entries."""
+
+    order = {"debug": 0, "info": 1, "warn": 2, "error": 3}
+    min_level = min_level or "info"
+
+    def logger(entry: LogEntry) -> None:
+        if order.get(entry.level, order["info"]) < order.get(min_level, order["info"]):
+            return
+        print(str(entry))
+
+    return logger
 
 
 def _wait_for_build_finish(

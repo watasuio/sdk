@@ -20,6 +20,9 @@ from watasu import (
     CommandResult,
     ConnectionConfig,
     ConflictException,
+    LogEntry,
+    LogEntryEnd,
+    LogEntryStart,
     Sandbox,
     SandboxBase,
     SandboxException,
@@ -29,6 +32,7 @@ from watasu import (
     Volume,
     AsyncVolume,
     TemplateBuildStatus,
+    default_build_logger,
     get_signature,
     wait_for_timeout,
 )
@@ -126,6 +130,8 @@ def test_connection_config_exposes_watasu_sandbox_host_helpers():
 def test_public_team_ref_signatures_are_explicit():
     assert AsyncSandbox.mcp_port == Sandbox.mcp_port
     assert AsyncSandbox.default_sandbox_timeout == Sandbox.default_sandbox_timeout
+    assert not hasattr(Sandbox, "checkpoint")
+    assert not hasattr(AsyncSandbox, "checkpoint")
     assert "team" in inspect.signature(Sandbox.create).parameters
     assert "team" in inspect.signature(Sandbox.list).parameters
     assert "team" in inspect.signature(AsyncSandbox.create).parameters
@@ -173,6 +179,20 @@ def test_code_interpreter_package_re_exports_core_sdk_helpers():
     assert isinstance(
         ci_exceptions.format_execution_timeout_error(), watasu.TimeoutException
     )
+
+
+def test_template_logger_exports_are_real_helpers(capsys):
+    logger = default_build_logger(min_level="debug")
+    start = LogEntryStart(message="start")
+    end = LogEntryEnd(message="end")
+
+    assert callable(logger)
+    assert start.level == "debug"
+    assert end.level == "debug"
+
+    logger(LogEntry(timestamp=None, level="info", message="hello"))
+
+    assert "[info] hello" in capsys.readouterr().out
 
 
 def test_code_interpreter_result_matches_chart_and_mapping_helpers():
