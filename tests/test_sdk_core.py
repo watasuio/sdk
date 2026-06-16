@@ -60,6 +60,7 @@ def test_connection_config_defaults_to_watasu_hosts(monkeypatch):
     monkeypatch.setenv("WATASU_API_KEY", "key")
     config = ConnectionConfig()
 
+    assert ConnectionConfig.envd_port == 49983
     assert config.api_key == "key"
     assert config.api_url == "https://api.watasu.io/v1"
     assert config.data_plane_domain == "watasuhost.com"
@@ -73,6 +74,15 @@ def test_connection_config_accepts_access_token_alias(monkeypatch):
 
     assert config.api_key == "alias-key"
     assert config.auth_headers["Authorization"] == "Bearer alias-key"
+
+
+def test_connection_config_zero_request_timeout_disables_timeout():
+    config = ConnectionConfig(api_key="key", request_timeout=0)
+
+    assert config.request_timeout is None
+    assert config.get_request_timeout() is None
+    assert config.get_request_timeout(0) is None
+    assert config.get_request_timeout(2) == 2.0
 
 
 def test_connection_config_accepts_sandbox_url_override(monkeypatch):
@@ -128,6 +138,8 @@ def test_template_sync_and_async_import_paths_match_top_level_exports():
     assert TemplateSyncMain is Template
     assert TemplateAsyncExport is AsyncTemplate
     assert TemplateAsyncMain is AsyncTemplate
+    assert watasu.template_sync.Template is Template
+    assert watasu.template_async.AsyncTemplate is AsyncTemplate
 
 
 def test_code_interpreter_package_re_exports_core_sdk_helpers():

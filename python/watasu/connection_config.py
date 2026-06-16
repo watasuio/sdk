@@ -39,7 +39,9 @@ class ConnectionConfig:
 
     api_key: Optional[str] = None
     domain: Optional[str] = None
-    request_timeout: float = 60
+    envd_port = 49983
+
+    request_timeout: Optional[float] = 60
     headers: Dict[str, str] = field(default_factory=dict)
     extra_sandbox_headers: Dict[str, str] = field(default_factory=dict)
     proxy: Optional[ProxyTypes] = None
@@ -78,11 +80,12 @@ class ConnectionConfig:
         self.sandbox_url = (
             sandbox_url or os.environ.get("WATASU_SANDBOX_URL") or None
         )
-        self.request_timeout = (
-            float(request_timeout)
-            if request_timeout is not None
-            else float(os.environ.get("WATASU_REQUEST_TIMEOUT", "60"))
-        )
+        if request_timeout == 0:
+            self.request_timeout = None
+        elif request_timeout is not None:
+            self.request_timeout = float(request_timeout)
+        else:
+            self.request_timeout = float(os.environ.get("WATASU_REQUEST_TIMEOUT", "60"))
         self.headers = dict(headers or {})
         self.extra_sandbox_headers = dict(extra_sandbox_headers or {})
         self.proxy = proxy
@@ -92,11 +95,13 @@ class ConnectionConfig:
             else os.environ.get("WATASU_DEBUG", "").lower() in {"1", "true", "yes"}
         )
 
-    def get_request_timeout(self, request_timeout: Optional[float] = None) -> float:
+    def get_request_timeout(
+        self, request_timeout: Optional[float] = None
+    ) -> Optional[float]:
         """Return the effective timeout in seconds for one HTTP request."""
-        return (
-            self.request_timeout if request_timeout is None else float(request_timeout)
-        )
+        if request_timeout == 0:
+            return None
+        return self.request_timeout if request_timeout is None else float(request_timeout)
 
     def get_api_params(self, **overrides: Any) -> Dict[str, Any]:
         """Return constructor kwargs that preserve this config with optional overrides."""

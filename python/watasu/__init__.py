@@ -3,6 +3,7 @@
 The public sync surface talks to Watasu REST and WebSocket runtime endpoints.
 """
 
+from . import template_async, template_sync
 from .api import ApiClient, client
 from .connection_config import ApiParams, ConnectionConfig, ProxyTypes, Username
 from .exceptions import (
@@ -224,6 +225,8 @@ __all__ = [
     "client",
     "default_build_logger",
     "get_signature",
+    "template_async",
+    "template_sync",
     "wait_for_file",
     "wait_for_port",
     "wait_for_process",
