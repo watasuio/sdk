@@ -561,6 +561,11 @@ export class Sandbox {
     return sandboxInfo(record(payload.sandbox ?? payload))
   }
 
+  /** Fetch full control-plane metadata for a sandbox by id. */
+  static async getFullInfo(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxInfo> {
+    return this.getInfo(sandboxId, opts)
+  }
+
   /** Fetch the latest control-plane metadata for this sandbox. */
   async getInfo(opts: SandboxRequestOpts = {}): Promise<SandboxInfo> {
     const payload = await this.control.get(`/sandboxes/${this.sandboxId}`, {

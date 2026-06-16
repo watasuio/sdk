@@ -694,6 +694,37 @@ test('sandbox create uses root snake_case API payload', async () => {
   }
 })
 
+test('sandbox getFullInfo aliases getInfo', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push({ url: String(url), method: init.method })
+      return new Response(
+        JSON.stringify({
+          sandbox: {
+            id: 'full-info',
+            sandbox_id: 'full-info',
+            template_id: 'base',
+            state: 'ready',
+            metadata: { purpose: 'test' },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const info = await Sandbox.getFullInfo('full-info', { apiKey: 'key' })
+
+    assert.equal(info.sandboxId, 'full-info')
+    assert.deepEqual(requests, [
+      { url: 'https://api.watasu.io/v1/sandboxes/full-info', method: 'GET' },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('sandbox create rejects lifecycle autoResume without pause timeout', async () => {
   await assert.rejects(
     Sandbox.create({

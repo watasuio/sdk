@@ -80,6 +80,7 @@ test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_
     assert.equal(typeof sbx.id, 'string')
     assert.equal(await sbx.isRunning({ requestTimeoutMs }), true)
     assert.equal((await Sandbox.getInfo(sbx.id, { requestTimeoutMs })).sandboxId, sbx.id)
+    assert.equal((await Sandbox.getFullInfo(sbx.id, { requestTimeoutMs })).sandboxId, sbx.id)
     assert.equal((await sbx.getInfo({ requestTimeoutMs })).sandboxId, sbx.id)
     await Sandbox.setTimeout(sbx.id, 300_000, { requestTimeoutMs })
     await sbx.setTimeout(300_000, { requestTimeoutMs })
