@@ -100,11 +100,17 @@ export interface SandboxInfo {
   templateId?: string
   name?: string
   state?: string
+  cpuCount?: number
+  memoryMB?: number
+  envdVersion?: string
+  allowInternetAccess?: boolean
+  network?: SandboxNetworkInfo
+  sandboxDomain?: string
   lifecycle?: SandboxInfoLifecycle
   volumeMounts?: Array<{ name: string; path: string }>
   metadata: Record<string, string>
-  startedAt?: string
-  endAt?: string
+  startedAt?: Date
+  endAt?: Date
 }
 
 export interface SandboxInfoLifecycle {
@@ -126,11 +132,18 @@ type SandboxConnectionDetails = {
 }
 
 export interface SandboxMetrics {
+  timestamp?: Date
   sandboxId?: string
   state?: string
   node?: string
   backend?: string
   cpuCount?: number
+  cpuUsedPct?: number
+  memUsed?: number
+  memTotal?: number
+  memCache?: number
+  diskUsed?: number
+  diskTotal?: number
   memoryMb?: number
   raw: Record<string, unknown>
 }
@@ -144,6 +157,7 @@ export interface SandboxMetricsOpts extends ConnectionOpts {
 
 export interface SnapshotInfo {
   snapshotId: string
+  names: string[]
   sandboxId?: string
   name?: string
   status?: string
@@ -923,15 +937,17 @@ function sandboxInfo(payload: Record<string, unknown>): SandboxInfo {
     templateId: typeof payload.template_id === 'string' ? payload.template_id : templateSlug(payload.template),
     name: typeof payload.name === 'string' ? payload.name : undefined,
     state: typeof payload.state === 'string' ? payload.state : undefined,
+    cpuCount: numberValue(payload.cpu_count ?? payload.cpuCount),
+    memoryMB: numberValue(payload.memory_mb ?? payload.memoryMB ?? payload.memoryMb),
+    envdVersion: stringValue(payload.envd_version ?? payload.envdVersion),
+    allowInternetAccess: booleanValue(payload.allow_internet_access ?? payload.allowInternetAccess),
+    network: sandboxNetworkInfo(payload.network),
+    sandboxDomain: stringValue(payload.sandbox_domain ?? payload.sandboxDomain),
     lifecycle: sandboxLifecycleInfo(payload.lifecycle),
     volumeMounts: volumeMountsInfo(payload.volume_mounts ?? payload.volumeMounts),
     metadata: recordOfStrings(payload.metadata),
-    startedAt: typeof payload.started_at === 'string'
-      ? payload.started_at
-      : typeof payload.created_at === 'string' ? payload.created_at : undefined,
-    endAt: typeof payload.end_at === 'string'
-      ? payload.end_at
-      : typeof payload.deadline_at === 'string' ? payload.deadline_at : undefined,
+    startedAt: dateValue(payload.started_at ?? payload.startedAt ?? payload.created_at ?? payload.createdAt ?? payload.ready_at ?? payload.readyAt),
+    endAt: dateValue(payload.end_at ?? payload.endAt ?? payload.deadline_at ?? payload.deadlineAt),
   }
 }
 
@@ -975,6 +991,11 @@ function sandboxLifecycleInfo(value: unknown): SandboxInfoLifecycle | undefined 
   }
 }
 
+function sandboxNetworkInfo(value: unknown): SandboxNetworkInfo | undefined {
+  const item = record(value)
+  return Object.keys(item).length > 0 ? item as SandboxNetworkInfo : undefined
+}
+
 function metricsList(value: unknown): SandboxMetrics[] {
   if (Array.isArray(value)) return value.map((item) => metricsInfo(record(item)))
   return [metricsInfo(record(value))]
@@ -982,11 +1003,18 @@ function metricsList(value: unknown): SandboxMetrics[] {
 
 function metricsInfo(value: Record<string, unknown>): SandboxMetrics {
   return {
+    timestamp: dateValue(value.timestamp ?? value.time ?? value.created_at ?? value.createdAt),
     sandboxId: stringValue(value.sandbox_id ?? value.sandboxId),
     state: stringValue(value.state),
     node: stringValue(value.node),
     backend: stringValue(value.backend),
     cpuCount: numberValue(value.cpu_count ?? value.cpuCount),
+    cpuUsedPct: numberValue(value.cpu_used_pct ?? value.cpuUsedPct ?? value.cpu_pct ?? value.cpuPct),
+    memUsed: numberValue(value.mem_used ?? value.memUsed ?? value.memory_used ?? value.memoryUsed),
+    memTotal: numberValue(value.mem_total ?? value.memTotal ?? value.memory_total ?? value.memoryTotal),
+    memCache: numberValue(value.mem_cache ?? value.memCache ?? value.memory_cache ?? value.memoryCache),
+    diskUsed: numberValue(value.disk_used ?? value.diskUsed),
+    diskTotal: numberValue(value.disk_total ?? value.diskTotal),
     memoryMb: numberValue(value.memory_mb ?? value.memoryMb),
     raw: value,
   }
@@ -1004,10 +1032,12 @@ function snapshotPayload(opts: CreateSnapshotOpts): Record<string, unknown> {
 function snapshotInfo(value: Record<string, unknown>): SnapshotInfo {
   const id = value.snapshot_id ?? value.snapshotId ?? value.checkpoint_id ?? value.checkpointId ?? value.id
   if (id === undefined) throw new SandboxError('snapshot response did not include id')
+  const name = stringValue(value.name)
   return {
     snapshotId: String(id),
+    names: arrayOfStrings(value.names ?? value.name ?? value.snapshot_names ?? value.snapshotNames),
     sandboxId: stringValue(value.sandbox_id ?? value.sandboxId),
-    name: stringValue(value.name),
+    name,
     status: stringValue(value.status),
     sizeBytes: numberValue(value.size_bytes ?? value.sizeBytes),
     createdAt: stringValue(value.created_at ?? value.createdAt),
@@ -1022,8 +1052,23 @@ function stringValue(value: unknown): string | undefined {
   return undefined
 }
 
+function arrayOfStrings(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String)
+  if (value === undefined || value === null || value === '') return []
+  return [String(value)]
+}
+
 function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
+}
+
+function dateValue(value: unknown): Date | undefined {
+  if (value instanceof Date) return value
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  return undefined
 }
 
 function booleanValue(value: unknown): boolean | undefined {

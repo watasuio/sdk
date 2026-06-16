@@ -582,7 +582,20 @@ test('filesystem write overload accepts batches and browser data objects', async
   const fs = new Filesystem({
     putJson(path, body, opts) {
       calls.push(['put', path, Array.from(body), opts])
-      return Promise.resolve({ file: { path: '/tmp/a.txt', name: 'a.txt', type: 'file', bytes: body.byteLength } })
+      return Promise.resolve({
+        file: {
+          path: '/tmp/a.txt',
+          name: 'a.txt',
+          type: 'file',
+          bytes: body.byteLength,
+          mode: 0o644,
+          permissions: 'rw-r--r--',
+          owner: 'sandbox',
+          group: 'sandbox',
+          modified_time: '2026-01-01T00:00:00Z',
+          symlink_target: '/tmp/target.txt',
+        },
+      })
     },
     postJson(path, opts) {
       calls.push(['post', path, opts])
@@ -610,6 +623,11 @@ test('filesystem write overload accepts batches and browser data objects', async
   ])
 
   assert.equal(blobWritten.size, 3)
+  assert.equal(blobWritten.permissions, 'rw-r--r--')
+  assert.equal(blobWritten.owner, 'sandbox')
+  assert.equal(blobWritten.group, 'sandbox')
+  assert.equal(blobWritten.modifiedTime.toISOString(), '2026-01-01T00:00:00.000Z')
+  assert.equal(blobWritten.symlinkTarget, '/tmp/target.txt')
   assert.deepEqual(batchWritten.map((item) => item.path), ['/tmp/b.txt', '/tmp/c.bin'])
   assert.deepEqual(calls, [
     ['put', '/runtime/v1/files?path=%2Ftmp%2Fa.txt', [97, 98, 99], {}],
@@ -1601,26 +1619,54 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
       requests.push({ url: String(url), method: init.method, body: init.body ? JSON.parse(init.body) : undefined })
       if (new URL(String(url)).pathname.endsWith('/metrics')) {
         return new Response(
-          JSON.stringify({ metrics: { sandbox_id: '1', state: 'ready', backend: 'firecracker' } }),
+          JSON.stringify({
+            metrics: {
+              sandbox_id: '1',
+              state: 'ready',
+              backend: 'firecracker',
+              timestamp: '2026-01-01T00:00:00Z',
+              cpu_count: 2,
+              cpu_used_pct: 12.5,
+              mem_used: 1024,
+              mem_total: 2048,
+              mem_cache: 256,
+              disk_used: 4096,
+              disk_total: 8192,
+            },
+          }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
       }
       if (String(url).endsWith('/snapshots') && init.method === 'POST') {
         return new Response(
-          JSON.stringify({ sandbox_checkpoint: { id: 9, sandbox_id: '1', name: 'ready', status: 'pending' } }),
+          JSON.stringify({ sandbox_checkpoint: { id: 9, sandbox_id: '1', name: 'ready', names: ['watasu/ready:latest'], status: 'pending' } }),
           { status: 202, headers: { 'content-type': 'application/json' } }
         )
       }
       const parsedUrl = new URL(String(url))
       if (parsedUrl.pathname.endsWith('/sandbox_snapshots') && init.method === 'GET') {
         return new Response(
-          JSON.stringify({ snapshots: [{ id: 9, sandbox_id: '1', name: 'ready', status: 'ready' }] }),
+          JSON.stringify({ snapshots: [{ id: 9, sandbox_id: '1', name: 'ready', names: ['watasu/ready:latest'], status: 'ready' }] }),
           { status: 200, headers: { 'content-type': 'application/json' } }
         )
       }
       if (String(url).endsWith('/restore')) {
         return new Response(
-          JSON.stringify({ sandbox: { id: 'restored', state: 'restoring', template_id: 'base' } }),
+          JSON.stringify({
+            sandbox: {
+              id: 'restored',
+              state: 'restoring',
+              template_id: 'base',
+              cpu_count: 2,
+              memory_mb: 512,
+              envd_version: '0.6.3',
+              allow_internet_access: true,
+              sandbox_domain: 'sandbox.watasuhost.com',
+              network: { allow_internet_access: true },
+              started_at: '2026-01-01T00:00:00Z',
+              end_at: '2026-01-01T00:05:00Z',
+            },
+          }),
           { status: 202, headers: { 'content-type': 'application/json' } }
         )
       }
@@ -1669,9 +1715,27 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
     const cachedMcpToken = await sbx.getMcpToken()
 
     assert.equal(metrics[0].backend, 'firecracker')
+    assert.equal(metrics[0].timestamp.toISOString(), '2026-01-01T00:00:00.000Z')
+    assert.equal(metrics[0].cpuCount, 2)
+    assert.equal(metrics[0].cpuUsedPct, 12.5)
+    assert.equal(metrics[0].memUsed, 1024)
+    assert.equal(metrics[0].memTotal, 2048)
+    assert.equal(metrics[0].memCache, 256)
+    assert.equal(metrics[0].diskUsed, 4096)
+    assert.equal(metrics[0].diskTotal, 8192)
     assert.equal(snapshot.snapshotId, '9')
+    assert.deepEqual(snapshot.names, ['watasu/ready:latest'])
     assert.equal(snapshots[0].status, 'ready')
+    assert.deepEqual(snapshots[0].names, ['watasu/ready:latest'])
     assert.equal(restored.sandboxId, 'restored')
+    assert.equal(restored.cpuCount, 2)
+    assert.equal(restored.memoryMB, 512)
+    assert.equal(restored.envdVersion, '0.6.3')
+    assert.equal(restored.allowInternetAccess, true)
+    assert.equal(restored.sandboxDomain, 'sandbox.watasuhost.com')
+    assert.deepEqual(restored.network, { allow_internet_access: true })
+    assert.equal(restored.startedAt.toISOString(), '2026-01-01T00:00:00.000Z')
+    assert.equal(restored.endAt.toISOString(), '2026-01-01T00:05:00.000Z')
     assert.equal(deleted, true)
     assert.equal(uploadUrl, 'https://signed.example/tmp/a.txt')
     assert.equal(rootUploadUrl, 'https://signed.example')

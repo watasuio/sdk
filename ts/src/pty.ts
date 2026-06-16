@@ -1,5 +1,5 @@
-import { CommandHandle, CommandStartOpts } from './commands.js'
-import { ConnectionConfig, type ConnectionOpts } from './connectionConfig.js'
+import { CommandHandle } from './commands.js'
+import { ConnectionConfig, type ConnectionOpts, type Username } from './connectionConfig.js'
 import { ProcessFrame, ProcessSocket } from './processSocket.js'
 import { DataPlaneClient } from './transport.js'
 import { SandboxError } from './errors.js'
@@ -9,12 +9,17 @@ export interface PtySize {
   rows: number
 }
 
-export interface PtyCreateOpts extends Omit<CommandStartOpts, 'background' | 'onStdout' | 'onStderr'> {
+export interface PtyCreateOpts extends Pick<ConnectionOpts, 'requestTimeoutMs' | 'signal'> {
   cols?: number
   rows?: number
   size?: PtySize
   cmd?: string
+  cwd?: string
+  user?: Username
+  envs?: Record<string, string>
+  timeoutMs?: number
   onData?: (data: Uint8Array) => void | Promise<void>
+  onPty?: (data: Uint8Array) => void | Promise<void>
 }
 
 export interface PtyConnectOpts {

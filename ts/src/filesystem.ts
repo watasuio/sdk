@@ -28,6 +28,11 @@ export interface EntryInfo {
   path: string
   size?: number
   mode?: number
+  permissions?: string
+  owner?: string
+  group?: string
+  modifiedTime?: Date
+  symlinkTarget?: string
   uid?: number
   gid?: number
   mtime?: number
@@ -55,6 +60,7 @@ export interface WatchOpts {
   recursive?: boolean
   includeEntry?: boolean
   allowNetworkMounts?: boolean
+  timeoutMs?: number
   requestTimeoutMs?: number
   signal?: AbortSignal
   user?: string
@@ -145,7 +151,7 @@ export class FilesystemWatcher {
         include_entry: nextOpts.includeEntry,
         allow_network_mounts: nextOpts.allowNetworkMounts,
       }),
-      nextOpts.requestTimeoutMs,
+      nextOpts.requestTimeoutMs ?? nextOpts.timeoutMs,
       this.dataPlane.headers
     ).connect()
     this.handle = new WatchHandle(socket, socket, async (event) => {
@@ -382,6 +388,11 @@ function entryInfo(value: unknown): EntryInfo {
     path: String(item.path ?? ''),
     size: numberValue(item.bytes ?? item.size),
     mode: numberValue(item.mode),
+    permissions: stringValue(item.permissions),
+    owner: stringValue(item.owner),
+    group: stringValue(item.group),
+    modifiedTime: dateValue(item.modified_time ?? item.modifiedTime ?? item.mtime ?? item.updated_at ?? item.updatedAt),
+    symlinkTarget: stringValue(item.symlink_target ?? item.symlinkTarget),
     uid: numberValue(item.uid),
     gid: numberValue(item.gid),
     mtime: numberValue(item.mtime),
@@ -391,6 +402,21 @@ function entryInfo(value: unknown): EntryInfo {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
+}
+
+function stringValue(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  return undefined
+}
+
+function dateValue(value: unknown): Date | undefined {
+  if (value instanceof Date) return value
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+  return undefined
 }
 
 function recordOfStrings(value: unknown): Record<string, string> | undefined {
