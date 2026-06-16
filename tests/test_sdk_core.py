@@ -20,6 +20,7 @@ from watasu import (
     CommandResult,
     ConnectionConfig,
     ConflictException,
+    InvalidArgumentException,
     LogEntry,
     LogEntryEnd,
     LogEntryStart,
@@ -2570,6 +2571,7 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
     build = Template.build_in_background(
         template,
         "python-ci:stable",
+        tags=["stable"],
         cpu_count=4,
         memory_mb=4096,
         skip_cache=True,
@@ -2586,6 +2588,7 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
             "https://api.watasu.io/v1/templates",
             {
                 "name": "python-ci:stable",
+                "tags": ["stable"],
                 "cpu_count": 4,
                 "memory_mb": 4096,
                 "skip_cache": True,
@@ -2617,6 +2620,68 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
             {"logs_offset": 1},
         ),
     ]
+
+
+def test_template_build_accepts_name_alias_and_tags_shapes(monkeypatch):
+    monkeypatch.setenv("WATASU_API_KEY", "key")
+    calls = []
+
+    class Response:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+            self.content = json.dumps(payload).encode()
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+    def request(self, method, url, **kwargs):
+        calls.append(kwargs.get("json"))
+        return Response(
+            201,
+            {
+                "template_build": {
+                    "template_id": "template-id",
+                    "build_id": "build-id",
+                    "name": kwargs["json"]["name"],
+                    "alias": kwargs["json"]["name"],
+                    "tags": kwargs["json"].get("tags", []),
+                }
+            },
+        )
+
+    monkeypatch.setattr("requests.Session.request", request)
+
+    first = Template.build_in_background(Template(), name="python-ci")
+    second = Template.build_in_background(
+        Template(),
+        alias="python-ci:stable",
+        tags=["stable"],
+    )
+
+    assert first.name == "python-ci"
+    assert second.tags == ["stable"]
+    assert calls == [
+        {
+            "name": "python-ci",
+            "cpu_count": 2,
+            "memory_mb": 1024,
+            "skip_cache": False,
+            "build_spec": {},
+        },
+        {
+            "name": "python-ci:stable",
+            "tags": ["stable"],
+            "cpu_count": 2,
+            "memory_mb": 1024,
+            "skip_cache": False,
+            "build_spec": {},
+        },
+    ]
+
+    with pytest.raises(InvalidArgumentException, match="template build name"):
+        Template.build_in_background(Template())
 
 
 def test_template_builder_serializers_and_mcp_helper(tmp_path):
@@ -2691,11 +2756,11 @@ def test_template_builder_serializers_and_mcp_helper(tmp_path):
     }
     assert list(inspect.signature(AsyncTemplate.build).parameters)[:6] == [
         "template",
+        "name",
         "alias",
+        "tags",
         "cpu_count",
         "memory_mb",
-        "skip_cache",
-        "on_build_logs",
     ]
     assert list(inspect.signature(AsyncCommands.connect).parameters)[:5] == [
         "self",

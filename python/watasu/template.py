@@ -595,7 +595,10 @@ class Template(TemplateBase):
     @staticmethod
     def build(
         template: "TemplateBase",
-        alias: str,
+        name: Optional[str] = None,
+        *,
+        alias: Optional[str] = None,
+        tags: Optional[List[str]] = None,
         cpu_count: int = 2,
         memory_mb: int = 1024,
         skip_cache: bool = False,
@@ -608,7 +611,9 @@ class Template(TemplateBase):
         try:
             build_info = Template.build_in_background(
                 template,
-                alias,
+                name,
+                alias=alias,
+                tags=tags,
                 cpu_count=cpu_count,
                 memory_mb=memory_mb,
                 skip_cache=skip_cache,
@@ -624,7 +629,10 @@ class Template(TemplateBase):
     @staticmethod
     def build_in_background(
         template: "TemplateBase",
-        alias: str,
+        name: Optional[str] = None,
+        *,
+        alias: Optional[str] = None,
+        tags: Optional[List[str]] = None,
         cpu_count: int = 2,
         memory_mb: int = 1024,
         skip_cache: bool = False,
@@ -632,15 +640,18 @@ class Template(TemplateBase):
         **opts: ApiParams,
     ) -> BuildInfo:
         """Start a Watasu template build and return its identifiers."""
+        resolved_name = _normalize_template_build_name(name, alias)
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         payload: Dict[str, Any] = {
-            "name": alias,
+            "name": resolved_name,
             "cpu_count": cpu_count,
             "memory_mb": memory_mb,
             "skip_cache": skip_cache or template._force,
             "build_spec": template.to_build_spec(),
         }
+        if tags is not None:
+            payload["tags"] = tags
         if "team" in opts:
             payload["team"] = opts["team"]
         response = control.post("/templates", json=payload)
@@ -721,7 +732,10 @@ class AsyncTemplate(TemplateBase):
     @staticmethod
     async def build(
         template: "TemplateBase",
-        alias: str,
+        name: Optional[str] = None,
+        *,
+        alias: Optional[str] = None,
+        tags: Optional[List[str]] = None,
         cpu_count: int = 2,
         memory_mb: int = 1024,
         skip_cache: bool = False,
@@ -731,7 +745,9 @@ class AsyncTemplate(TemplateBase):
         return await asyncio.to_thread(
             Template.build,
             template,
-            alias,
+            name,
+            alias=alias,
+            tags=tags,
             cpu_count=cpu_count,
             memory_mb=memory_mb,
             skip_cache=skip_cache,
@@ -742,7 +758,10 @@ class AsyncTemplate(TemplateBase):
     @staticmethod
     async def build_in_background(
         template: "TemplateBase",
-        alias: str,
+        name: Optional[str] = None,
+        *,
+        alias: Optional[str] = None,
+        tags: Optional[List[str]] = None,
         cpu_count: int = 2,
         memory_mb: int = 1024,
         skip_cache: bool = False,
@@ -752,7 +771,9 @@ class AsyncTemplate(TemplateBase):
         return await asyncio.to_thread(
             Template.build_in_background,
             template,
-            alias,
+            name,
+            alias=alias,
+            tags=tags,
             cpu_count=cpu_count,
             memory_mb=memory_mb,
             skip_cache=skip_cache,
@@ -873,6 +894,13 @@ def _wait_for_build_finish(
             message = build_status.reason.message if build_status.reason else "Template build failed"
             raise BuildException(message)
         time.sleep(TemplateBase._logs_refresh_frequency)
+
+
+def _normalize_template_build_name(name: Optional[str], alias: Optional[str]) -> str:
+    selected = name if name is not None else alias
+    if selected is None or not str(selected).strip():
+        raise InvalidArgumentException("template build name is required")
+    return str(selected)
 
 
 def _build_info(payload: Dict[str, Any]) -> BuildInfo:
