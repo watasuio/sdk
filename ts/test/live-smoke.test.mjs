@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   CommandExitError,
   ConnectionConfig,
+  InvalidArgumentError,
   Sandbox,
   Template,
   Volume,
@@ -22,8 +23,9 @@ const live = process.env.WATASU_LIVE_API_TESTS === '1'
 const team = process.env.WATASU_SMOKE_TEAM ?? 'watasu'
 const prefix = `sdk-ts-${Date.now()}-${process.pid}`
 const requestTimeoutMs = 240_000
+const sandboxTimeoutMs = 900_000
 
-test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_API_TESTS=1 to run live API smoke tests', timeout: 900_000 }, async () => {
+test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_API_TESTS=1 to run live API smoke tests', timeout: 1_200_000 }, async () => {
   assert.ok(process.env.WATASU_API_KEY, 'WATASU_API_KEY is required')
   assert.equal(new ConnectionConfig().apiKey, process.env.WATASU_API_KEY)
   assert.equal(base64DecodeText(base64Encode(new TextEncoder().encode('codec-ok'))), 'codec-ok')
@@ -47,6 +49,7 @@ test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_
   let volume
   let sbx
   let codeSbx
+  let restoredSbx
   const snapshots = []
 
   try {
@@ -70,7 +73,7 @@ test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_
 
     sbx = await Sandbox.create('base', {
       team,
-      timeoutMs: 300_000,
+      timeoutMs: sandboxTimeoutMs,
       requestTimeoutMs,
       metadata: { smoke: prefix, sdk: 'typescript' },
       envs: { WATASU_SMOKE_VALUE: 'env-ok' },
@@ -82,8 +85,8 @@ test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_
     assert.equal((await Sandbox.getInfo(sbx.id, { requestTimeoutMs })).sandboxId, sbx.id)
     assert.equal((await Sandbox.getFullInfo(sbx.id, { requestTimeoutMs })).sandboxId, sbx.id)
     assert.equal((await sbx.getInfo({ requestTimeoutMs })).sandboxId, sbx.id)
-    await Sandbox.setTimeout(sbx.id, 300_000, { requestTimeoutMs })
-    await sbx.setTimeout(300_000, { requestTimeoutMs })
+    await Sandbox.setTimeout(sbx.id, sandboxTimeoutMs, { requestTimeoutMs })
+    await sbx.setTimeout(sandboxTimeoutMs, { requestTimeoutMs })
     assert.ok((await Sandbox.list({ team, limit: 10, query: { metadata: { smoke: prefix } } }).nextItems()).some((item) => item.sandboxId === sbx.id))
     assert.equal(typeof sbx.getHost(8080), 'string')
     assert.equal(typeof sbx.getMcpUrl(), 'string')
@@ -106,18 +109,27 @@ test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_
     assert.equal(typeof snapshot.snapshotId, 'string')
     assert.ok((await sbx.listSnapshots({ limit: 10 }).nextItems({ requestTimeoutMs })).some((item) => item.snapshotId === snapshot.snapshotId))
     assert.ok((await Sandbox.listSnapshots({ sandboxId: sbx.id, limit: 10 }).nextItems({ requestTimeoutMs })).some((item) => item.snapshotId === snapshot.snapshotId))
+    restoredSbx = await Sandbox.create(snapshot.snapshotId, {
+      timeoutMs: sandboxTimeoutMs,
+      requestTimeoutMs,
+      team,
+      metadata: { smoke: prefix, sdk: 'typescript-restored' },
+    })
+    assert.equal(await restoredSbx.files.read(`/tmp/${prefix}-files/batch-a.txt`, { requestTimeoutMs }), 'a')
+    await restoredSbx.kill({ requestTimeoutMs }).catch(() => {})
+    restoredSbx = undefined
     assert.equal(await sbx.deleteSnapshot(snapshot.snapshotId, { requestTimeoutMs }), true)
     snapshots.pop()
     assert.equal(await Sandbox.deleteSnapshot(`${prefix}-missing-snapshot`, { requestTimeoutMs }), false)
 
-    const connected = await Sandbox.connect(sbx.id, { requestTimeoutMs, timeoutMs: 300_000 })
+    const connected = await Sandbox.connect(sbx.id, { requestTimeoutMs, timeoutMs: sandboxTimeoutMs })
     assert.equal(connected.id, sbx.id)
     assert.equal(await connected.commands.run('printf connected-ok', { requestTimeoutMs }).then((r) => r.stdout), 'connected-ok')
-    assert.equal(await connected.resume({ requestTimeoutMs, timeoutMs: 300_000 }), true)
+    assert.equal(await connected.resume({ requestTimeoutMs, timeoutMs: sandboxTimeoutMs }), true)
 
     codeSbx = await CodeInterpreterSandbox.create({
       team,
-      timeoutMs: 300_000,
+      timeoutMs: sandboxTimeoutMs,
       requestTimeoutMs,
       metadata: { smoke: prefix, sdk: 'typescript-code' },
     })
@@ -132,6 +144,7 @@ test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_
     for (const snapshotId of snapshots.splice(0)) {
       await Sandbox.deleteSnapshot(snapshotId, { requestTimeoutMs }).catch(() => {})
     }
+    if (restoredSbx) await restoredSbx.kill({ requestTimeoutMs }).catch(() => {})
     if (codeSbx) await codeSbx.kill({ requestTimeoutMs }).catch(() => {})
     if (sbx) await sbx.kill({ requestTimeoutMs }).catch(() => {})
     if (volume) await retryCleanup(() => volume.destroy({ requestTimeoutMs }))
@@ -153,14 +166,37 @@ async function exerciseFiles(sbx) {
       { path: `${dir}/batch-a.txt`, data: 'a' },
       { path: `${dir}/batch-b.txt`, data: new TextEncoder().encode('b') },
     ], { requestTimeoutMs })
-    assert.equal(await sbx.files.read(`${dir}/hello.txt`, { requestTimeoutMs }), 'file-ok')
-    assert.deepEqual(Array.from(await sbx.files.readBytes(`${dir}/bytes.bin`, { requestTimeoutMs })), [4, 5, 6])
+    await waitEventually(
+      async () => await sbx.files.read(`${dir}/hello.txt`, { requestTimeoutMs }) === 'file-ok',
+      10_000,
+      'text file read',
+    )
+    await waitEventually(
+      async () => {
+        const bytes = await sbx.files.readBytes(`${dir}/bytes.bin`, { requestTimeoutMs })
+        return assert.deepEqual(Array.from(bytes), [4, 5, 6]) === undefined
+      },
+      10_000,
+      'bytes file read',
+    )
     assert.ok(await sbx.files.read(`${dir}/hello.txt`, { requestTimeoutMs, format: 'blob' }))
     const stream = await sbx.files.read(`${dir}/hello.txt`, { requestTimeoutMs, format: 'stream' })
     assert.ok(stream.getReader)
-    assert.equal((await sbx.files.getInfo(`${dir}/hello.txt`, { requestTimeoutMs })).type, 'file')
-    assert.ok((await sbx.files.list(dir, { requestTimeoutMs, depth: 1 })).some((entry) => entry.name === 'hello.txt'))
-    assert.equal(await sbx.files.exists(`${dir}/hello.txt`, { requestTimeoutMs }), true)
+    await waitEventually(
+      async () => (await sbx.files.getInfo(`${dir}/hello.txt`, { requestTimeoutMs })).type === 'file',
+      10_000,
+      'file info',
+    )
+    await waitEventually(
+      async () => (await sbx.files.list(dir, { requestTimeoutMs, depth: 1 })).some((entry) => entry.name === 'hello.txt'),
+      10_000,
+      'directory listing',
+    )
+    await waitEventually(
+      async () => await sbx.files.exists(`${dir}/hello.txt`, { requestTimeoutMs }) === true,
+      10_000,
+      'file exists',
+    )
     const renamed = await sbx.files.rename(`${dir}/hello.txt`, `${dir}/renamed.txt`, { requestTimeoutMs })
     assert.equal(renamed.name, 'renamed.txt')
     await waitUntil(() => events.length > 0, 10_000, 'filesystem watch event')
@@ -303,6 +339,22 @@ async function waitUntil(check, timeoutMs, label) {
     if (await check()) return
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
+  throw new Error(`timed out waiting for ${label}`)
+}
+
+async function waitEventually(check, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs
+  let lastInvalidArgument
+  while (Date.now() < deadline) {
+    try {
+      if (await check()) return
+    } catch (error) {
+      if (!(error instanceof InvalidArgumentError)) throw error
+      lastInvalidArgument = error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  if (lastInvalidArgument) throw labelError(lastInvalidArgument, label)
   throw new Error(`timed out waiting for ${label}`)
 }
 

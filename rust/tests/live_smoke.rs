@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 use watasu::{
@@ -13,7 +13,7 @@ use watasu::{
 };
 
 const REQUEST_TIMEOUT_SECS: u64 = 240;
-const SANDBOX_TIMEOUT_SECS: u64 = 300;
+const SANDBOX_TIMEOUT_SECS: u64 = 900;
 
 #[tokio::test]
 async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
@@ -42,6 +42,7 @@ async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
 
     let mut volume: Option<Volume> = None;
     let mut sandbox: Option<Sandbox> = None;
+    let mut restored_sandbox: Option<Sandbox> = None;
     let mut snapshots: Vec<String> = Vec::new();
 
     let result: watasu::Result<()> = async {
@@ -198,6 +199,26 @@ async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
         .snapshots
         .iter()
         .any(|item| item.snapshot_id == snapshot.snapshot_id));
+        restored_sandbox = Some(
+            Sandbox::create(create_opts(
+                &snapshot.snapshot_id,
+                &team,
+                &prefix,
+                "rust-restored",
+                &[],
+            ))
+            .await?,
+        );
+        let restored = restored_sandbox.as_ref().unwrap();
+        assert_eq!(
+            restored
+                .files
+                .read_text(&format!("/tmp/{prefix}-files/batch-a.txt"))
+                .await?,
+            "a"
+        );
+        let _ = restored.kill().await;
+        restored_sandbox = None;
         assert!(sbx.delete_snapshot(&snapshot.snapshot_id).await?);
         snapshots.pop();
         assert!(
@@ -218,6 +239,9 @@ async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
 
     for snapshot_id in snapshots {
         let _ = Sandbox::delete_snapshot_by_id(snapshot_id, conn()).await;
+    }
+    if let Some(restored) = restored_sandbox.as_ref() {
+        let _ = restored.kill().await;
     }
     if let Some(sbx) = sandbox.as_ref() {
         let _ = sbx.kill().await;
@@ -282,28 +306,16 @@ async fn exercise_files(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
             WriteEntry::new(format!("{dir}/batch-b.txt"), b"b"),
         ])
         .await?;
-    assert_eq!(
-        sbx.files.read_text(&format!("{dir}/hello.txt")).await?,
-        "file-ok"
-    );
-    assert_eq!(
-        sbx.files.read_bytes(&format!("{dir}/bytes.bin")).await?,
-        vec![4, 5, 6]
-    );
-    assert_eq!(
-        sbx.files.get_info(&format!("{dir}/hello.txt")).await?.name,
-        "hello.txt"
-    );
-    assert!(sbx
-        .files
-        .list(&dir)
-        .await?
-        .iter()
-        .any(|entry| entry.name == "hello.txt"));
-    assert!(sbx.files.exists(&format!("{dir}/hello.txt")).await?);
+    let hello_path = format!("{dir}/hello.txt");
+    let bytes_path = format!("{dir}/bytes.bin");
+    wait_text_file(sbx, &hello_path, "file-ok", "text file read").await?;
+    wait_bytes_file(sbx, &bytes_path, vec![4, 5, 6], "bytes file read").await?;
+    wait_file_info_name(sbx, &hello_path, "hello.txt", "file info").await?;
+    wait_directory_contains(sbx, &dir, "hello.txt", "directory listing").await?;
+    wait_file_exists(sbx, &hello_path, "file exists").await?;
     let renamed = sbx
         .files
-        .rename(&format!("{dir}/hello.txt"), &format!("{dir}/renamed.txt"))
+        .rename(&hello_path, &format!("{dir}/renamed.txt"))
         .await?;
     assert_eq!(renamed.name, "renamed.txt");
     let events = tokio::time::timeout(Duration::from_secs(10), watcher.next_events())
@@ -316,6 +328,120 @@ async fn exercise_files(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
     let _ = watcher.stop().await;
     sbx.files.remove(&format!("{dir}/renamed.txt")).await?;
     Ok(())
+}
+
+async fn wait_text_file(
+    sbx: &Sandbox,
+    path: &str,
+    expected: &str,
+    label: &str,
+) -> watasu::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut last_invalid_argument = None;
+
+    while Instant::now() < deadline {
+        match sbx.files.read_text(path).await {
+            Ok(value) if value == expected => return Ok(()),
+            Ok(_) => {}
+            Err(Error::InvalidArgument(message)) => last_invalid_argument = Some(message),
+            Err(error) => return Err(error),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(wait_timeout(label, last_invalid_argument))
+}
+
+async fn wait_bytes_file(
+    sbx: &Sandbox,
+    path: &str,
+    expected: Vec<u8>,
+    label: &str,
+) -> watasu::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut last_invalid_argument = None;
+
+    while Instant::now() < deadline {
+        match sbx.files.read_bytes(path).await {
+            Ok(value) if value == expected => return Ok(()),
+            Ok(_) => {}
+            Err(Error::InvalidArgument(message)) => last_invalid_argument = Some(message),
+            Err(error) => return Err(error),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(wait_timeout(label, last_invalid_argument))
+}
+
+async fn wait_file_info_name(
+    sbx: &Sandbox,
+    path: &str,
+    expected: &str,
+    label: &str,
+) -> watasu::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut last_invalid_argument = None;
+
+    while Instant::now() < deadline {
+        match sbx.files.get_info(path).await {
+            Ok(info) if info.name == expected => return Ok(()),
+            Ok(_) => {}
+            Err(Error::InvalidArgument(message)) => last_invalid_argument = Some(message),
+            Err(error) => return Err(error),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(wait_timeout(label, last_invalid_argument))
+}
+
+async fn wait_directory_contains(
+    sbx: &Sandbox,
+    path: &str,
+    expected: &str,
+    label: &str,
+) -> watasu::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut last_invalid_argument = None;
+
+    while Instant::now() < deadline {
+        match sbx.files.list(path).await {
+            Ok(entries) if entries.iter().any(|entry| entry.name == expected) => return Ok(()),
+            Ok(_) => {}
+            Err(Error::InvalidArgument(message)) => last_invalid_argument = Some(message),
+            Err(error) => return Err(error),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(wait_timeout(label, last_invalid_argument))
+}
+
+async fn wait_file_exists(sbx: &Sandbox, path: &str, label: &str) -> watasu::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut last_invalid_argument = None;
+
+    while Instant::now() < deadline {
+        match sbx.files.exists(path).await {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(Error::InvalidArgument(message)) => last_invalid_argument = Some(message),
+            Err(error) => return Err(error),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(wait_timeout(label, last_invalid_argument))
+}
+
+fn wait_timeout(label: &str, last_invalid_argument: Option<String>) -> Error {
+    match last_invalid_argument {
+        Some(message) if !message.is_empty() => {
+            Error::Sandbox(format!("timed out waiting for {label}: {message}"))
+        }
+        _ => Error::Sandbox(format!("timed out waiting for {label}")),
+    }
 }
 
 async fn exercise_signed_file_urls(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {

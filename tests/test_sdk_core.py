@@ -1562,6 +1562,45 @@ def test_data_plane_post_json_accepts_empty_success_response(monkeypatch):
     ]
 
 
+def test_data_plane_reads_success_body_before_closing_session(monkeypatch):
+    session_closed = False
+
+    class Response:
+        status_code = 200
+        text = '{"ok": true}'
+        _content = None
+
+        @property
+        def content(self):
+            nonlocal session_closed
+            if self._content is None:
+                assert session_closed is False
+                self._content = b'{"ok": true}'
+            return self._content
+
+        def json(self):
+            return json.loads(self.content)
+
+    def request(self, method, url, **kwargs):
+        return Response()
+
+    def close(self):
+        nonlocal session_closed
+        session_closed = True
+
+    monkeypatch.setattr("requests.Session.request", request)
+    monkeypatch.setattr("requests.Session.close", close)
+
+    client = DataPlaneClient(
+        "https://route.sandbox.watasuhost.com",
+        "data",
+        ConnectionConfig(api_key="key"),
+    )
+
+    assert client.post_json("/runtime/v1/files/write_files", json={"files": []}) == {"ok": True}
+    assert session_closed is True
+
+
 def test_sandbox_create_with_mcp_sends_config_to_api_without_sdk_bootstrap(monkeypatch):
     captured = {}
     commands = []

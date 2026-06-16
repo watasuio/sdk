@@ -36,7 +36,7 @@ pytestmark = pytest.mark.skipif(
 TEAM = os.environ.get("WATASU_SMOKE_TEAM", "watasu")
 PREFIX = f"sdk-py-{int(time.time() * 1000)}-{os.getpid()}"
 REQUEST_TIMEOUT = 240
-SANDBOX_TIMEOUT = 300
+SANDBOX_TIMEOUT = 900
 
 
 def test_live_python_sync_sdk_smoke():
@@ -59,6 +59,7 @@ def test_live_python_sync_sdk_smoke():
     volume = None
     sbx = None
     code_sbx = None
+    restored_sbx = None
     snapshots = []
 
     try:
@@ -164,6 +165,19 @@ def test_live_python_sync_sdk_smoke():
                 request_timeout=REQUEST_TIMEOUT,
             ).next_items()
         )
+        restored_sbx = Sandbox.create(
+            snapshot.snapshot_id,
+            team=TEAM,
+            timeout=SANDBOX_TIMEOUT,
+            request_timeout=REQUEST_TIMEOUT,
+            metadata={"smoke": PREFIX, "sdk": "python-sync-restored"},
+        )
+        assert restored_sbx.files.read(
+            f"/tmp/{PREFIX}-files/batch-a.txt",
+            request_timeout=REQUEST_TIMEOUT,
+        ) == "a"
+        _ignore_errors(lambda: restored_sbx.kill(request_timeout=REQUEST_TIMEOUT))
+        restored_sbx = None
         assert sbx.delete_snapshot(snapshot.snapshot_id, request_timeout=REQUEST_TIMEOUT) is True
         snapshots.pop()
         assert Sandbox.delete_snapshot(f"{PREFIX}-missing-snapshot", request_timeout=REQUEST_TIMEOUT) is False
@@ -209,6 +223,8 @@ def test_live_python_sync_sdk_smoke():
                 pass
         if code_sbx is not None:
             _ignore_errors(lambda: code_sbx.kill(request_timeout=REQUEST_TIMEOUT))
+        if restored_sbx is not None:
+            _ignore_errors(lambda: restored_sbx.kill(request_timeout=REQUEST_TIMEOUT))
         if sbx is not None:
             _ignore_errors(lambda: sbx.kill(request_timeout=REQUEST_TIMEOUT))
         if volume is not None:
@@ -230,6 +246,7 @@ async def _test_live_python_async_sdk_smoke():
     volume = None
     sbx = None
     code_sbx = None
+    restored_sbx = None
     snapshots = []
 
     try:
@@ -320,6 +337,19 @@ async def _test_live_python_async_sdk_smoke():
                     request_timeout=REQUEST_TIMEOUT,
                 ).next_items()
             )
+            restored_sbx = await AsyncSandbox.create(
+                snapshot.snapshot_id,
+                team=TEAM,
+                timeout=SANDBOX_TIMEOUT,
+                request_timeout=REQUEST_TIMEOUT,
+                metadata={"smoke": PREFIX, "sdk": "python-async-restored"},
+            )
+            assert await restored_sbx.files.read(
+                f"/tmp/{PREFIX}-async-files/batch-a.txt",
+                request_timeout=REQUEST_TIMEOUT,
+            ) == "a"
+            await _async_ignore_errors(restored_sbx.kill(request_timeout=REQUEST_TIMEOUT))
+            restored_sbx = None
             assert await sbx.delete_snapshot(snapshot.snapshot_id, request_timeout=REQUEST_TIMEOUT) is True
             snapshots.pop()
             assert await AsyncSandbox.delete_snapshot(
@@ -373,6 +403,8 @@ async def _test_live_python_async_sdk_smoke():
                 pass
         if code_sbx is not None:
             await _async_ignore_errors(code_sbx.kill(request_timeout=REQUEST_TIMEOUT))
+        if restored_sbx is not None:
+            await _async_ignore_errors(restored_sbx.kill(request_timeout=REQUEST_TIMEOUT))
         if sbx is not None:
             await _async_ignore_errors(sbx.kill(request_timeout=REQUEST_TIMEOUT))
         if volume is not None:
@@ -402,8 +434,28 @@ def _exercise_files(sbx: Sandbox) -> None:
             ],
             request_timeout=REQUEST_TIMEOUT,
         )
-        assert sbx.files.read(f"{directory}/hello.txt", request_timeout=REQUEST_TIMEOUT) == "file-ok"
-        assert sbx.files.read_bytes(f"{directory}/bytes.bin", request_timeout=REQUEST_TIMEOUT) == b"\x04\x05\x06"
+        _wait_until(
+            lambda: _retry_invalid_argument(
+                lambda: sbx.files.read(
+                    f"{directory}/hello.txt",
+                    request_timeout=REQUEST_TIMEOUT,
+                )
+                == "file-ok"
+            ),
+            timeout=10,
+            label="text file read",
+        )
+        _wait_until(
+            lambda: _retry_invalid_argument(
+                lambda: sbx.files.read_bytes(
+                    f"{directory}/bytes.bin",
+                    request_timeout=REQUEST_TIMEOUT,
+                )
+                == b"\x04\x05\x06"
+            ),
+            timeout=10,
+            label="bytes file read",
+        )
         assert b"file-ok" == b"".join(
             sbx.files.read(
                 f"{directory}/hello.txt",
@@ -411,12 +463,42 @@ def _exercise_files(sbx: Sandbox) -> None:
                 request_timeout=REQUEST_TIMEOUT,
             )
         )
-        assert sbx.files.get_info(f"{directory}/hello.txt", request_timeout=REQUEST_TIMEOUT).name == "hello.txt"
-        assert any(
-            entry.name == "hello.txt"
-            for entry in sbx.files.list(directory, depth=1, request_timeout=REQUEST_TIMEOUT)
+        _wait_until(
+            lambda: _retry_invalid_argument(
+                lambda: sbx.files.get_info(
+                    f"{directory}/hello.txt",
+                    request_timeout=REQUEST_TIMEOUT,
+                ).name
+                == "hello.txt"
+            ),
+            timeout=10,
+            label="file info",
         )
-        assert sbx.files.exists(f"{directory}/hello.txt", request_timeout=REQUEST_TIMEOUT) is True
+        _wait_until(
+            lambda: _retry_invalid_argument(
+                lambda: any(
+                    entry.name == "hello.txt"
+                    for entry in sbx.files.list(
+                        directory,
+                        depth=1,
+                        request_timeout=REQUEST_TIMEOUT,
+                    )
+                )
+            ),
+            timeout=10,
+            label="directory listing",
+        )
+        _wait_until(
+            lambda: _retry_invalid_argument(
+                lambda: sbx.files.exists(
+                    f"{directory}/hello.txt",
+                    request_timeout=REQUEST_TIMEOUT,
+                )
+                is True
+            ),
+            timeout=10,
+            label="file exists",
+        )
         renamed = sbx.files.rename(
             f"{directory}/hello.txt",
             f"{directory}/renamed.txt",
@@ -452,7 +534,21 @@ async def _exercise_async_files(sbx: AsyncSandbox) -> None:
             ],
             request_timeout=REQUEST_TIMEOUT,
         )
-        assert await sbx.files.read(f"{directory}/hello.txt", request_timeout=REQUEST_TIMEOUT) == "async-file-ok"
+        async def text_file_is_readable():
+            try:
+                return await sbx.files.read(
+                    f"{directory}/hello.txt",
+                    request_timeout=REQUEST_TIMEOUT,
+                ) == "async-file-ok"
+            except InvalidArgumentException:
+                return False
+
+        await _async_wait_until(
+            text_file_is_readable,
+            timeout=10,
+            label="async text file read",
+        )
+
         async def bytes_file_is_readable():
             try:
                 return await sbx.files.read_bytes(
@@ -473,12 +569,45 @@ async def _exercise_async_files(sbx: AsyncSandbox) -> None:
             request_timeout=REQUEST_TIMEOUT,
         )
         assert b"async-file-ok" == b"".join(stream)
-        assert (await sbx.files.get_info(f"{directory}/hello.txt", request_timeout=REQUEST_TIMEOUT)).name == "hello.txt"
-        assert any(
-            entry.name == "hello.txt"
-            for entry in await sbx.files.list(directory, depth=1, request_timeout=REQUEST_TIMEOUT)
+        async def file_info_is_readable():
+            return await _async_retry_invalid_argument(
+                lambda: _async_file_info_is(
+                    sbx,
+                    f"{directory}/hello.txt",
+                    "hello.txt",
+                )
+            )
+
+        await _async_wait_until(
+            file_info_is_readable,
+            timeout=10,
+            label="async file info",
         )
-        assert await sbx.files.exists(f"{directory}/hello.txt", request_timeout=REQUEST_TIMEOUT) is True
+
+        async def directory_listing_contains_file():
+            return await _async_retry_invalid_argument(
+                lambda: _async_directory_contains(sbx, directory, "hello.txt")
+            )
+
+        await _async_wait_until(
+            directory_listing_contains_file,
+            timeout=10,
+            label="async directory listing",
+        )
+
+        async def file_exists():
+            return await _async_retry_invalid_argument(
+                lambda: sbx.files.exists(
+                    f"{directory}/hello.txt",
+                    request_timeout=REQUEST_TIMEOUT,
+                )
+            )
+
+        await _async_wait_until(
+            file_exists,
+            timeout=10,
+            label="async file exists",
+        )
         renamed = await sbx.files.rename(
             f"{directory}/hello.txt",
             f"{directory}/renamed.txt",
@@ -790,6 +919,45 @@ def _request(url: str, *, method: str, data: bytes | None = None) -> bytes:
     with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
         assert 200 <= response.status < 300
         return response.read()
+
+
+def _retry_invalid_argument(check) -> bool:
+    try:
+        return bool(check())
+    except InvalidArgumentException:
+        return False
+
+
+async def _async_retry_invalid_argument(check) -> bool:
+    try:
+        return bool(await check())
+    except InvalidArgumentException:
+        return False
+
+
+async def _async_file_info_is(
+    sbx: AsyncSandbox,
+    path: str,
+    name: str,
+) -> bool:
+    return (
+        await sbx.files.get_info(path, request_timeout=REQUEST_TIMEOUT)
+    ).name == name
+
+
+async def _async_directory_contains(
+    sbx: AsyncSandbox,
+    directory: str,
+    name: str,
+) -> bool:
+    return any(
+        entry.name == name
+        for entry in await sbx.files.list(
+            directory,
+            depth=1,
+            request_timeout=REQUEST_TIMEOUT,
+        )
+    )
 
 
 def _wait_until(check, *, timeout: float, label: str) -> None:

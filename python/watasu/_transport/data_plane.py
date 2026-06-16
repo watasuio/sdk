@@ -68,6 +68,7 @@ class DataPlaneClient:
             if stream:
                 setattr(response, "_watasu_session", session)
             else:
+                _ = response.content
                 session.close()
             return response
 
