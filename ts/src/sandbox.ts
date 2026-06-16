@@ -155,7 +155,6 @@ export interface SnapshotListOpts extends ConnectionOpts {
 export interface RestoreSnapshotOpts extends ConnectionOpts {
   checkpointId?: string | number
   snapshotId?: string | number
-  timeout?: number
   timeoutMs?: number
 }
 
@@ -237,14 +236,12 @@ export class Sandbox {
   static readonly defaultSandboxTimeoutMs = 300_000
 
   files: Filesystem
-  filesystem: Filesystem
   commands: Commands
   process: ProcessManager
   pty: Pty
   terminal: TerminalManager
   git: Git
   cwd: string | undefined
-  envVars: Record<string, string>
   readonly sandboxId: string
 
   private readonly mcpPort = 50005
@@ -267,12 +264,10 @@ export class Sandbox {
     this.config = opts.connectionConfig
     this.control = opts.control ?? new ControlClient(this.config)
     this.envs = opts.envs ?? {}
-    this.envVars = this.envs
     this.sandbox = opts.sandbox ?? {}
     const dataPlane = dataPlaneFromSession(opts.session, this.config)
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
-    this.filesystem = this.files
     this.commands = new Commands(dataPlane, this.config, this.envs)
     this.process = new ProcessManager(this.commands)
     this.pty = new Pty(dataPlane, this.config)
@@ -351,14 +346,6 @@ export class Sandbox {
     })
   }
 
-  /** Alias for `connect`. */
-  static async reconnect(sandboxId: string, opts?: SandboxConnectOpts): Promise<Sandbox>
-  static async reconnect(opts: SandboxConnectOpts & { sandboxID: string }): Promise<Sandbox>
-  static async reconnect(sandboxOrOpts: string | (SandboxConnectOpts & { sandboxID: string }), opts: SandboxConnectOpts = {}): Promise<Sandbox> {
-    if (typeof sandboxOrOpts === 'string') return this.connect(sandboxOrOpts, opts)
-    return this.connect(sandboxOrOpts.sandboxID, sandboxOrOpts)
-  }
-
   /** Refresh this sandbox's data-plane session in place. */
   async connect(opts: SandboxConnectOpts = {}): Promise<this> {
     const response = await this.control.post(`/sandboxes/${this.sandboxId}/resume`, {
@@ -370,7 +357,6 @@ export class Sandbox {
     const dataPlane = dataPlaneFromSession(response.session, this.config)
     this.dataPlane = dataPlane
     this.files = new Filesystem(dataPlane)
-    this.filesystem = this.files
     this.commands = new Commands(dataPlane, this.config, this.envs)
     this.process = new ProcessManager(this.commands)
     this.pty = new Pty(dataPlane, this.config)
@@ -400,7 +386,7 @@ export class Sandbox {
     }
   }
 
-  /** Alias for `betaPause`. */
+  /** Pause a sandbox by id. */
   static async pause(sandboxId: string, opts: ConnectionOpts = {}): Promise<boolean> {
     return this.betaPause(sandboxId, opts)
   }
@@ -439,11 +425,6 @@ export class Sandbox {
       signal: opts.signal,
     })
     return response.sandbox === undefined ? undefined : record(response.sandbox)
-  }
-
-  /** Deprecated alias for `getInfo`. */
-  static async getFullInfo(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxInfo> {
-    return this.getInfo(sandboxId, opts)
   }
 
   /** Create a Watasu checkpoint using snapshot naming. */
@@ -520,11 +501,6 @@ export class Sandbox {
     })
   }
 
-  /** Keep the sandbox alive for `duration` milliseconds. */
-  async keepAlive(duration: number, opts: SandboxRequestOpts = {}): Promise<void> {
-    await this.setTimeout(duration, opts)
-  }
-
   /** Fetch control-plane metadata for a sandbox by id. */
   static async getInfo(sandboxId: string, opts: ConnectionOpts = {}): Promise<SandboxInfo> {
     const control = new ControlClient(new ConnectionConfig(opts))
@@ -578,7 +554,6 @@ export class Sandbox {
     if (checkpointId === undefined) throw new SandboxError('checkpointId or snapshotId is required')
 
     const payload: Record<string, unknown> = { checkpoint_id: checkpointId }
-    if (restoreOpts.timeout !== undefined) payload.timeout_seconds = restoreOpts.timeout
     if (restoreOpts.timeoutMs !== undefined) payload.timeout_seconds = Math.ceil(restoreOpts.timeoutMs / 1000)
 
     const response = await this.control.post(`/sandboxes/${this.sandboxId}/restore`, {
@@ -605,12 +580,6 @@ export class Sandbox {
     return `p${port}-${routeToken}.sandbox.${this.config.dataPlaneDomain}`
   }
 
-  /** Return the public hostname for the sandbox or an exposed sandbox port. */
-  getHostname(port?: number): string {
-    if (port !== undefined) return this.getHost(port)
-    return new URL(this.dataPlane.baseUrl).host
-  }
-
   /** Return the conventional MCP URL for this sandbox. */
   getMcpUrl(): string {
     return `https://${this.getHost(this.mcpPort)}/mcp`
@@ -628,14 +597,6 @@ export class Sandbox {
       throw error
     }
   }
-
-  /** Return a protocol string for a secure or insecure sandbox URL. */
-  getProtocol(baseProtocol = 'http', secure = true): string {
-    return `${baseProtocol}${secure ? 's' : ''}`
-  }
-
-  /** Close the local SDK attachment. This does not destroy the sandbox. */
-  async close(): Promise<void> {}
 
   /** Get a signed URL that accepts a POST upload for a sandbox file path. */
   async uploadUrl(path = '', opts: SandboxUrlOpts = {}): Promise<string> {
@@ -670,7 +631,7 @@ export class Sandbox {
     return Sandbox.betaPause(this.sandboxId, { ...this.configOptions(), ...opts })
   }
 
-  /** Alias for `betaPause`. */
+  /** Pause this sandbox. Returns false when it was already paused. */
   async pause(opts: ConnectionOpts = {}): Promise<boolean> {
     return this.betaPause(opts)
   }

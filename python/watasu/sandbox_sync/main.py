@@ -306,7 +306,6 @@ class Sandbox(SandboxBase):
         )
 
     connect = _DualMethod(_connect_instance, _connect_class)
-    reconnect = connect
 
     def is_running(self, request_timeout: Optional[float] = None) -> bool:
         """Return whether this sandbox is in a runtime-active lifecycle state."""
@@ -344,10 +343,6 @@ class Sandbox(SandboxBase):
         return True
 
     kill = _DualMethod(_kill_instance, _kill_class)
-
-    def close(self) -> None:
-        """Close the local SDK attachment without destroying the sandbox."""
-        return None
 
     def _beta_pause_instance(self, **opts: ApiParams) -> bool:
         """Pause this sandbox. Returns ``False`` if it is already paused."""

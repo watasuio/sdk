@@ -6,7 +6,7 @@ from watasu.connection_config import ConnectionConfig
 
 
 class SandboxOpts(TypedDict, total=False):
-    """Internal sandbox construction options used by compatibility imports."""
+    """Internal sandbox construction options."""
 
     sandbox_id: str
     sandbox_domain: Optional[str]
@@ -69,7 +69,7 @@ class SandboxBase:
 
     @property
     def envd_api_url(self) -> str:
-        """Data-plane API URL used by compatibility callers."""
+        """Data-plane API URL."""
         return self.connection_config.sandbox_url or self._sandbox_url or ""
 
     @property

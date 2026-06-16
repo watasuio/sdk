@@ -1,4 +1,4 @@
-"""Asynchronous template builder compatibility exports."""
+"""Asynchronous template builder exports."""
 
 from .main import AsyncTemplate
 

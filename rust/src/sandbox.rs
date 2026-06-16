@@ -494,7 +494,7 @@ impl Sandbox {
         }
     }
 
-    /// Alias for `beta_pause_by_id`.
+    /// Pause a sandbox by id.
     pub async fn pause_by_id(
         sandbox_id: impl ToString,
         connection: ConnectionOptions,
@@ -502,7 +502,7 @@ impl Sandbox {
         Self::beta_pause_by_id(sandbox_id, connection).await
     }
 
-    /// Alias for `beta_pause`.
+    /// Pause this sandbox.
     pub async fn pause(&self) -> Result<bool> {
         self.beta_pause().await
     }

@@ -22,7 +22,6 @@ export interface GitAuthOpts {
   envs?: Record<string, string>
   user?: string
   cwd?: string
-  timeout?: number
   timeoutMs?: number
   requestTimeoutMs?: number
   signal?: AbortSignal
@@ -33,7 +32,6 @@ export interface GitCloneOpts extends GitAuthOpts {
   branch?: string
   depth?: number
   recursive?: boolean
-  submodules?: boolean
   dangerouslyStoreCredentials?: boolean
 }
 
@@ -150,7 +148,7 @@ export class Git {
     return this.run('/runtime/v1/git/clone', {
       url,
       ...gitOpts(opts),
-      ...pick(opts, ['path', 'branch', 'depth', 'recursive', 'submodules', 'username', 'password']),
+      ...pick(opts, ['path', 'branch', 'depth', 'recursive', 'username', 'password']),
       dangerously_store_credentials: opts.dangerouslyStoreCredentials,
     }, opts)
   }
@@ -338,7 +336,7 @@ function gitOpts(opts: GitRequestOpts): Record<string, unknown> {
     env_vars: opts.envs,
     user: opts.user,
     cwd: opts.cwd,
-    timeout_seconds: opts.timeout ?? (opts.timeoutMs === undefined ? undefined : Math.ceil(opts.timeoutMs / 1000)),
+    timeout_seconds: opts.timeoutMs === undefined ? undefined : Math.ceil(opts.timeoutMs / 1000),
   }
 }
 

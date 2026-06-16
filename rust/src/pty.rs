@@ -109,7 +109,7 @@ impl Pty {
         handle.send_stdin(data).await
     }
 
-    /// Alias for `send_stdin`.
+    /// Send input bytes to a PTY.
     pub async fn send_input(&self, pid: impl ToString, data: impl AsRef<[u8]>) -> Result<()> {
         self.send_stdin(pid, data).await
     }

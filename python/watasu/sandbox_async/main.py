@@ -454,7 +454,7 @@ class AsyncSnapshotPaginator:
         return list(self._items)
 
     async def next_items(self) -> List[SnapshotInfo]:
-        """Alias for ``list_items``."""
+        """Return the next available snapshot items."""
         return await self.list_items()
 
     def __aiter__(self):
@@ -659,7 +659,6 @@ class AsyncSandbox:
         )
 
     connect = _AsyncDualMethod(_connect_instance, _connect_class)
-    reconnect = connect
 
     async def is_running(self, request_timeout: Optional[float] = None) -> bool:
         """Return whether this sandbox is in a runtime-active lifecycle state."""
@@ -677,10 +676,6 @@ class AsyncSandbox:
         return await asyncio.to_thread(Sandbox.kill, sandbox_id, **opts)
 
     kill = _AsyncDualMethod(_kill_instance, _kill_class)
-
-    async def close(self) -> None:
-        """Close the local SDK attachment without destroying the sandbox."""
-        return None
 
     async def _beta_pause_instance(self, **opts: ApiParams) -> bool:
         """Pause this sandbox. Returns ``False`` if it is already paused."""

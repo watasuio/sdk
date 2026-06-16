@@ -145,7 +145,6 @@ class AsyncSandbox(BaseAsyncSandbox):
         )
 
     connect = _AsyncDualMethod(_connect_instance, _connect_class)
-    reconnect = connect
 
     async def run_code(
         self,

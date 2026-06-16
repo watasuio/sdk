@@ -76,9 +76,9 @@ export class Process {
     await this.handle.kill()
   }
 
-  async wait(timeout?: number): Promise<ProcessOutput> {
+  async wait(timeoutMs?: number): Promise<ProcessOutput> {
     if (!this.waitPromise) this.waitPromise = this.waitOnce()
-    return waitFor(this.waitPromise, timeout)
+    return waitFor(this.waitPromise, timeoutMs)
   }
 
   private async waitOnce(): Promise<ProcessOutput> {
@@ -138,7 +138,7 @@ export class ProcessManager {
   async startAndWait(opts: ProcessOpts): Promise<ProcessOutput>
   async startAndWait(cmdOrOpts: string | ProcessOpts): Promise<ProcessOutput> {
     const process = await this.start(cmdOrOpts as ProcessOpts)
-    return process.wait(typeof cmdOrOpts === 'string' ? undefined : cmdOrOpts.timeout)
+    return process.wait(typeof cmdOrOpts === 'string' ? undefined : cmdOrOpts.timeoutMs)
   }
 }
 

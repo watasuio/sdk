@@ -103,7 +103,6 @@ export {
   waitForProcess,
   waitForTimeout,
   waitForURL,
-  waitForUrl,
 } from './template.js'
 export type {
   BuildInfo,
@@ -136,8 +135,6 @@ export interface RunCodeOpts {
   onError?: (error: ExecutionError) => void
   envs?: Record<string, string>
   timeoutMs?: number
-  /** Deprecated alias for `timeoutMs`, in seconds. */
-  timeout?: number
   requestTimeoutMs?: number
   signal?: AbortSignal
 }
@@ -321,7 +318,7 @@ export class Sandbox extends BaseSandbox {
       language: opts.language,
       context_id: contextId(opts.context),
       env_vars: opts.envs,
-      ...(opts.timeoutMs !== undefined ? { timeout_ms: opts.timeoutMs } : { timeout_seconds: opts.timeout }),
+      timeout_ms: opts.timeoutMs,
     })
     const response = await this.runtimePostJson('/runtime/v1/code/run', payload, {
       requestTimeoutMs: opts.requestTimeoutMs,

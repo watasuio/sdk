@@ -159,11 +159,6 @@ export class Volume {
     }
   }
 
-  /** Alias for `destroy`. */
-  static async delete(volumeId: string, opts: VolumeConnectionConfig = {}): Promise<boolean> {
-    return this.destroy(volumeId, opts)
-  }
-
   /** Fetch this volume's latest metadata. */
   async getInfo(): Promise<VolumeInfo>
   /** Fetch metadata for a path inside this volume. */
@@ -279,11 +274,6 @@ export class Volume {
   /** Destroy this volume. Returns false when it no longer exists. */
   async destroy(opts: ConnectionOpts = {}): Promise<boolean> {
     return Volume.destroy(this.volumeId, this.configOptions(opts))
-  }
-
-  /** Alias for `destroy`. */
-  async delete(opts: ConnectionOpts = {}): Promise<boolean> {
-    return this.destroy(opts)
   }
 
   private configOptions(opts: ConnectionOpts = {}): ConnectionOpts {

@@ -1280,7 +1280,7 @@ def test_sandbox_create_with_mcp_sends_config_to_api_without_sdk_bootstrap(monke
     assert commands == []
 
 
-def test_python_sandbox_main_compatibility_imports():
+def test_python_sandbox_main_imports():
     from watasu.sandbox.main import SandboxBase as ImportedSandboxBase
     from watasu.sandbox.main import SandboxOpts as ImportedSandboxOpts
     from watasu.sandbox.mcp import McpServer as ImportedMcpServer
@@ -1558,10 +1558,9 @@ def test_sandbox_aliases_match_connection_lifecycle_shape(monkeypatch):
 
     monkeypatch.setattr("watasu.sandbox_sync.main.ControlClient", FakeControl)
 
-    sbx = Sandbox.reconnect("existing", api_key="key", timeout=600)
+    sbx = Sandbox.connect("existing", api_key="key", timeout=600)
 
     assert sbx.id == "existing"
-    assert sbx.close() is None
     assert calls[1] == (
         "post",
         "/sandboxes/existing/resume",
@@ -2246,7 +2245,7 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
     ]
 
 
-def test_template_builder_compatibility_serializers_and_mcp_helper(tmp_path):
+def test_template_builder_serializers_and_mcp_helper(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("print('ok')\n")
     (tmp_path / "Dockerfile").write_text(

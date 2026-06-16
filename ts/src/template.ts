@@ -137,9 +137,6 @@ export function waitForURL(url: string, statusCode = 200): ReadyCmd {
   return new ReadyCmd(`curl -s -o /dev/null -w "%{http_code}" ${url} | grep -q "${statusCode}"`)
 }
 
-/** Alias for `waitForURL`. */
-export const waitForUrl = waitForURL
-
 /** Return a ready check that waits for a process name. */
 export function waitForProcess(processName: string): ReadyCmd {
   return new ReadyCmd(`pgrep ${processName} > /dev/null`)

@@ -1,4 +1,4 @@
-"""Synchronous template builder compatibility exports."""
+"""Synchronous template builder exports."""
 
 from .main import Template
 

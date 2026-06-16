@@ -16,7 +16,7 @@ Set `WATASU_API_KEY` before using the SDK.
 import { Sandbox } from '@watasu/sdk'
 
 const sbx = await Sandbox.create()
-await sbx.filesystem.write('/home/user/a.js', 'console.log(2 + 2)')
+await sbx.files.write('/home/user/a.js', 'console.log(2 + 2)')
 const result = await sbx.process.startAndWait('node /home/user/a.js')
 console.log(result.stdout)
 console.log(await sbx.isRunning())
@@ -152,12 +152,12 @@ const remoteUrl = await sbx.git.remoteGet('/workspace/project', 'origin')
 await sbx.git.restore('/workspace/project', { paths: ['README.md'] })
 await sbx.git.reset('/workspace/project', { mode: 'hard', target: 'HEAD' })
 
-await sbx.filesystem.writeFiles([
+await sbx.files.writeFiles([
   { path: '/workspace/project/a.txt', data: 'alpha' },
   { path: '/workspace/project/b.bin', data: new Uint8Array([0, 1, 2]) },
 ])
 
-const watcher = sbx.filesystem.watchDir('/workspace/project')
+const watcher = sbx.files.watchDir('/workspace/project')
 watcher.addEventListener((event) => {
   console.log(event.type, event.path)
 })

@@ -113,7 +113,6 @@ class Git:
         branch: Optional[str] = None,
         depth: Optional[int] = None,
         recursive: bool = False,
-        submodules: bool = False,
         username: Optional[str] = None,
         password: Optional[str] = None,
         dangerously_store_credentials: bool = False,
@@ -132,7 +131,6 @@ class Git:
                 "branch": branch,
                 "depth": depth,
                 "recursive": recursive if recursive else None,
-                "submodules": submodules if submodules else None,
                 "username": username,
                 "password": password,
                 "dangerously_store_credentials": dangerously_store_credentials

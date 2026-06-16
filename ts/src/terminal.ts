@@ -19,9 +19,8 @@ export type TerminalOpts = {
   terminalID?: string
   cmd?: string
   cwd?: string
-  rootDir?: string
-  envVars?: Record<string, string>
-  timeout?: number
+  envs?: Record<string, string>
+  timeoutMs?: number
 }
 
 /** A running terminal session in a sandbox. */
@@ -77,10 +76,9 @@ export class TerminalManager {
     const handle = await this.pty.create({
       cmd: opts.cmd,
       cwd: opts.cwd,
-      rootDir: opts.rootDir,
-      envVars: opts.envVars,
+      envs: opts.envs,
       size: opts.size,
-      timeout: opts.timeout,
+      timeoutMs: opts.timeoutMs,
       onData: async (bytes) => {
         const data = new TextDecoder().decode(bytes)
         output.addData(data)

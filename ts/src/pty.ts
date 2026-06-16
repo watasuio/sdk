@@ -39,20 +39,20 @@ export class Pty {
       opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
       this.config.headers
     ).connect()
-    const envs = { TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ...(opts.envVars ?? opts.envs ?? {}) }
+    const envs = { TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ...(opts.envs ?? {}) }
     const size = opts.size ?? { cols: opts.cols ?? 80, rows: opts.rows ?? 24 }
     const args = opts.cmd === undefined ? ['-i', '-l'] : ['-l', '-c', opts.cmd]
     socket.sendJson({
       type: 'start',
       cmd: '/bin/bash',
       args,
-      cwd: opts.cwd ?? opts.rootDir,
+      cwd: opts.cwd,
       user: opts.user,
       environment: envs,
       envs,
       stdin: true,
       pty: { cols: size.cols, rows: size.rows },
-      timeout_ms: opts.timeoutMs ?? opts.timeout ?? 60_000,
+      timeout_ms: opts.timeoutMs ?? 60_000,
     })
     const first = await nextStarted(socket)
     const pid = framePid(first)
@@ -84,7 +84,7 @@ export class Pty {
     }
   }
 
-  /** Alias for `sendStdin`. */
+  /** Send input bytes or text to a PTY. */
   async sendInput(pid: number | string, data: string | Uint8Array, opts: PtyConnectOpts = {}): Promise<void> {
     return this.sendStdin(pid, data, opts)
   }

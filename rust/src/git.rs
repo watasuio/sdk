@@ -123,8 +123,6 @@ pub struct GitCloneOptions {
     pub depth: Option<u64>,
     /// Whether to recurse into submodules.
     pub recursive: bool,
-    /// Alias for `recursive`.
-    pub submodules: bool,
     /// Optional username for private HTTP(S) repositories.
     pub username: Option<String>,
     /// Optional password or token for private HTTP(S) repositories.
@@ -323,9 +321,6 @@ impl Git {
         put_if_some_u64(&mut body, "depth", opts.depth);
         if opts.recursive {
             body.insert("recursive".into(), Value::Bool(true));
-        }
-        if opts.submodules {
-            body.insert("submodules".into(), Value::Bool(true));
         }
         put_if_some_string(&mut body, "username", opts.username);
         put_if_some_string(&mut body, "password", opts.password);

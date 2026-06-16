@@ -114,7 +114,6 @@ export {
   waitForProcess,
   waitForTimeout,
   waitForURL,
-  waitForUrl,
 } from './template.js'
 export type {
   BuildInfo,

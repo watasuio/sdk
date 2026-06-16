@@ -246,11 +246,10 @@ test('sandboxUrl overrides the data-plane URL without changing public hosts', ()
     sandbox: { route_token: 'remote-token' },
   })
 
-  assert.equal(sbx.getHostname(), 'localhost:49983')
   assert.equal(sbx.getHost(3000), 'p3000-remote-token.sandbox.watasuhost.com')
 })
 
-test('sandbox exposes compatibility aliases without destroying local state', async () => {
+test('sandbox exposes helper modules without destroying local state', () => {
   const sbx = new Sandbox({
     sandboxId: '1',
     connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
@@ -259,13 +258,9 @@ test('sandbox exposes compatibility aliases without destroying local state', asy
   })
 
   assert.equal(sbx.id, '1')
-  assert.equal(sbx.filesystem, sbx.files)
   assert.equal(typeof sbx.process.start, 'function')
   assert.equal(typeof sbx.terminal.start, 'function')
-  assert.equal(sbx.getHostname(), 'derived-token.sandbox.watasuhost.com')
-  assert.equal(sbx.getHostname(8080), 'p8080-derived-token.sandbox.watasuhost.com')
-  assert.equal(sbx.getProtocol('http', true), 'https')
-  await sbx.close()
+  assert.equal(sbx.getHost(8080), 'p8080-derived-token.sandbox.watasuhost.com')
 })
 
 test('process output preserves stdout stderr and exit code', () => {
@@ -1034,7 +1029,7 @@ test('sandbox connect and setTimeout use root timeout payloads', async () => {
   }
 })
 
-test('sandbox pause and resume use lifecycle compatibility routes', async () => {
+test('sandbox pause and resume use lifecycle routes', async () => {
   const originalFetch = globalThis.fetch
   const requests = []
   try {
@@ -1456,7 +1451,7 @@ test('template builder sends snake_case build payloads and parses status', async
   }
 })
 
-test('template alias and tag helpers use compatibility routes', async () => {
+test('template alias and tag helpers use template routes', async () => {
   const originalFetch = globalThis.fetch
   const requests = []
   try {
@@ -1559,7 +1554,7 @@ test('git helper uses data-plane git routes', async () => {
     })
 
     const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, user: 'sandbox', cwd: '/workspace', timeoutMs: 10_000 })
-    await sbx.git.dangerouslyAuthenticate({ username: 'user', password: 'token', host: 'git.example.com', protocol: 'https', timeout: 5 })
+    await sbx.git.dangerouslyAuthenticate({ username: 'user', password: 'token', host: 'git.example.com', protocol: 'https', timeoutMs: 5_000 })
     await sbx.git.configureUser('Watasu Test', 'test@watasu.local', { scope: 'local', path: '/workspace/repo' })
     await sbx.git.init('/workspace/repo', { initialBranch: 'main' })
     const status = await sbx.git.status('/workspace/repo', { user: 'sandbox', cwd: '/workspace' })

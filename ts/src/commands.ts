@@ -41,20 +41,14 @@ export interface CommandStartOpts {
   /** Arguments for `cmd` when starting a direct executable. */
   args?: string[]
   cwd?: string
-  /** Deprecated alias for `cwd`. */
-  rootDir?: string
   user?: string
   envs?: Record<string, string>
-  /** Alias for `envs`. */
-  envVars?: Record<string, string>
   onStdout?: (data: string) => void | Promise<void>
   onStderr?: (data: string) => void | Promise<void>
   onPty?: (data: Uint8Array) => void | Promise<void>
   onExit?: (exitCode: number) => void | Promise<void>
   stdin?: boolean
   timeoutMs?: number
-  /** Alias for `timeoutMs`. */
-  timeout?: number
   processID?: string
   requestTimeoutMs?: number
   signal?: AbortSignal
@@ -211,7 +205,7 @@ export class Commands {
   async run(cmd: string, opts: CommandStartOpts = {}): Promise<CommandHandle | CommandResult> {
     const handle = await this.start(cmd, opts)
     if (opts.background) return handle
-    return handle.wait(opts.timeoutMs ?? opts.timeout)
+    return handle.wait(opts.timeoutMs)
   }
 
   /** Reconnect to a live process stream by pid. */
@@ -237,19 +231,19 @@ export class Commands {
       opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
       this.config.headers
     ).connect()
-    const environment = { ...this.sandboxEnvs, ...(opts.envVars ?? opts.envs ?? {}) }
+    const environment = { ...this.sandboxEnvs, ...(opts.envs ?? {}) }
     const processConfig = processStartConfig(cmd, opts)
     socket.sendJson({
       type: 'start',
       id: opts.processID,
       cmd: processConfig.cmd,
       args: processConfig.args,
-      cwd: opts.cwd ?? opts.rootDir,
+      cwd: opts.cwd,
       user: opts.user,
       environment,
       envs: environment,
       stdin: opts.stdin ?? false,
-      timeout_ms: opts.timeoutMs ?? opts.timeout ?? 60_000,
+      timeout_ms: opts.timeoutMs ?? 60_000,
     })
     const first = await nextStarted(socket)
     const pid = framePid(first)

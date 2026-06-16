@@ -80,11 +80,6 @@ export class WatchHandle {
     this.socket.close()
   }
 
-  /** Alias for `stop`. */
-  close(): void {
-    this.stop()
-  }
-
   /** Resolves when the watcher stream exits. */
   wait(): Promise<void> {
     return this.done

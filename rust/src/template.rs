@@ -275,7 +275,7 @@ pub struct BuildInfo {
     pub build_id: String,
     /// Template name.
     pub name: String,
-    /// Alias kept for compatibility with other Watasu SDKs.
+    /// First template alias.
     pub alias: String,
     /// Tags assigned to the build.
     pub tags: Vec<String>,
