@@ -78,18 +78,24 @@ class Sandbox(BaseSandbox):
     def remove_code_context(
         self,
         context: Union[Context, str],
+        request_timeout: Optional[float] = None,
     ) -> None:
         """Remove a persistent code context."""
 
         self._require_data_plane().delete_json(
             f"/runtime/v1/code/contexts/{_context_path_id(context)}",
+            request_timeout=request_timeout,
         )
 
-    def list_code_contexts(self) -> List[Context]:
+    def list_code_contexts(
+        self,
+        request_timeout: Optional[float] = None,
+    ) -> List[Context]:
         """List persistent code contexts."""
 
         response = self._require_data_plane().get_json(
             "/runtime/v1/code/contexts",
+            request_timeout=request_timeout,
         )
         contexts = response if isinstance(response, list) else response.get("contexts", [])
         return [context_from_api(item) for item in contexts]
@@ -97,12 +103,14 @@ class Sandbox(BaseSandbox):
     def restart_code_context(
         self,
         context: Union[Context, str],
+        request_timeout: Optional[float] = None,
     ) -> None:
         """Restart a persistent code context."""
 
         self._require_data_plane().post_json(
             f"/runtime/v1/code/contexts/{_context_path_id(context)}/restart",
             json={},
+            request_timeout=request_timeout,
         )
 
 
@@ -190,30 +198,38 @@ class AsyncSandbox(BaseAsyncSandbox):
     async def remove_code_context(
         self,
         context: Union[Context, str],
+        request_timeout: Optional[float] = None,
     ) -> None:
         """Remove a persistent code context."""
 
         await asyncio.to_thread(
             self._sync.remove_code_context,
             context,
+            request_timeout=request_timeout,
         )
 
-    async def list_code_contexts(self) -> List[Context]:
+    async def list_code_contexts(
+        self,
+        request_timeout: Optional[float] = None,
+    ) -> List[Context]:
         """List persistent code contexts."""
 
         return await asyncio.to_thread(
             self._sync.list_code_contexts,
+            request_timeout=request_timeout,
         )
 
     async def restart_code_context(
         self,
         context: Union[Context, str],
+        request_timeout: Optional[float] = None,
     ) -> None:
         """Restart a persistent code context."""
 
         await asyncio.to_thread(
             self._sync.restart_code_context,
             context,
+            request_timeout=request_timeout,
         )
 
 
