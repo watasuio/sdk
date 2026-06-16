@@ -49,8 +49,16 @@ export interface VolumeApiParams extends ConnectionOpts {
   team?: string
 }
 
-export type VolumeConnectionConfig = ConnectionOpts
-export const VolumeConnectionConfig = ConnectionConfig
+export type VolumeApiOpts = ConnectionOpts
+
+export class VolumeConnectionConfig extends ConnectionConfig {
+  readonly token?: string
+
+  constructor(volume: Volume, opts: VolumeApiOpts = {}) {
+    super(opts)
+    this.token = volume.token
+  }
+}
 
 export interface VolumeListOpts extends ConnectionOpts {
   team?: string
@@ -78,7 +86,6 @@ export interface VolumeMetadataOpts extends ConnectionOpts {
 }
 
 export type VolumeAndToken = VolumeInfo & { token: string }
-export type VolumeApiOpts = ConnectionOpts
 export type VolumeMetadataOptions = Omit<VolumeMetadataOpts, keyof ConnectionOpts>
 export type VolumeWriteOptions = Omit<VolumeWriteFileOpts, keyof ConnectionOpts>
 
@@ -95,13 +102,37 @@ export class Volume {
   private readonly config: ConnectionConfig
   private readonly control: ControlClient
 
+  constructor(volumeId: string, name: string, token: string, domain?: string, debug?: boolean, proxy?: string)
   constructor(opts: {
     volumeId: string
     name?: string
     token?: string
     connectionConfig: ConnectionConfig
     control?: ControlClient
-  }) {
+  })
+  constructor(
+    volumeOrOpts: string | {
+      volumeId: string
+      name?: string
+      token?: string
+      connectionConfig: ConnectionConfig
+      control?: ControlClient
+    },
+    name?: string,
+    token?: string,
+    domain?: string,
+    debug?: boolean,
+    proxy?: string
+  ) {
+    const opts = typeof volumeOrOpts === 'string'
+      ? {
+          volumeId: volumeOrOpts,
+          name,
+          token,
+          connectionConfig: new ConnectionConfig({ domain, debug, proxy }),
+        }
+      : volumeOrOpts
+
     this.volumeId = String(opts.volumeId)
     this.id = this.volumeId
     this.name = opts.name ?? this.volumeId
@@ -126,7 +157,7 @@ export class Volume {
   }
 
   /** Connect to an existing volume by id or name. */
-  static async connect(volumeId: string, opts: VolumeConnectionConfig = {}): Promise<Volume> {
+  static async connect(volumeId: string, opts: VolumeApiOpts = {}): Promise<Volume> {
     const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
     const payload = await control.get(`/volumes/${encodeURIComponent(volumeId)}`, {
@@ -137,7 +168,7 @@ export class Volume {
   }
 
   /** Fetch metadata for an existing volume by id or name. */
-  static async getInfo(volumeId: string, opts: VolumeConnectionConfig = {}): Promise<VolumeInfo> {
+  static async getInfo(volumeId: string, opts: VolumeApiOpts = {}): Promise<VolumeInfo> {
     const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
     const payload = await control.get(`/volumes/${encodeURIComponent(volumeId)}`, {
@@ -161,7 +192,7 @@ export class Volume {
   }
 
   /** Destroy a volume by id or name. Returns false when it does not exist. */
-  static async destroy(volumeId: string, opts: VolumeConnectionConfig = {}): Promise<boolean> {
+  static async destroy(volumeId: string, opts: VolumeApiOpts = {}): Promise<boolean> {
     const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
     try {
