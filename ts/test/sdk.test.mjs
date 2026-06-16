@@ -31,7 +31,12 @@ import {
   waitForTimeout,
   waitForURL,
 } from '../dist/index.js'
-import { Sandbox as CodeInterpreterSandbox } from '../dist/codeInterpreter.js'
+import {
+  ConnectionConfig as CodeInterpreterConnectionConfig,
+  Pty as CodeInterpreterPty,
+  Sandbox as CodeInterpreterSandbox,
+  Template as CodeInterpreterTemplate,
+} from '../dist/codeInterpreter.js'
 
 test('connection config defaults to Watasu hosts', () => {
   const config = new ConnectionConfig({ apiKey: 'key' })
@@ -633,6 +638,14 @@ test('code interpreter sandbox create defaults to code-interpreter template', as
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('code interpreter package re-exports core SDK helpers', () => {
+  assert.equal(CodeInterpreterConnectionConfig, ConnectionConfig)
+  assert.equal(CodeInterpreterTemplate, Template)
+  assert.equal(CodeInterpreterPty, Pty)
+  assert.equal(CodeInterpreterSandbox.defaultTemplate, 'code-interpreter')
+  assert.notEqual(CodeInterpreterSandbox, Sandbox)
 })
 
 test('code interpreter runCode uses runtime API and parses callbacks', async () => {

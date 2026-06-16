@@ -8,6 +8,8 @@ import json
 
 import pytest
 
+import watasu
+import watasu_code_interpreter
 from watasu import (
     ALL_TRAFFIC,
     AsyncSandbox,
@@ -118,6 +120,15 @@ def test_template_sync_and_async_import_paths_match_top_level_exports():
     assert TemplateSyncMain is Template
     assert TemplateAsyncExport is AsyncTemplate
     assert TemplateAsyncMain is AsyncTemplate
+
+
+def test_code_interpreter_package_re_exports_core_sdk_helpers():
+    assert watasu_code_interpreter.Sandbox is CodeInterpreterSandbox
+    assert watasu_code_interpreter.Sandbox is not watasu.Sandbox
+    assert watasu_code_interpreter.Sandbox.default_template == "code-interpreter"
+    assert watasu_code_interpreter.ConnectionConfig is watasu.ConnectionConfig
+    assert watasu_code_interpreter.Template is watasu.Template
+    assert watasu_code_interpreter.PtySize is watasu.PtySize
 
 
 def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatch):
