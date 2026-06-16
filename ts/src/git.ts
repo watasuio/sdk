@@ -58,14 +58,18 @@ export interface GitCredentialOpts extends GitRequestOpts {
   protocol?: string
 }
 
+export type GitDangerouslyAuthenticateOpts = GitCredentialOpts
+
 export interface GitConfigureUserOpts extends GitRequestOpts {
-  scope?: 'global' | 'local'
+  scope?: GitConfigScope
   path?: string
 }
 
 export interface GitBranchOpts extends GitRequestOpts {
   force?: boolean
 }
+
+export type GitDeleteBranchOpts = GitBranchOpts
 
 export interface GitAddOpts extends GitRequestOpts {
   files?: string[]
@@ -99,9 +103,11 @@ export interface GitRemoteAddOpts extends GitRequestOpts {
 }
 
 export interface GitConfigOpts extends GitRequestOpts {
-  scope?: 'global' | 'local'
+  scope?: GitConfigScope
   path?: string
 }
+
+export type GitConfigScope = 'global' | 'local' | 'system'
 
 export interface GitBranches {
   path?: string

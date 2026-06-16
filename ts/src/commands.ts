@@ -54,6 +54,16 @@ export interface CommandStartOpts {
   signal?: AbortSignal
 }
 
+export type CommandRequestOpts = Pick<CommandStartOpts, 'requestTimeoutMs' | 'signal'>
+export interface CommandConnectOpts extends CommandRequestOpts {
+  timeoutMs?: number
+  onStdout?: (data: string) => void | Promise<void>
+  onStderr?: (data: string) => void | Promise<void>
+}
+export type Stdout = string
+export type Stderr = string
+export type PtyOutput = Uint8Array
+
 /** Live handle for one sandbox process stream. */
 export class CommandHandle implements Partial<CommandResult> {
   private _stdout = ''

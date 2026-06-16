@@ -61,6 +61,55 @@ export class FileNotFoundError extends NotFoundError {
   }
 }
 
+export class SandboxNotFoundError extends NotFoundError {
+  constructor(message = 'Sandbox not found') {
+    super(message)
+    this.name = 'SandboxNotFoundError'
+  }
+}
+
+export class GitAuthError extends AuthenticationError {
+  constructor(message = 'Git authentication failed') {
+    super(message)
+    this.name = 'GitAuthError'
+  }
+}
+
+export class GitUpstreamError extends SandboxError {
+  constructor(message = 'Git upstream tracking is missing') {
+    super(message)
+    this.name = 'GitUpstreamError'
+  }
+}
+
+export class TemplateError extends SandboxError {
+  constructor(message = 'Template error') {
+    super(message)
+    this.name = 'TemplateError'
+  }
+}
+
+export class BuildError extends Error {
+  constructor(message = 'Build error') {
+    super(message)
+    this.name = 'BuildError'
+  }
+}
+
+export class FileUploadError extends BuildError {
+  constructor(message = 'File upload failed') {
+    super(message)
+    this.name = 'FileUploadError'
+  }
+}
+
+export class VolumeError extends Error {
+  constructor(message = 'Volume error') {
+    super(message)
+    this.name = 'VolumeError'
+  }
+}
+
 export function unsupported(feature: string): never {
   throw new NotImplementedError(`${feature} is not supported by Watasu yet`)
 }
@@ -94,6 +143,10 @@ export function errorFromResponse(status: number, payload: unknown): Error {
 
   if (code === 'not_enough_space') return new NotEnoughSpaceError(message)
   if (code === 'file_not_found') return new FileNotFoundError(message)
+  if (code === 'sandbox_not_found') return new SandboxNotFoundError(message)
+  if (code === 'git_auth') return new GitAuthError(message)
+  if (code === 'git_upstream') return new GitUpstreamError(message)
+  if (code === 'template_error') return new TemplateError(message)
   if (status === 401 || status === 403) return new AuthenticationError(message)
   if (status === 404) return new NotFoundError(message)
   if (status === 409) return new ConflictError(message)

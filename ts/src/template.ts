@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { ConnectionConfig, ConnectionOpts } from './connectionConfig.js'
-import { InvalidArgumentError, NotFoundError, SandboxError, unsupported } from './errors.js'
+import { InvalidArgumentError, NotFoundError, SandboxError, TemplateError, unsupported } from './errors.js'
 import { ControlClient, withQuery } from './transport.js'
 
 export type TemplateBuildStatus = 'building' | 'waiting' | 'ready' | 'error'
@@ -19,10 +19,31 @@ export interface BuildInfo {
   buildId: string
 }
 
-export interface LogEntry {
-  timestamp?: Date
-  level: string
-  message: string
+export type LogEntryLevel = 'debug' | 'info' | 'warn' | 'error'
+export type Logger = (logEntry: LogEntry) => void
+
+export class LogEntry {
+  constructor(
+    readonly timestamp: Date = new Date(),
+    readonly level: LogEntryLevel = 'info',
+    readonly message = ''
+  ) {}
+
+  toString(): string {
+    return `[${this.timestamp.toISOString()}] ${this.level}: ${this.message}`
+  }
+}
+
+export class LogEntryStart extends LogEntry {
+  constructor(timestamp: Date = new Date(), message = 'Build started') {
+    super(timestamp, 'info', message)
+  }
+}
+
+export class LogEntryEnd extends LogEntry {
+  constructor(timestamp: Date = new Date(), message = 'Build finished') {
+    super(timestamp, 'info', message)
+  }
 }
 
 export interface BuildStatusReason {
@@ -88,6 +109,17 @@ export type TemplateBuilder = TemplateBase
 export type TemplateFinal = TemplateBase
 export type TemplateFromImage = TemplateBase
 export type ReadyCommand = string | ReadyCmd
+
+export function defaultBuildLogger(options: { minLevel?: LogEntryLevel } = {}): Logger {
+  const order: Record<LogEntryLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 }
+  const minLevel = options.minLevel ?? 'info'
+  return (entry: LogEntry) => {
+    if (order[entry.level] < order[minLevel]) return
+    if (entry.level === 'error') console.error(entry.toString())
+    else if (entry.level === 'warn') console.warn(entry.toString())
+    else console.log(entry.toString())
+  }
+}
 
 interface TemplateFileSpec {
   path: string
@@ -181,10 +213,10 @@ export class TemplateBase {
     options: Omit<BuildOptions, 'alias'> = {}
   ): Promise<BuildInfo> {
     const { name, buildOptions } = normalizeBuildArguments(nameOrOptions, options)
-    buildOptions.onBuildLogs?.({ timestamp: new Date(), level: 'info', message: 'Build started' })
+    buildOptions.onBuildLogs?.(new LogEntryStart())
     const data = await TemplateBase.buildInBackground(template, name, buildOptions)
     await waitForBuildFinish(data, buildOptions)
-    buildOptions.onBuildLogs?.({ timestamp: new Date(), level: 'info', message: 'Build finished' })
+    buildOptions.onBuildLogs?.(new LogEntryEnd())
     return data
   }
 
@@ -739,7 +771,7 @@ async function waitForBuildFinish(data: BuildInfo, options: BuildOptions): Promi
     buildStatus.logEntries.forEach((entry) => options.onBuildLogs?.(entry))
     status = buildStatus.status
     if (status === 'ready') return
-    if (status === 'error') throw new SandboxError(buildStatus.reason?.message ?? 'Template build failed')
+    if (status === 'error') throw new TemplateError(buildStatus.reason?.message ?? 'Template build failed')
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
 }
@@ -791,11 +823,16 @@ function buildStatusReason(payload: Record<string, unknown>): BuildStatusReason 
 
 function logEntry(payload: Record<string, unknown>): LogEntry {
   const timestamp = stringValue(payload.timestamp)
-  return {
-    timestamp: timestamp ? new Date(timestamp) : undefined,
-    level: stringValue(payload.level) ?? 'info',
-    message: stringValue(payload.message) ?? '',
-  }
+  return new LogEntry(
+    timestamp ? new Date(timestamp) : new Date(),
+    logEntryLevel(stringValue(payload.level)),
+    stringValue(payload.message) ?? ''
+  )
+}
+
+function logEntryLevel(value: string | undefined): LogEntryLevel {
+  if (value === 'debug' || value === 'info' || value === 'warn' || value === 'error') return value
+  return 'info'
 }
 
 function templateTag(payload: Record<string, unknown>): TemplateTag {

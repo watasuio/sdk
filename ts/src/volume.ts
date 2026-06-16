@@ -5,7 +5,12 @@ import { NotFoundError, SandboxError } from './errors.js'
 import { base64DecodeBytes, base64DecodeText, base64Encode } from './processSocket.js'
 import { ControlClient, withQuery } from './transport.js'
 
-export type VolumeFileType = 'file' | 'directory' | 'symlink' | string
+export enum VolumeFileType {
+  UNKNOWN = 'unknown',
+  FILE = 'file',
+  DIRECTORY = 'directory',
+  SYMLINK = 'symlink',
+}
 export type VolumeReadFormat = 'text' | 'bytes' | 'blob' | 'stream'
 export type VolumeWriteData = string | Uint8Array | ArrayBuffer | Blob
 
@@ -29,7 +34,7 @@ export interface VolumeInfo {
 export interface VolumeEntryStat {
   path: string
   name: string
-  type: VolumeFileType
+  type: VolumeFileType | string
   size?: number
   mode?: number
   uid?: number
@@ -44,7 +49,8 @@ export interface VolumeApiParams extends ConnectionOpts {
   team?: string
 }
 
-export interface VolumeConnectionConfig extends ConnectionOpts {}
+export type VolumeConnectionConfig = ConnectionOpts
+export const VolumeConnectionConfig = ConnectionConfig
 
 export interface VolumeListOpts extends ConnectionOpts {
   team?: string
@@ -70,6 +76,11 @@ export interface VolumeMetadataOpts extends ConnectionOpts {
   gid?: number
   mode?: number | string
 }
+
+export type VolumeAndToken = VolumeInfo & { token: string }
+export type VolumeApiOpts = ConnectionOpts
+export type VolumeMetadataOptions = Omit<VolumeMetadataOpts, keyof ConnectionOpts>
+export type VolumeWriteOptions = Omit<VolumeWriteFileOpts, keyof ConnectionOpts>
 
 /** Persistent volume that can be mounted into sandboxes and edited while detached. */
 export class Volume {

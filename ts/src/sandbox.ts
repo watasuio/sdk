@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
 import { DataPlaneClient, ControlClient, withQuery } from './transport.js'
@@ -8,6 +10,8 @@ import { Pty } from './pty.js'
 import { ProcessManager } from './process.js'
 import { TerminalManager } from './terminal.js'
 import type { Volume } from './volume.js'
+
+export const ALL_TRAFFIC = '0.0.0.0/0'
 
 export interface SandboxCreateOpts extends ConnectionOpts {
   /** Template slug to create. Defaults to "base". */
@@ -47,6 +51,17 @@ export interface SandboxNetworkUpdate {
   rules?: unknown
   maskRequestHost?: string
 }
+
+export type SandboxNetworkOpts = SandboxNetworkUpdate
+export type SandboxNetworkInfo = SandboxNetworkUpdate
+export type SandboxNetworkRule = Record<string, unknown>
+export type SandboxNetworkRuleInfo = Record<string, unknown>
+export type SandboxNetworkRules = SandboxNetworkRule[]
+export type SandboxNetworkSelectorContext = Record<string, unknown>
+export type SandboxNetworkTransform = Record<string, unknown>
+export type SandboxOpts = SandboxCreateOpts
+export type SandboxApiOpts = ConnectionOpts
+export type SandboxState = string
 
 export interface SandboxNetworkUpdateOpts extends ConnectionOpts {}
 
@@ -156,6 +171,30 @@ export interface RestoreSnapshotOpts extends ConnectionOpts {
   checkpointId?: string | number
   snapshotId?: string | number
   timeoutMs?: number
+}
+
+export interface SignatureOpts {
+  path: string
+  operation: 'read' | 'write'
+  user?: string
+  expirationInSeconds?: number
+  envdAccessToken?: string
+}
+
+export async function getSignature({
+  path,
+  operation,
+  user,
+  expirationInSeconds,
+  envdAccessToken,
+}: SignatureOpts): Promise<{ signature: string; expiration: number | null }> {
+  if (!envdAccessToken) throw new Error('Access token is not set and signature cannot be generated')
+  const expiration = expirationInSeconds ? Math.floor(Date.now() / 1000) + expirationInSeconds : null
+  const signatureRaw = expiration === null
+    ? `${path}:${operation}:${user ?? ''}:${envdAccessToken}`
+    : `${path}:${operation}:${user ?? ''}:${envdAccessToken}:${expiration}`
+  const hashBase64 = await sha256(signatureRaw)
+  return { signature: `v1_${hashBase64.replace(/=+$/, '')}`, expiration }
 }
 
 /** Paginator for listing sandbox snapshots. */
@@ -930,4 +969,13 @@ function routeTokenFromDataPlaneUrl(value: string, dataPlaneDomain: string): str
   if (!host.endsWith(suffix)) return undefined
   const token = host.slice(0, -suffix.length)
   return token || undefined
+}
+
+async function sha256(data: string): Promise<string> {
+  if (globalThis.crypto?.subtle) {
+    const bytes = new TextEncoder().encode(data)
+    const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+    return Buffer.from(hash).toString('base64')
+  }
+  return createHash('sha256').update(data, 'utf8').digest('base64')
 }

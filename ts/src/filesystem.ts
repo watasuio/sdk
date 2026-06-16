@@ -11,6 +11,14 @@ export enum FileType {
   SYMLINK = 'symlink',
 }
 
+export enum FilesystemEventType {
+  CHMOD = 'chmod',
+  CREATE = 'create',
+  REMOVE = 'remove',
+  RENAME = 'rename',
+  WRITE = 'write',
+}
+
 /** Metadata for one sandbox filesystem entry. */
 export interface EntryInfo {
   name: string
@@ -34,7 +42,8 @@ export interface WriteEntry {
 }
 
 export interface FilesystemEvent {
-  type: 'create' | 'write' | 'modify' | 'remove' | 'delete' | 'rename' | string
+  name: string
+  type: FilesystemEventType | string
   path: string
   entry?: EntryInfo
   raw: Record<string, unknown>
@@ -363,16 +372,27 @@ function recordOfStrings(value: unknown): Record<string, string> | undefined {
 
 function filesystemEvent(value: unknown): FilesystemEvent {
   const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const path = String(item.path ?? '')
   return {
     type: normalizeEventType(String(item.type ?? 'modify')),
-    path: String(item.path ?? ''),
+    name: String(item.name ?? relativeName(path)),
+    path,
     entry: item.file && typeof item.file === 'object' ? entryInfo(item.file) : undefined,
     raw: item,
   }
 }
 
 function normalizeEventType(value: string): FilesystemEvent['type'] {
-  if (value === 'delete') return 'remove'
-  if (value === 'modify') return 'write'
+  if (value === 'delete') return FilesystemEventType.REMOVE
+  if (value === 'modify') return FilesystemEventType.WRITE
+  if (value === 'chmod') return FilesystemEventType.CHMOD
+  if (value === 'create') return FilesystemEventType.CREATE
+  if (value === 'remove') return FilesystemEventType.REMOVE
+  if (value === 'rename') return FilesystemEventType.RENAME
+  if (value === 'write') return FilesystemEventType.WRITE
   return value
+}
+
+function relativeName(path: string): string {
+  return path.split('/').filter(Boolean).pop() ?? ''
 }

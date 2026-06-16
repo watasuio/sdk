@@ -5,27 +5,44 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import {
+  ALL_TRAFFIC,
+  ApiClient,
+  BuildError,
   Commands,
   CommandExitError,
   CommandHandle,
   ConnectionConfig,
   FileNotFoundError,
+  FileUploadError,
   Filesystem,
+  FilesystemEventType,
   FilesystemWatcher,
+  GitAuthError,
+  GitUpstreamError,
+  LogEntry,
+  LogEntryEnd,
+  LogEntryStart,
   ProcessManager,
   ProcessOutput,
   ProcessSocket,
   Pty,
   Sandbox,
   SandboxError,
+  SandboxNotFoundError,
   SandboxPaginator,
   SnapshotPaginator,
   WatchHandle,
   ReadyCmd,
   Template,
+  TemplateError,
   Volume,
+  VolumeConnectionConfig,
+  VolumeError,
+  VolumeFileType,
   base64DecodeText,
   base64Encode,
+  defaultBuildLogger,
+  getSignature,
   waitForFile,
   waitForPort,
   waitForProcess,
@@ -48,6 +65,36 @@ test('connection config defaults to Watasu hosts', () => {
   assert.equal(config.apiUrl, 'https://api.watasu.io/v1')
   assert.equal(config.dataPlaneDomain, 'watasuhost.com')
   assert.equal(config.authHeaders.Authorization, 'Bearer key')
+})
+
+test('core package exposes reference-compatible runtime symbols', async () => {
+  assert.equal(ALL_TRAFFIC, '0.0.0.0/0')
+  assert.equal(FilesystemEventType.WRITE, 'write')
+  assert.equal(VolumeFileType.FILE, 'file')
+  assert.equal(VolumeConnectionConfig, ConnectionConfig)
+  assert.equal(typeof ApiClient, 'function')
+  assert.ok(new BuildError('x') instanceof Error)
+  assert.ok(new FileUploadError('x') instanceof BuildError)
+  assert.ok(new GitAuthError('x') instanceof Error)
+  assert.ok(new GitUpstreamError('x') instanceof SandboxError)
+  assert.ok(new SandboxNotFoundError('x') instanceof Error)
+  assert.ok(new TemplateError('x') instanceof SandboxError)
+  assert.ok(new VolumeError('x') instanceof Error)
+
+  const entry = new LogEntry(new Date('2026-06-16T00:00:00Z'), 'info', 'ready')
+  assert.equal(entry.toString(), '[2026-06-16T00:00:00.000Z] info: ready')
+  assert.ok(new LogEntryStart() instanceof LogEntry)
+  assert.ok(new LogEntryEnd() instanceof LogEntry)
+  assert.equal(typeof defaultBuildLogger({ minLevel: 'error' }), 'function')
+
+  const signature = await getSignature({
+    path: '/workspace/a.txt',
+    operation: 'read',
+    user: 'user',
+    envdAccessToken: 'token',
+  })
+  assert.equal(signature.expiration, null)
+  assert.match(signature.signature, /^v1_[A-Za-z0-9+/]+$/)
 })
 
 test('code interpreter models expose chart enums and raw result payloads', () => {

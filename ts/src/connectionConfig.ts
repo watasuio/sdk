@@ -7,6 +7,8 @@ declare const process:
 export const KEEPALIVE_PING_INTERVAL_SEC = 50
 export const SESSION_OPERATION_REQUEST_TIMEOUT_MS = 150_000
 
+export type Username = string
+
 /** Connection options accepted by Watasu SDK entrypoints. */
 export interface ConnectionOpts {
   apiKey?: string
