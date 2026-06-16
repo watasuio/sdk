@@ -11,6 +11,12 @@ const version = versionTag.slice(1)
 const repository = process.env.GITHUB_REPOSITORY
 
 replaceInFile('pyproject.toml', /^version = ".*"$/m, `version = "${version}"`)
+replaceInFile('python-code-interpreter/pyproject.toml', /^version = ".*"$/m, `version = "${version}"`)
+replaceInFile(
+  'python-code-interpreter/pyproject.toml',
+  /"watasu>=[^"]+"/,
+  `"watasu>=${version},<0.2"`,
+)
 replaceInFile('rust/Cargo.toml', /^version = ".*"$/m, `version = "${version}"`)
 
 if (repository) {
@@ -37,6 +43,18 @@ if (repository) {
   }
 }
 writeJson('ts/package.json', packageJson)
+
+const codeInterpreterPackageJson = JSON.parse(readFileSync('ts-code-interpreter/package.json', 'utf8'))
+codeInterpreterPackageJson.version = version
+codeInterpreterPackageJson.dependencies['@watasu/sdk'] = version
+if (repository) {
+  codeInterpreterPackageJson.repository = {
+    type: 'git',
+    url: `git+https://github.com/${repository}.git`,
+    directory: 'ts-code-interpreter',
+  }
+}
+writeJson('ts-code-interpreter/package.json', codeInterpreterPackageJson)
 
 const packageLock = JSON.parse(readFileSync('ts/package-lock.json', 'utf8'))
 packageLock.version = version

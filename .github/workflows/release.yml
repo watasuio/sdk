@@ -70,12 +70,18 @@ jobs:
       - name: Test Python SDK
         run: |
           python -m pytest -q
-          python -m compileall -q python tests
+          python -m compileall -q python python-code-interpreter/src tests
 
       - name: Test TypeScript SDK
         working-directory: ts
         run: |
           npm ci
+          npm test
+
+      - name: Test TypeScript Code Interpreter SDK
+        working-directory: ts-code-interpreter
+        run: |
+          npm install --no-package-lock --no-save ../ts typescript @types/node
           npm test
 
       - name: Test Rust SDK
@@ -94,20 +100,26 @@ jobs:
           set -euo pipefail
           git config user.name 'watasu.io'
           git config user.email 'watasu@watasu.io'
-          git add pyproject.toml rust/Cargo.toml rust/Cargo.lock ts/package.json ts/package-lock.json
+          git add pyproject.toml python-code-interpreter/pyproject.toml rust/Cargo.toml rust/Cargo.lock ts/package.json ts/package-lock.json ts-code-interpreter/package.json
           git commit -m "chore(release): ${{ inputs.version }}"
           git tag -a "${{ inputs.version }}" -m "${{ inputs.version }}"
           git push origin HEAD:main
           git push origin "${{ inputs.version }}"
 
       - name: Build Python package
-        run: python -m build
+        run: |
+          python -m build
+          python -m build python-code-interpreter --outdir dist
 
       - name: Publish Python package
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Publish TypeScript package
         working-directory: ts
+        run: npm publish --access public
+
+      - name: Publish TypeScript Code Interpreter package
+        working-directory: ts-code-interpreter
         run: npm publish --access public
 
       - name: Authenticate crates.io trusted publisher
