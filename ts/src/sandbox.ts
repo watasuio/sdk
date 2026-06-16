@@ -706,6 +706,11 @@ export class Sandbox {
     return fileUrlInfo(record(payload.file_url ?? payload))
   }
 
+  /** Base URL for the sandbox data-plane runtime API. */
+  protected get runtimeBaseUrl(): string {
+    return this.dataPlane.baseUrl
+  }
+
   /** POST JSON to the sandbox data-plane runtime API. */
   protected async runtimePostJson(path: string, json: Record<string, unknown>, opts: ConnectionOpts = {}): Promise<Record<string, unknown>> {
     return this.dataPlane.postJson(path, {

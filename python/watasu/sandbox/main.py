@@ -74,6 +74,11 @@ class SandboxBase:
         return self.connection_config.sandbox_url or self._sandbox_url or ""
 
     @property
+    def envd_direct_url(self) -> str:
+        """Direct data-plane API URL."""
+        return self.envd_api_url
+
+    @property
     def _envd_access_token(self) -> Optional[str]:
         return self._envd_access_token_value
 

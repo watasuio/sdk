@@ -240,6 +240,7 @@ def test_async_sandbox_forwards_base_connection_properties():
     assert async_sandbox.sandbox_domain == "sandbox.watasuhost.com"
     assert async_sandbox.traffic_access_token == "traffic-token"
     assert async_sandbox.envd_api_url == "https://route.sandbox.watasuhost.com"
+    assert async_sandbox.envd_direct_url == "https://route.sandbox.watasuhost.com"
 
 
 def test_commands_list_prefers_stable_process_id_over_guest_os_pid():
@@ -769,6 +770,7 @@ def test_sandbox_url_override_replaces_data_plane_url_without_changing_public_ho
     )
 
     assert sbx.envd_api_url == "http://localhost:49983"
+    assert sbx.envd_direct_url == "http://localhost:49983"
     assert sbx._require_data_plane().base_url == "http://localhost:49983"
     assert sbx.get_host(8000) == "p8000-token.sandbox.watasuhost.com"
     assert calls == ["/sandboxes/123/ports/8000"]

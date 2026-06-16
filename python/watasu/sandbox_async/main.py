@@ -1149,6 +1149,11 @@ class AsyncSandbox:
         return self._sync.envd_api_url
 
     @property
+    def envd_direct_url(self) -> str:
+        """Direct data-plane API URL."""
+        return self._sync.envd_direct_url
+
+    @property
     def files(self) -> AsyncFilesystem:
         """Async filesystem helper."""
         return self._files

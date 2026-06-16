@@ -463,6 +463,10 @@ export class Context {
 export class Sandbox extends BaseSandbox {
   static readonly defaultTemplate = 'code-interpreter'
 
+  protected get jupyterUrl(): string {
+    return this.runtimeBaseUrl
+  }
+
   static async create(opts?: SandboxCreateOpts): Promise<Sandbox>
   static async create(template: string, opts?: SandboxCreateOpts): Promise<Sandbox>
   static async create(templateOrOpts?: string | SandboxCreateOpts, opts: SandboxCreateOpts = {}): Promise<Sandbox> {

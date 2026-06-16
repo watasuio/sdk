@@ -887,6 +887,22 @@ test('code interpreter package re-exports core SDK helpers', () => {
   assert.notEqual(CodeInterpreterSandbox, Sandbox)
 })
 
+test('code interpreter exposes protected runtime URL to subclasses', () => {
+  class InspectableCodeInterpreterSandbox extends CodeInterpreterSandbox {
+    runtimeUrl() {
+      return this.jupyterUrl
+    }
+  }
+
+  const sbx = new InspectableCodeInterpreterSandbox({
+    sandboxId: 'code',
+    connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+    session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
+  })
+
+  assert.equal(sbx.runtimeUrl(), 'https://route.sandbox.watasuhost.com')
+})
+
 test('code interpreter runCode uses runtime API and parses callbacks', async () => {
   const originalFetch = globalThis.fetch
   const requests = []
