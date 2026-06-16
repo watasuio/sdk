@@ -13,6 +13,7 @@ use crate::ConnectionOptions;
 #[derive(Clone, Debug, Default)]
 pub struct TemplateBuilder {
     base: Option<String>,
+    from_image: Option<String>,
     packages: BTreeMap<String, Vec<String>>,
     setup: Vec<String>,
     env: BTreeMap<String, String>,
@@ -32,48 +33,46 @@ impl TemplateBuilder {
     /// Start from the Watasu platform base template.
     pub fn from_base_image(mut self) -> Self {
         self.base = Some("base".to_string());
+        self.from_image = None;
         self
     }
 
-    /// Start from the Watasu base rootfs for Debian-shaped builder code.
-    pub fn from_debian_image(mut self, _variant: impl Into<String>) -> Self {
-        self.base.get_or_insert_with(|| "base".to_string());
-        self
+    /// Start from a Debian public base image.
+    pub fn from_debian_image(self, variant: impl Into<String>) -> Self {
+        self.from_image(format!("debian:{}", variant.into()))
     }
 
-    /// Start from the Watasu base rootfs for Ubuntu-shaped builder code.
-    pub fn from_ubuntu_image(mut self, _variant: impl Into<String>) -> Self {
-        self.base.get_or_insert_with(|| "base".to_string());
-        self
+    /// Start from an Ubuntu public base image.
+    pub fn from_ubuntu_image(self, variant: impl Into<String>) -> Self {
+        self.from_image(format!("ubuntu:{}", variant.into()))
     }
 
     /// Start from a named Watasu template base.
     pub fn from_template(mut self, template: impl Into<String>) -> Self {
         self.base = Some(template.into());
+        self.from_image = None;
         self
     }
 
-    /// Use the Watasu base rootfs for Python package-spec builds.
-    pub fn from_python_image(mut self, _version: impl Into<String>) -> Self {
-        self.base.get_or_insert_with(|| "base".to_string());
-        self
+    /// Start from a Python public base image.
+    pub fn from_python_image(self, version: impl Into<String>) -> Self {
+        self.from_image(format!("python:{}", version.into()))
     }
 
-    /// Use the Watasu base rootfs for Node package-spec builds.
-    pub fn from_node_image(mut self, _variant: impl Into<String>) -> Self {
-        self.base.get_or_insert_with(|| "base".to_string());
-        self
+    /// Start from a Node.js public base image.
+    pub fn from_node_image(self, variant: impl Into<String>) -> Self {
+        self.from_image(format!("node:{}", variant.into()))
     }
 
-    /// Use the Watasu base rootfs for Bun package-spec builds.
-    pub fn from_bun_image(mut self, _variant: impl Into<String>) -> Self {
-        self.base.get_or_insert_with(|| "base".to_string());
-        self
+    /// Start from a Bun public base image.
+    pub fn from_bun_image(self, variant: impl Into<String>) -> Self {
+        self.from_image(format!("oven/bun:{}", variant.into()))
     }
 
-    /// Accept image-shaped builder code while using Watasu's package-spec base.
-    pub fn from_image(mut self, _image: impl Into<String>) -> Self {
-        self.base.get_or_insert_with(|| "base".to_string());
+    /// Start from a public container image reference.
+    pub fn from_image(mut self, image: impl Into<String>) -> Self {
+        self.from_image = Some(image.into());
+        self.base = None;
         self
     }
 
@@ -172,7 +171,10 @@ impl TemplateBuilder {
     pub fn build_spec(&self) -> Value {
         let mut spec = serde_json::Map::new();
         if let Some(base) = &self.base {
-            spec.insert("base".to_string(), json!(base));
+            spec.insert("from_template".to_string(), json!(base));
+        }
+        if let Some(image) = &self.from_image {
+            spec.insert("from_image".to_string(), json!(image));
         }
         if !self.packages.is_empty() {
             spec.insert("packages".to_string(), json!(self.packages));
@@ -200,7 +202,13 @@ impl TemplateBuilder {
 
     /// Return a Dockerfile-shaped preview of the supported package spec.
     pub fn to_dockerfile(&self) -> String {
-        let mut lines = vec![format!("FROM {}", self.base.as_deref().unwrap_or("base"))];
+        let mut lines = vec![format!(
+            "FROM {}",
+            self.from_image
+                .as_deref()
+                .or(self.base.as_deref())
+                .unwrap_or("base")
+        )];
         for package in self.packages.get("apt").into_iter().flatten() {
             lines.push(format!(
                 "RUN apt-get update && apt-get install -y {package}"
@@ -655,7 +663,7 @@ mod tests {
         assert_eq!(
             spec,
             json!({
-                "base": "base",
+                "from_image": "python:3.12",
                 "packages": {"apt": ["git"], "pip": ["pytest"]},
                 "setup": ["cd '/workspace' && echo ready"],
             })
@@ -673,14 +681,14 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&template.to_json()).unwrap(),
             json!({
-                "base": "base",
+                "from_image": "python:3.12",
                 "packages": {"apt": ["git"], "pip": ["pytest"]},
                 "setup": ["echo ready"],
             })
         );
         assert_eq!(
             template.to_dockerfile(),
-            "FROM base\nRUN apt-get update && apt-get install -y git\nRUN python3 -m pip install pytest\nRUN echo ready\n"
+            "FROM python:3.12\nRUN apt-get update && apt-get install -y git\nRUN python3 -m pip install pytest\nRUN echo ready\n"
         );
 
         let mcp_template = TemplateBuilder::new()
@@ -689,7 +697,7 @@ mod tests {
         assert_eq!(
             mcp_template.build_spec(),
             json!({
-                "base": "mcp-gateway",
+                "from_template": "mcp-gateway",
                 "setup": ["mcp-gateway pull exa brave"],
             })
         );

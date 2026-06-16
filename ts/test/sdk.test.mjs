@@ -1585,7 +1585,7 @@ test('template builder sends snake_case build payloads and parses status', async
     assert.equal(status.status, 'ready')
     assert.equal(status.logEntries[0].message, 'done')
     assert.deepEqual(JSON.parse(await Template.toJSON(mcpTemplate)), {
-      base: 'mcp-gateway',
+      from_template: 'mcp-gateway',
       setup: ['mcp-gateway pull exa brave'],
     })
     assert.equal(waitForPort(8000).getCmd(), 'ss -tuln | grep :8000')
@@ -1609,7 +1609,7 @@ test('template builder sends snake_case build payloads and parses status', async
       .betaDevContainerPrebuild('/workspace/project')
       .betaSetDevContainerStart('/workspace/project')
     assert.deepEqual(JSON.parse(await Template.toJSON(devcontainerTemplate)), {
-      base: 'devcontainer',
+      from_template: 'devcontainer',
       setup: [
         'git clone https://example.test/project.git /workspace/project',
         'devcontainer build --workspace-folder /workspace/project',
@@ -1622,7 +1622,7 @@ test('template builder sends snake_case build payloads and parses status', async
       /devcontainer template/
     )
     assert.equal(Template.toDockerfile(template), [
-      'FROM base',
+      'FROM python:3.12',
       'RUN apt-get update && apt-get install -y git',
       'RUN python3 -m pip install pytest',
       'COPY src/app.js /workspace/app.js',
@@ -1632,7 +1632,7 @@ test('template builder sends snake_case build payloads and parses status', async
     assert.deepEqual(JSON.parse(await Template.toJSON(
       Template({ fileContextPath: contextPath }).fromDockerfile('Dockerfile')
     )), {
-      base: 'base',
+      from_image: 'node:22',
       files: [
         {
           path: '/workspace/src/app.js',
@@ -1646,14 +1646,22 @@ test('template builder sends snake_case build payloads and parses status', async
       ready_cmd: 'sleep 20',
     })
     assert.throws(() => Template().addMcpServer('exa'), /mcp-gateway/)
-    assert.throws(
-      () => Template().fromAWSRegistry('image', { accessKeyId: 'key', secretAccessKey: 'secret', region: 'us-east-1' }),
-      /not supported/
-    )
-    assert.throws(
-      () => Template().fromGCPRegistry('image', { serviceAccountJSON: {} }),
-      /not supported/
-    )
+    assert.deepEqual(Template().fromAWSRegistry('image', { accessKeyId: 'key', secretAccessKey: 'secret', region: 'us-east-1' }).toBuildSpec(), {
+      from_image: 'image',
+      from_image_registry: {
+        type: 'aws',
+        aws_access_key_id: 'key',
+        aws_secret_access_key: 'secret',
+        aws_region: 'us-east-1',
+      },
+    })
+    assert.deepEqual(Template().fromGCPRegistry('image', { serviceAccountJSON: {} }).toBuildSpec(), {
+      from_image: 'image',
+      from_image_registry: {
+        type: 'gcp',
+        service_account_json: {},
+      },
+    })
     assert.deepEqual(requests, [
       {
         url: 'https://api.watasu.io/v1/templates',
@@ -1665,7 +1673,7 @@ test('template builder sends snake_case build payloads and parses status', async
           memory_mb: 4096,
           skip_cache: true,
           build_spec: {
-            base: 'base',
+            from_image: 'python:3.12',
             packages: { apt: ['git'], pip: ['pytest'] },
             files: [
               {

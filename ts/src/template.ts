@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { ConnectionConfig, ConnectionOpts } from './connectionConfig.js'
-import { InvalidArgumentError, NotFoundError, SandboxError, TemplateError, unsupported } from './errors.js'
+import { InvalidArgumentError, NotFoundError, SandboxError, TemplateError } from './errors.js'
 import { ControlClient, withQuery } from './transport.js'
 
 export type TemplateBuildStatus = 'building' | 'waiting' | 'ready' | 'error'
@@ -131,6 +131,10 @@ interface TemplateFileSpec {
 
 interface BuildSpec {
   base?: string
+  from_template?: string
+  from_image?: string
+  from_image_registry?: Record<string, unknown>
+  requested_from_image?: string
   packages?: Record<string, string[]>
   files?: TemplateFileSpec[]
   setup?: string[]
@@ -188,6 +192,8 @@ export function waitForTimeout(timeout: number): ReadyCmd {
 /** Chainable template builder for Watasu package-spec template builds. */
 export class TemplateBase {
   private base: string | undefined
+  private fromImageReference: string | undefined
+  private fromImageRegistry: Record<string, unknown> | undefined
   private packages: Record<string, string[]> = {}
   private files: TemplateFileSpec[] = []
   private setup: string[] = []
@@ -319,50 +325,71 @@ export class TemplateBase {
   }
 
   fromDebianImage(_variant = 'stable'): TemplateBuilder {
-    this.base = 'base'
-    return this
+    return this.fromImage(`debian:${_variant}`)
   }
 
   fromUbuntuImage(_variant = 'latest'): TemplateBuilder {
-    this.base = 'base'
-    return this
+    return this.fromImage(`ubuntu:${_variant}`)
   }
 
   fromPythonImage(_version = '3'): TemplateBuilder {
-    this.base = this.base ?? 'base'
-    return this
+    return this.fromImage(`python:${_version}`)
   }
 
   fromNodeImage(_variant = 'lts'): TemplateBuilder {
-    this.base = this.base ?? 'base'
-    return this
+    return this.fromImage(`node:${_variant}`)
   }
 
   fromBunImage(_variant = 'latest'): TemplateBuilder {
-    this.base = this.base ?? 'base'
-    return this
+    return this.fromImage(`oven/bun:${_variant}`)
   }
 
   fromBaseImage(): TemplateBuilder {
-    this.base = 'base'
+    return this.fromTemplate('base')
+  }
+
+  fromImage(baseImage: string, credentials?: { username: string; password: string }): TemplateBuilder {
+    if (credentials && (!credentials.username || !credentials.password)) {
+      throw new InvalidArgumentError('Both username and password are required when providing registry credentials')
+    }
+    this.fromImageReference = baseImage
+    this.base = undefined
+    this.fromImageRegistry = credentials
+      ? {
+          type: 'registry',
+          username: credentials.username,
+          password: credentials.password,
+        }
+      : undefined
     return this
   }
 
-  fromImage(_baseImage: string, _credentials?: { username: string; password: string }): TemplateBuilder {
-    this.base = this.base ?? 'base'
+  fromAWSRegistry(image: string, credentials: { accessKeyId: string; secretAccessKey: string; region: string }): TemplateBuilder {
+    this.fromImageReference = image
+    this.base = undefined
+    this.fromImageRegistry = {
+      type: 'aws',
+      aws_access_key_id: credentials.accessKeyId,
+      aws_secret_access_key: credentials.secretAccessKey,
+      aws_region: credentials.region,
+    }
     return this
   }
 
-  fromAWSRegistry(_image: string, _credentials: { accessKeyId: string; secretAccessKey: string; region: string }): TemplateBuilder {
-    unsupported('Template.fromAWSRegistry')
-  }
-
-  fromGCPRegistry(_image: string, _credentials: { serviceAccountJSON: object | string }): TemplateBuilder {
-    unsupported('Template.fromGCPRegistry')
+  fromGCPRegistry(image: string, credentials: { serviceAccountJSON: object | string }): TemplateBuilder {
+    this.fromImageReference = image
+    this.base = undefined
+    this.fromImageRegistry = {
+      type: 'gcp',
+      service_account_json: credentials.serviceAccountJSON,
+    }
+    return this
   }
 
   fromTemplate(template: string): TemplateBuilder {
     this.base = template
+    this.fromImageReference = undefined
+    this.fromImageRegistry = undefined
     return this
   }
 
@@ -516,7 +543,9 @@ export class TemplateBase {
 
   toBuildSpec(): BuildSpec {
     const spec: BuildSpec = {}
-    if (this.base) spec.base = this.base
+    if (this.base) spec.from_template = this.base
+    if (this.fromImageReference) spec.from_image = this.fromImageReference
+    if (this.fromImageRegistry) spec.from_image_registry = this.fromImageRegistry
     if (Object.keys(this.packages).length > 0) spec.packages = this.packages
     if (this.files.length > 0) spec.files = this.files
     if (this.setup.length > 0) spec.setup = this.setup
@@ -598,7 +627,7 @@ export class TemplateBase {
   }
 
   private toDockerfile(): string {
-    const lines = ['FROM base']
+    const lines = [`FROM ${this.fromImageReference ?? this.base ?? 'base'}`]
     for (const packageName of this.packages.apt ?? []) lines.push(`RUN apt-get update && apt-get install -y ${packageName}`)
     for (const packageName of this.packages.pip ?? []) lines.push(`RUN python3 -m pip install ${packageName}`)
     for (const packageName of this.packages.npm ?? []) lines.push(`RUN npm install -g ${packageName}`)

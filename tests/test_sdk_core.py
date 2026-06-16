@@ -2590,7 +2590,7 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
                 "memory_mb": 4096,
                 "skip_cache": True,
                 "build_spec": {
-                    "base": "base",
+                    "from_image": "python:3.12",
                     "packages": {"apt": ["git"], "pip": ["pytest"]},
                     "files": [
                         {
@@ -2641,7 +2641,7 @@ def test_template_builder_serializers_and_mcp_helper(tmp_path):
     )
 
     assert json.loads(Template.to_json(template)) == {
-        "base": "base",
+        "from_image": "python:3.12",
         "packages": {"apt": ["git"], "pip": ["pytest"]},
         "files": [
             {
@@ -2653,7 +2653,7 @@ def test_template_builder_serializers_and_mcp_helper(tmp_path):
         "setup": ["echo ready"],
     }
     assert Template.to_dockerfile(template) == (
-        "FROM base\n"
+        "FROM python:3.12\n"
         "RUN apt-get update && apt-get install -y git\n"
         "RUN python3 -m pip install pytest\n"
         "COPY src/app.py /workspace/app.py\n"
@@ -2663,7 +2663,7 @@ def test_template_builder_serializers_and_mcp_helper(tmp_path):
     assert Template(file_context_path=str(tmp_path)).from_dockerfile(
         "Dockerfile"
     ).to_build_spec() == {
-        "base": "base",
+        "from_image": "python:3.12",
         "files": [
             {
                 "path": "/workspace/src/app.py",
@@ -2681,7 +2681,14 @@ def test_template_builder_serializers_and_mcp_helper(tmp_path):
         "python:3.12",
         username="registry-user",
         password="registry-password",
-    ).to_build_spec() == {"base": "base"}
+    ).to_build_spec() == {
+        "from_image": "python:3.12",
+        "from_image_registry": {
+            "type": "registry",
+            "username": "registry-user",
+            "password": "registry-password",
+        },
+    }
     assert list(inspect.signature(AsyncTemplate.build).parameters)[:6] == [
         "template",
         "alias",
@@ -2732,18 +2739,32 @@ def test_template_builder_serializers_and_mcp_helper(tmp_path):
         ["exa", "brave"]
     )
     assert mcp_template.to_build_spec() == {
-        "base": "mcp-gateway",
+        "from_template": "mcp-gateway",
         "setup": ["mcp-gateway pull exa brave"],
     }
 
     with pytest.raises(BuildException, match="mcp-gateway"):
         Template().add_mcp_server("exa")
 
-    with pytest.raises(NotImplementedError, match="from_aws_registry"):
-        Template().from_aws_registry("image", "key", "secret", "us-east-1")
+    assert Template().from_aws_registry(
+        "image", "key", "secret", "us-east-1"
+    ).to_build_spec() == {
+        "from_image": "image",
+        "from_image_registry": {
+            "type": "aws",
+            "aws_access_key_id": "key",
+            "aws_secret_access_key": "secret",
+            "aws_region": "us-east-1",
+        },
+    }
 
-    with pytest.raises(NotImplementedError, match="from_gcp_registry"):
-        Template().from_gcp_registry("image", {"project_id": "test"})
+    assert Template().from_gcp_registry("image", {"project_id": "test"}).to_build_spec() == {
+        "from_image": "image",
+        "from_image_registry": {
+            "type": "gcp",
+            "service_account_json": {"project_id": "test"},
+        },
+    }
 
 
 def test_ready_timeout_uses_milliseconds_with_minimum_one_second():

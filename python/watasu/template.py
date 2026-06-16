@@ -15,7 +15,6 @@ from typing import Any, Callable, Dict, List, Optional, TypedDict, Union
 from watasu._transport.control import ControlClient
 from watasu.connection_config import ApiParams, ConnectionConfig
 from watasu.exceptions import BuildException, InvalidArgumentException, NotFoundException
-from watasu.stubs import unsupported
 
 
 class TemplateBuildStatus(str, Enum):
@@ -152,6 +151,8 @@ class TemplateBase:
         self._file_context_path = file_context_path
         self._file_ignore_patterns = file_ignore_patterns or []
         self._base: Optional[str] = None
+        self._from_image: Optional[str] = None
+        self._from_image_registry: Optional[Dict[str, Any]] = None
         self._packages: Dict[str, List[str]] = {}
         self._files: List[Dict[str, Any]] = []
         self._setup: List[str] = []
@@ -163,34 +164,28 @@ class TemplateBase:
         self._force = False
 
     def from_debian_image(self, variant: str = "stable") -> "TemplateBase":
-        """Start from the default Watasu base rootfs."""
-        self._base = "base"
-        return self
+        """Start from a Debian public base image."""
+        return self.from_image(f"debian:{variant}")
 
     def from_ubuntu_image(self, variant: str = "latest") -> "TemplateBase":
-        """Start from the default Watasu base rootfs."""
-        self._base = "base"
-        return self
+        """Start from an Ubuntu public base image."""
+        return self.from_image(f"ubuntu:{variant}")
 
     def from_python_image(self, version: str = "3") -> "TemplateBase":
-        """Use the Watasu base rootfs and install Python packages through package-spec pip."""
-        self._base = self._base or "base"
-        return self
+        """Start from a Python public base image."""
+        return self.from_image(f"python:{version}")
 
     def from_node_image(self, variant: str = "lts") -> "TemplateBase":
-        """Use the Watasu base rootfs and install Node packages through package-spec npm."""
-        self._base = self._base or "base"
-        return self
+        """Start from a Node.js public base image."""
+        return self.from_image(f"node:{variant}")
 
     def from_bun_image(self, variant: str = "latest") -> "TemplateBase":
-        """Use the Watasu base rootfs and run Bun setup commands explicitly."""
-        self._base = self._base or "base"
-        return self
+        """Start from a Bun public base image."""
+        return self.from_image(f"oven/bun:{variant}")
 
     def from_base_image(self) -> "TemplateBase":
         """Start from the Watasu platform base template."""
-        self._base = "base"
-        return self
+        return self.from_template("base")
 
     def from_image(
         self,
@@ -198,8 +193,20 @@ class TemplateBase:
         username: Optional[str] = None,
         password: Optional[str] = None,
     ) -> "TemplateBase":
-        """Accept Docker-image-shaped builder code while using Watasu's package-spec base."""
-        self._base = self._base or "base"
+        """Start from a public container image reference."""
+        if (username and not password) or (password and not username):
+            raise InvalidArgumentException(
+                "Both username and password are required when providing registry credentials"
+            )
+        self._from_image = image
+        self._base = None
+        self._from_image_registry = None
+        if username and password:
+            self._from_image_registry = {
+                "type": "registry",
+                "username": username,
+                "password": password,
+            }
         return self
 
     def from_aws_registry(
@@ -209,20 +216,36 @@ class TemplateBase:
         secret_access_key: str,
         region: str,
     ) -> "TemplateBase":
-        """AWS registry template bases are not supported by Watasu package-spec builds yet."""
-        unsupported("Template.from_aws_registry")
+        """Start from an AWS registry image reference."""
+        self._from_image = image
+        self._base = None
+        self._from_image_registry = {
+            "type": "aws",
+            "aws_access_key_id": access_key_id,
+            "aws_secret_access_key": secret_access_key,
+            "aws_region": region,
+        }
+        return self
 
     def from_gcp_registry(
         self,
         image: str,
         service_account_json: Union[str, Dict[str, Any]],
     ) -> "TemplateBase":
-        """GCP registry template bases are not supported by Watasu package-spec builds yet."""
-        unsupported("Template.from_gcp_registry")
+        """Start from a GCP registry image reference."""
+        self._from_image = image
+        self._base = None
+        self._from_image_registry = {
+            "type": "gcp",
+            "service_account_json": service_account_json,
+        }
+        return self
 
     def from_template(self, template: str) -> "TemplateBase":
         """Start this build from a named Watasu template base."""
         self._base = template
+        self._from_image = None
+        self._from_image_registry = None
         return self
 
     def from_dockerfile(self, dockerfile_content_or_path: str) -> "TemplateBase":
@@ -410,7 +433,11 @@ class TemplateBase:
         """Return the snake_case package-spec payload sent to the Watasu API."""
         spec: Dict[str, Any] = {}
         if self._base:
-            spec["base"] = self._base
+            spec["from_template"] = self._base
+        if self._from_image:
+            spec["from_image"] = self._from_image
+        if self._from_image_registry:
+            spec["from_image_registry"] = self._from_image_registry
         if self._packages:
             spec["packages"] = self._packages
         if self._files:
@@ -434,7 +461,7 @@ class TemplateBase:
     def to_dockerfile(template: "TemplateBase") -> str:
         """Return a Dockerfile-shaped preview of the supported package spec."""
         spec = template.to_build_spec()
-        lines = [f"FROM {spec.get('base') or 'base'}"]
+        lines = [f"FROM {spec.get('from_image') or spec.get('from_template') or 'base'}"]
         packages = spec.get("packages") or {}
         for package in packages.get("apt", []):
             lines.append(f"RUN apt-get update && apt-get install -y {package}")

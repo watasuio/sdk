@@ -119,17 +119,19 @@ async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
             .await?;
         assert!(connected_volume.remove("/workspace/hello.txt").await?);
 
-        sandbox = Some(Sandbox::create(create_opts(
-            "base",
-            &team,
-            &prefix,
-            "rust",
-            &[VolumeMount::new(
-                "/mnt/smoke-volume",
-                created_volume.name.clone(),
-            )],
-        ))
-        .await?);
+        sandbox = Some(
+            Sandbox::create(create_opts(
+                "base",
+                &team,
+                &prefix,
+                "rust",
+                &[VolumeMount::new(
+                    "/mnt/smoke-volume",
+                    created_volume.name.clone(),
+                )],
+            ))
+            .await?,
+        );
         let sbx = sandbox.as_mut().unwrap();
         assert!(!sbx.sandbox_id.is_empty());
         assert_eq!(sbx.get_info().await?.sandbox_id, sbx.sandbox_id);
@@ -198,7 +200,9 @@ async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
         .any(|item| item.snapshot_id == snapshot.snapshot_id));
         assert!(sbx.delete_snapshot(&snapshot.snapshot_id).await?);
         snapshots.pop();
-        assert!(!Sandbox::delete_snapshot_by_id(format!("{prefix}-missing-snapshot"), conn()).await?);
+        assert!(
+            !Sandbox::delete_snapshot_by_id(format!("{prefix}-missing-snapshot"), conn()).await?
+        );
 
         let mut connected = Sandbox::connect(&sbx.sandbox_id, conn()).await?;
         assert_eq!(connected.sandbox_id, sbx.sandbox_id);
@@ -241,24 +245,28 @@ async fn exercise_files(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
         )
         .await?;
     assert!(!sbx.files.exists(&format!("{dir}/missing.txt")).await?);
-    sbx.files.write(&format!("{dir}/hello.txt"), b"file-ok").await?;
-    sbx.files.write(&format!("{dir}/bytes.bin"), [4, 5, 6]).await?;
+    sbx.files
+        .write(&format!("{dir}/hello.txt"), b"file-ok")
+        .await?;
+    sbx.files
+        .write(&format!("{dir}/bytes.bin"), [4, 5, 6])
+        .await?;
     sbx.files
         .write_files(vec![
             WriteEntry::new(format!("{dir}/batch-a.txt"), b"a"),
             WriteEntry::new(format!("{dir}/batch-b.txt"), b"b"),
         ])
         .await?;
-    assert_eq!(sbx.files.read_text(&format!("{dir}/hello.txt")).await?, "file-ok");
+    assert_eq!(
+        sbx.files.read_text(&format!("{dir}/hello.txt")).await?,
+        "file-ok"
+    );
     assert_eq!(
         sbx.files.read_bytes(&format!("{dir}/bytes.bin")).await?,
         vec![4, 5, 6]
     );
     assert_eq!(
-        sbx.files
-            .get_info(&format!("{dir}/hello.txt"))
-            .await?
-            .name,
+        sbx.files.get_info(&format!("{dir}/hello.txt")).await?.name,
         "hello.txt"
     );
     assert!(sbx
@@ -276,7 +284,10 @@ async fn exercise_files(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
     let events = tokio::time::timeout(Duration::from_secs(10), watcher.next_events())
         .await
         .map_err(|_| Error::Timeout)??;
-    assert!(events.unwrap_or_default().iter().any(|event| !event.path.is_empty()));
+    assert!(events
+        .unwrap_or_default()
+        .iter()
+        .any(|event| !event.path.is_empty()));
     let _ = watcher.stop().await;
     sbx.files.remove(&format!("{dir}/renamed.txt")).await?;
     Ok(())
@@ -306,7 +317,10 @@ async fn exercise_signed_file_urls(sbx: &Sandbox, prefix: &str) -> watasu::Resul
         )
         .await?;
     assert_eq!(download.method, "GET");
-    assert!(sbx.upload_url(&path, FileUrlOptions::default()).await?.starts_with("http"));
+    assert!(sbx
+        .upload_url(&path, FileUrlOptions::default())
+        .await?
+        .starts_with("http"));
     assert!(sbx
         .download_url(&path, FileUrlOptions::default())
         .await?
@@ -319,7 +333,10 @@ async fn exercise_signed_file_urls(sbx: &Sandbox, prefix: &str) -> watasu::Resul
 }
 
 async fn exercise_commands(sbx: &Sandbox) -> watasu::Result<()> {
-    assert_eq!(sbx.commands.run("printf command-ok").await?.stdout, "command-ok");
+    assert_eq!(
+        sbx.commands.run("printf command-ok").await?.stdout,
+        "command-ok"
+    );
     let error = sbx.commands.run("echo fail >&2; exit 7").await.unwrap_err();
     assert!(matches!(
         error,
@@ -375,7 +392,13 @@ async fn exercise_pty(sbx: &Sandbox) -> watasu::Result<()> {
     let mut connected = sbx.pty.connect(&long.pid).await?;
     connected.disconnect().await?;
     sbx.pty
-        .resize(&long.pid, PtySize { cols: 100, rows: 30 })
+        .resize(
+            &long.pid,
+            PtySize {
+                cols: 100,
+                rows: 30,
+            },
+        )
         .await?;
     let _ = sbx.pty.send_input(&long.pid, "echo ignored\n").await;
     assert!(sbx.pty.kill(&long.pid).await?);
@@ -390,7 +413,9 @@ async fn exercise_git(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
     sbx.commands
         .run(&format!("rm -rf {repo} {remote} {clone}"))
         .await?;
-    sbx.commands.run(&format!("git init --bare {remote}")).await?;
+    sbx.commands
+        .run(&format!("git init --bare {remote}"))
+        .await?;
     sbx.git
         .dangerously_authenticate(GitCredentialOptions {
             username: "user".to_string(),
@@ -560,7 +585,10 @@ async fn exercise_git(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
             },
         )
         .await?;
-    assert_eq!(sbx.files.read_text(&format!("{clone}/file.txt")).await?, "two");
+    assert_eq!(
+        sbx.files.read_text(&format!("{clone}/file.txt")).await?,
+        "two"
+    );
     sbx.commands
         .run(&format!("printf dirty > {repo}/file.txt"))
         .await?;
@@ -574,7 +602,10 @@ async fn exercise_git(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
             },
         )
         .await?;
-    assert_eq!(sbx.files.read_text(&format!("{repo}/file.txt")).await?, "two");
+    assert_eq!(
+        sbx.files.read_text(&format!("{repo}/file.txt")).await?,
+        "two"
+    );
     sbx.commands
         .run(&format!("printf staged > {repo}/staged.txt"))
         .await?;
@@ -629,7 +660,7 @@ fn exercise_template_builder() {
         .add_mcp_server(["server-one"])
         .run_cmd("true")
         .skip_cache();
-    assert_eq!(builder.build_spec()["base"], "base");
+    assert_eq!(builder.build_spec()["from_template"], "base");
     assert!(builder.to_json().contains("\"packages\""));
     assert!(builder.to_dockerfile().contains("FROM base"));
 }
@@ -665,11 +696,7 @@ fn conn() -> ConnectionOptions {
     }
 }
 
-async fn request_bytes(
-    url: &str,
-    method: &str,
-    body: Option<Vec<u8>>,
-) -> watasu::Result<Vec<u8>> {
+async fn request_bytes(url: &str, method: &str, body: Option<Vec<u8>>) -> watasu::Result<Vec<u8>> {
     let method = reqwest::Method::from_bytes(method.as_bytes())
         .map_err(|error| Error::Sandbox(error.to_string()))?;
     let client = reqwest::Client::new();

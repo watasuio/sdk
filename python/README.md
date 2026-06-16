@@ -305,5 +305,5 @@ async def main() -> None:
         await sbx.delete_snapshot(snapshot.snapshot_id)
 ```
 
-Unsupported surfaces raise explicit not-implemented errors instead of silently
-falling back to client-side polling.
+Unsupported control/runtime surfaces fail with explicit errors instead of
+silently falling back to client-side polling.
