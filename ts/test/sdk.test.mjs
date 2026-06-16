@@ -679,7 +679,7 @@ test('code interpreter runCode uses runtime API and parses callbacks', async () 
     const execution = await sbx.runCode("print('hello')\n2 + 3", {
       language: 'python',
       envs: { A: 'B' },
-      timeout: 5,
+      timeoutMs: 5_000,
       requestTimeoutMs: 10,
       onStdout: (message) => stdout.push(message),
       onStderr: (message) => stderr.push(message),
@@ -699,7 +699,7 @@ test('code interpreter runCode uses runtime API and parses callbacks', async () 
           code: "print('hello')\n2 + 3",
           language: 'python',
           env_vars: { A: 'B' },
-          timeout_seconds: 5,
+          timeout_ms: 5000,
         },
       },
     ])

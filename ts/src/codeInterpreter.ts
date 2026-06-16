@@ -135,6 +135,8 @@ export interface RunCodeOpts {
   onResult?: (result: Result) => void
   onError?: (error: ExecutionError) => void
   envs?: Record<string, string>
+  timeoutMs?: number
+  /** Deprecated alias for `timeoutMs`, in seconds. */
   timeout?: number
   requestTimeoutMs?: number
   signal?: AbortSignal
@@ -319,7 +321,7 @@ export class Sandbox extends BaseSandbox {
       language: opts.language,
       context_id: contextId(opts.context),
       env_vars: opts.envs,
-      timeout_seconds: opts.timeout,
+      ...(opts.timeoutMs !== undefined ? { timeout_ms: opts.timeoutMs } : { timeout_seconds: opts.timeout }),
     })
     const response = await this.runtimePostJson('/runtime/v1/code/run', payload, {
       requestTimeoutMs: opts.requestTimeoutMs,
