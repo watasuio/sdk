@@ -10,6 +10,8 @@ import pytest
 
 import watasu
 import watasu_code_interpreter
+import watasu_code_interpreter.charts as ci_charts
+import watasu_code_interpreter.models as ci_models
 from watasu import (
     ALL_TRAFFIC,
     AsyncCommandHandle as TopLevelAsyncCommandHandle,
@@ -171,6 +173,8 @@ def test_code_interpreter_package_re_exports_core_sdk_helpers():
     assert callable(watasu_code_interpreter.OutputHandler)
     assert ci_sync.Sandbox is CodeInterpreterSandbox
     assert ci_async.AsyncSandbox is watasu_code_interpreter.AsyncSandbox
+    assert watasu_code_interpreter.charts is ci_charts
+    assert watasu_code_interpreter.models is ci_models
     assert ci_constants.DEFAULT_TEMPLATE == "code-interpreter"
     assert ci_constants.DEFAULT_TIMEOUT == 300
     assert ci_constants.JUPYTER_PORT == 49999

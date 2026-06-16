@@ -3,7 +3,7 @@
 from watasu import *  # noqa: F403
 from watasu import __all__ as _watasu_all
 
-from . import code_interpreter_async, code_interpreter_sync, constants, exceptions
+from . import charts, code_interpreter_async, code_interpreter_sync, constants, exceptions, models
 from .main import AsyncSandbox, Sandbox
 from .models import (
     Context,
@@ -18,6 +18,7 @@ from .models import (
 
 _code_interpreter_all = [
     "AsyncSandbox",
+    "charts",
     "Context",
     "code_interpreter_async",
     "code_interpreter_sync",
@@ -27,6 +28,7 @@ _code_interpreter_all = [
     "exceptions",
     "Logs",
     "MIMEType",
+    "models",
     "OutputHandler",
     "OutputMessage",
     "Result",
