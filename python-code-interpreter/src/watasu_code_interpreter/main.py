@@ -25,13 +25,13 @@ class Sandbox(BaseSandbox):
         self,
         code: str,
         language: Optional[str] = None,
-        context: Optional[Union[Context, str]] = None,
-        on_stdout: Optional[Callable[[OutputMessage], None]] = None,
-        on_stderr: Optional[Callable[[OutputMessage], None]] = None,
-        on_result: Optional[Callable[[Result], None]] = None,
-        on_error: Optional[Callable[[ExecutionError], None]] = None,
+        context: Optional[Context] = None,
+        on_stdout: Optional[Callable[[OutputMessage], Any]] = None,
+        on_stderr: Optional[Callable[[OutputMessage], Any]] = None,
+        on_result: Optional[Callable[[Result], Any]] = None,
+        on_error: Optional[Callable[[ExecutionError], Any]] = None,
         envs: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None,
+        timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> Execution:
         """Run Python code in the sandbox and return structured execution output."""
@@ -78,21 +78,18 @@ class Sandbox(BaseSandbox):
     def remove_code_context(
         self,
         context: Union[Context, str],
-        request_timeout: Optional[float] = None,
     ) -> None:
         """Remove a persistent code context."""
 
         self._require_data_plane().delete_json(
             f"/runtime/v1/code/contexts/{_context_path_id(context)}",
-            request_timeout=request_timeout,
         )
 
-    def list_code_contexts(self, request_timeout: Optional[float] = None) -> List[Context]:
+    def list_code_contexts(self) -> List[Context]:
         """List persistent code contexts."""
 
         response = self._require_data_plane().get_json(
             "/runtime/v1/code/contexts",
-            request_timeout=request_timeout,
         )
         contexts = response if isinstance(response, list) else response.get("contexts", [])
         return [context_from_api(item) for item in contexts]
@@ -100,14 +97,12 @@ class Sandbox(BaseSandbox):
     def restart_code_context(
         self,
         context: Union[Context, str],
-        request_timeout: Optional[float] = None,
     ) -> None:
         """Restart a persistent code context."""
 
         self._require_data_plane().post_json(
             f"/runtime/v1/code/contexts/{_context_path_id(context)}/restart",
             json={},
-            request_timeout=request_timeout,
         )
 
 
@@ -151,13 +146,13 @@ class AsyncSandbox(BaseAsyncSandbox):
         self,
         code: str,
         language: Optional[str] = None,
-        context: Optional[Union[Context, str]] = None,
-        on_stdout: Optional[Callable[[OutputMessage], None]] = None,
-        on_stderr: Optional[Callable[[OutputMessage], None]] = None,
-        on_result: Optional[Callable[[Result], None]] = None,
-        on_error: Optional[Callable[[ExecutionError], None]] = None,
+        context: Optional[Context] = None,
+        on_stdout: Optional[Callable[[OutputMessage], Any]] = None,
+        on_stderr: Optional[Callable[[OutputMessage], Any]] = None,
+        on_result: Optional[Callable[[Result], Any]] = None,
+        on_error: Optional[Callable[[ExecutionError], Any]] = None,
         envs: Optional[Dict[str, str]] = None,
-        timeout: Optional[int] = None,
+        timeout: Optional[float] = None,
         request_timeout: Optional[float] = None,
     ) -> Execution:
         """Run Python code in the sandbox and return structured execution output."""
@@ -195,46 +190,39 @@ class AsyncSandbox(BaseAsyncSandbox):
     async def remove_code_context(
         self,
         context: Union[Context, str],
-        request_timeout: Optional[float] = None,
     ) -> None:
         """Remove a persistent code context."""
 
         await asyncio.to_thread(
             self._sync.remove_code_context,
             context,
-            request_timeout=request_timeout,
         )
 
-    async def list_code_contexts(
-        self, request_timeout: Optional[float] = None
-    ) -> List[Context]:
+    async def list_code_contexts(self) -> List[Context]:
         """List persistent code contexts."""
 
         return await asyncio.to_thread(
             self._sync.list_code_contexts,
-            request_timeout=request_timeout,
         )
 
     async def restart_code_context(
         self,
         context: Union[Context, str],
-        request_timeout: Optional[float] = None,
     ) -> None:
         """Restart a persistent code context."""
 
         await asyncio.to_thread(
             self._sync.restart_code_context,
             context,
-            request_timeout=request_timeout,
         )
 
 
 def _emit_callbacks(
     execution: Execution,
-    on_stdout: Optional[Callable[[OutputMessage], None]],
-    on_stderr: Optional[Callable[[OutputMessage], None]],
-    on_result: Optional[Callable[[Result], None]],
-    on_error: Optional[Callable[[ExecutionError], None]],
+    on_stdout: Optional[Callable[[OutputMessage], Any]],
+    on_stderr: Optional[Callable[[OutputMessage], Any]],
+    on_result: Optional[Callable[[Result], Any]],
+    on_error: Optional[Callable[[ExecutionError], Any]],
 ) -> None:
     for message in execution.logs.stdout:
         if on_stdout is not None:

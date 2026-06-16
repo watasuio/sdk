@@ -1506,9 +1506,9 @@ def test_code_interpreter_context_methods_use_runtime_api():
     context = sbx.create_code_context(
         cwd="/workspace/app", language="python", request_timeout=5
     )
-    contexts = sbx.list_code_contexts(request_timeout=6)
-    sbx.restart_code_context(context, request_timeout=7)
-    sbx.remove_code_context("ctx-1", request_timeout=8)
+    contexts = sbx.list_code_contexts()
+    sbx.restart_code_context(context)
+    sbx.remove_code_context("ctx-1")
 
     assert context.id == "ctx-1"
     assert contexts[0].cwd == "/workspace/app"
@@ -1521,13 +1521,13 @@ def test_code_interpreter_context_methods_use_runtime_api():
                 "request_timeout": 5,
             },
         ),
-        ("GET", "/runtime/v1/code/contexts", {"request_timeout": 6}),
+        ("GET", "/runtime/v1/code/contexts", {}),
         (
             "POST",
             "/runtime/v1/code/contexts/ctx-1/restart",
-            {"json": {}, "request_timeout": 7},
+            {"json": {}},
         ),
-        ("DELETE", "/runtime/v1/code/contexts/ctx-1", {"request_timeout": 8}),
+        ("DELETE", "/runtime/v1/code/contexts/ctx-1", {}),
     ]
 
 
