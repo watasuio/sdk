@@ -223,12 +223,37 @@ async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
         let _ = sbx.kill().await;
     }
     if let Some(volume) = volume.as_ref() {
-        let _ = volume.destroy().await;
+        let _ = retry_cleanup(|| volume.destroy()).await;
     }
 
     result?;
     assert!(!Volume::destroy_by_id(format!("{prefix}-missing-volume"), conn()).await?);
     Ok(())
+}
+
+async fn retry_cleanup<F, Fut>(mut action: F) -> watasu::Result<bool>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = watasu::Result<bool>>,
+{
+    let mut last_error = None;
+
+    for attempt in 0..8 {
+        match action().await {
+            Ok(true) => return Ok(true),
+            Ok(false) => {}
+            Err(error) => last_error = Some(error),
+        }
+
+        if attempt < 7 {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    match last_error {
+        Some(error) => Err(error),
+        None => Ok(false),
+    }
 }
 
 async fn exercise_files(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {

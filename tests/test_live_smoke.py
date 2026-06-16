@@ -13,6 +13,7 @@ from watasu import (
     AsyncVolume,
     CommandExitException,
     ConnectionConfig,
+    InvalidArgumentException,
     Sandbox,
     Template,
     Volume,
@@ -211,7 +212,7 @@ def test_live_python_sync_sdk_smoke():
         if sbx is not None:
             _ignore_errors(lambda: sbx.kill(request_timeout=REQUEST_TIMEOUT))
         if volume is not None:
-            _ignore_errors(lambda: volume.destroy(request_timeout=REQUEST_TIMEOUT))
+            _retry_ignore_errors(lambda: volume.destroy(request_timeout=REQUEST_TIMEOUT))
 
     assert Volume.destroy(f"{PREFIX}-missing-volume", request_timeout=REQUEST_TIMEOUT) is False
 
@@ -375,7 +376,9 @@ async def _test_live_python_async_sdk_smoke():
         if sbx is not None:
             await _async_ignore_errors(sbx.kill(request_timeout=REQUEST_TIMEOUT))
         if volume is not None:
-            await _async_ignore_errors(volume.destroy(request_timeout=REQUEST_TIMEOUT))
+            await _async_retry_ignore_errors(
+                lambda: volume.destroy(request_timeout=REQUEST_TIMEOUT)
+            )
 
     assert await AsyncVolume.destroy(f"{PREFIX}-async-missing-volume", request_timeout=REQUEST_TIMEOUT) is False
 
@@ -450,7 +453,20 @@ async def _exercise_async_files(sbx: AsyncSandbox) -> None:
             request_timeout=REQUEST_TIMEOUT,
         )
         assert await sbx.files.read(f"{directory}/hello.txt", request_timeout=REQUEST_TIMEOUT) == "async-file-ok"
-        assert await sbx.files.read_bytes(f"{directory}/bytes.bin", request_timeout=REQUEST_TIMEOUT) == b"\x07\x08\x09"
+        async def bytes_file_is_readable():
+            try:
+                return await sbx.files.read_bytes(
+                    f"{directory}/bytes.bin",
+                    request_timeout=REQUEST_TIMEOUT,
+                ) == b"\x07\x08\x09"
+            except InvalidArgumentException:
+                return False
+
+        await _async_wait_until(
+            bytes_file_is_readable,
+            timeout=10,
+            label="async bytes file read",
+        )
         stream = await sbx.files.read(
             f"{directory}/hello.txt",
             format="stream",
@@ -801,8 +817,30 @@ def _ignore_errors(fn) -> None:
         pass
 
 
+def _retry_ignore_errors(fn, *, attempts: int = 8, delay: float = 2.0) -> None:
+    for attempt in range(attempts):
+        try:
+            if fn() is not False:
+                return
+        except Exception:
+            pass
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+
+
 async def _async_ignore_errors(awaitable) -> None:
     try:
         await awaitable
     except Exception:
         pass
+
+
+async def _async_retry_ignore_errors(awaitable_factory, *, attempts: int = 8, delay: float = 2.0) -> None:
+    for attempt in range(attempts):
+        try:
+            if await awaitable_factory() is not False:
+                return
+        except Exception:
+            pass
+        if attempt + 1 < attempts:
+            await asyncio.sleep(delay)

@@ -134,7 +134,7 @@ test('live broad TypeScript SDK smoke', { skip: live ? false : 'set WATASU_LIVE_
     }
     if (codeSbx) await codeSbx.kill({ requestTimeoutMs }).catch(() => {})
     if (sbx) await sbx.kill({ requestTimeoutMs }).catch(() => {})
-    if (volume) await volume.destroy({ requestTimeoutMs }).catch(() => {})
+    if (volume) await retryCleanup(() => volume.destroy({ requestTimeoutMs }))
   }
 
   assert.equal(await Volume.destroy(`${prefix}-missing-volume`, { requestTimeoutMs }), false)
@@ -330,6 +330,15 @@ async function cleanupHandle(handle) {
   try {
     if (typeof handle.disconnect === 'function') await handle.disconnect()
   } catch {}
+}
+
+async function retryCleanup(action, attempts = 8, delayMs = 2_000) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      if (await action() !== false) return
+    } catch {}
+    if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs))
+  }
 }
 
 function labelError(error, label) {
