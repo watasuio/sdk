@@ -35,13 +35,6 @@ class Filesystem:
     ):
         """Read a file as text, bytes, or a byte stream iterator."""
         params = {"path": path}
-        if format == "stream":
-            return self._data_plane.iter_bytes(
-                "/runtime/v1/files",
-                params=params,
-                request_timeout=request_timeout,
-                resource="file",
-            )
         data = self._data_plane.get_bytes(
             "/runtime/v1/files",
             params=params,
@@ -50,6 +43,8 @@ class Filesystem:
         )
         if gzip:
             data = gzip_module.decompress(data)
+        if format == "stream":
+            return _single_chunk_stream(data)
         if format == "bytes":
             return bytearray(data)
         if format == "text":
@@ -248,3 +243,8 @@ def _to_bytes(data: Union[str, bytes, IO]) -> bytes:
 
 def _maybe_gzip(data: bytes, enabled: bool) -> bytes:
     return gzip_module.compress(data) if enabled else data
+
+
+def _single_chunk_stream(data: bytes) -> Iterator[bytes]:
+    if data:
+        yield data
