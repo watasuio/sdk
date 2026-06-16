@@ -53,6 +53,7 @@ import { errorFromResponse } from '../dist/errors.js'
 import {
   ConnectionConfig as CodeInterpreterConnectionConfig,
   ChartType,
+  Context as CodeInterpreterContext,
   Pty as CodeInterpreterPty,
   Result as CodeInterpreterResult,
   Sandbox as CodeInterpreterSandbox,
@@ -805,6 +806,7 @@ test('code interpreter runCode uses runtime API and parses callbacks', async () 
     const stdout = []
     const stderr = []
     const results = []
+    let asyncResultCallbackDone = false
 
     const execution = await sbx.runCode("print('hello')\n2 + 3", {
       language: 'python',
@@ -813,10 +815,15 @@ test('code interpreter runCode uses runtime API and parses callbacks', async () 
       requestTimeoutMs: 10,
       onStdout: (message) => stdout.push(message),
       onStderr: (message) => stderr.push(message),
-      onResult: (result) => results.push(result),
+      onResult: async (result) => {
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        results.push(result)
+        asyncResultCallbackDone = true
+      },
     })
 
     assert.equal(execution.text, '5')
+    assert.equal(asyncResultCallbackDone, true)
     assert.equal(stdout[0].line, 'hello')
     assert.equal(stderr[0].line, 'warn')
     assert.equal(stderr[0].error, true)
@@ -870,9 +877,13 @@ test('code interpreter context methods use runtime API', async () => {
     const contexts = await sbx.listCodeContexts({ requestTimeoutMs: 6 })
     await sbx.restartCodeContext(context, { requestTimeoutMs: 7 })
     await sbx.removeCodeContext('ctx-1', { requestTimeoutMs: 8 })
+    const emptyContext = new CodeInterpreterContext('empty')
 
     assert.equal(context.id, 'ctx-1')
+    assert.equal(context.language, 'python')
     assert.equal(contexts[0].cwd, '/workspace/app')
+    assert.equal(emptyContext.language, '')
+    assert.equal(emptyContext.cwd, '')
     assert.deepEqual(requests, [
       {
         url: 'https://route.sandbox.watasuhost.com/runtime/v1/code/contexts',

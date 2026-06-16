@@ -175,15 +175,23 @@ export type {
   TemplateTagInfo,
 } from './template.js'
 
-export type RunCodeLanguage = 'python' | 'python3' | string
+export type RunCodeLanguage =
+  | 'python'
+  | 'javascript'
+  | 'typescript'
+  | 'r'
+  | 'java'
+  | 'bash'
+  | (string & {})
+type OutputHandler<T> = (output: T) => Promise<unknown> | unknown
 
 export interface RunCodeOpts {
   language?: RunCodeLanguage
   context?: Context | string
-  onStdout?: (message: OutputMessage) => void
-  onStderr?: (message: OutputMessage) => void
-  onResult?: (result: Result) => void
-  onError?: (error: ExecutionError) => void
+  onStdout?: OutputHandler<OutputMessage>
+  onStderr?: OutputHandler<OutputMessage>
+  onResult?: OutputHandler<Result>
+  onError?: OutputHandler<ExecutionError>
   envs?: Record<string, string>
   timeoutMs?: number
   requestTimeoutMs?: number
@@ -440,8 +448,8 @@ export class Execution {
 export class Context {
   constructor(
     readonly id: string,
-    readonly language?: string,
-    readonly cwd?: string
+    readonly language: string = '',
+    readonly cwd: string = ''
   ) {}
 
   toJSON(): Record<string, unknown> {
@@ -486,18 +494,18 @@ export class Sandbox extends BaseSandbox {
       signal: opts.signal,
     })
     const execution = executionFromApi(response)
-    emitCallbacks(execution, opts)
+    await emitCallbacks(execution, opts)
     return execution
   }
 
   /** Create a persistent code context. */
-  async createCodeContext(_opts: CreateCodeContextOpts = {}): Promise<Context> {
+  async createCodeContext(opts: CreateCodeContextOpts = {}): Promise<Context> {
     const response = await this.runtimePostJson('/runtime/v1/code/contexts', compactRecord({
-      cwd: _opts.cwd,
-      language: _opts.language,
+      cwd: opts.cwd,
+      language: opts.language,
     }), {
-      requestTimeoutMs: _opts.requestTimeoutMs,
-      signal: _opts.signal,
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
     })
     return contextFromApi(response)
   }
@@ -565,11 +573,11 @@ function executionErrorFromApi(value: unknown): ExecutionError | undefined {
   )
 }
 
-function emitCallbacks(execution: Execution, opts: RunCodeOpts): void {
-  for (const message of execution.logs.stdout) opts.onStdout?.(message)
-  for (const message of execution.logs.stderr) opts.onStderr?.(message)
-  for (const result of execution.results) opts.onResult?.(result)
-  if (execution.error !== undefined) opts.onError?.(execution.error)
+async function emitCallbacks(execution: Execution, opts: RunCodeOpts): Promise<void> {
+  for (const message of execution.logs.stdout) await opts.onStdout?.(message)
+  for (const message of execution.logs.stderr) await opts.onStderr?.(message)
+  for (const result of execution.results) await opts.onResult?.(result)
+  if (execution.error !== undefined) await opts.onError?.(execution.error)
 }
 
 function contextId(context: Context | string | undefined): string | undefined {
@@ -585,8 +593,8 @@ function requireContextId(context: Context | string): string {
 function contextFromApi(payload: Record<string, unknown>): Context {
   return new Context(
     String(payload.id ?? ''),
-    stringValue(payload.language),
-    stringValue(payload.cwd)
+    stringValue(payload.language) ?? '',
+    stringValue(payload.cwd) ?? ''
   )
 }
 
