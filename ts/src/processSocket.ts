@@ -12,6 +12,7 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
   private ws?: WebSocket
   private queue: ProcessFrame[] = []
   private waiters: Array<(value: IteratorResult<ProcessFrame>) => void> = []
+  private ackWaiters = new Map<string, Array<{ resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>>()
   private closed = false
   private keepalive?: ReturnType<typeof setInterval>
 
@@ -53,20 +54,39 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     return this
   }
 
-  sendJson(payload: ProcessFrame): void {
+  async sendJson(payload: ProcessFrame): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new SandboxError('process websocket is not connected')
     }
-    this.ws.send(JSON.stringify(payload))
+    await new Promise<void>((resolve, reject) => {
+      this.ws!.send(JSON.stringify(payload), (error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
   }
 
-  sendStdin(data: string | Uint8Array): void {
+  async sendStdin(data: string | Uint8Array): Promise<void> {
     const raw = typeof data === 'string' ? new TextEncoder().encode(data) : data
-    this.sendJson({ type: 'stdin', data: base64Encode(raw) })
+    const ack = this.waitForControlAck('stdin_ack')
+    try {
+      await this.sendJson({ type: 'stdin', data: base64Encode(raw) })
+      await ack.promise
+    } catch (error) {
+      ack.cancel()
+      throw error
+    }
   }
 
-  closeStdin(): void {
-    this.sendJson({ type: 'close_stdin' })
+  async closeStdin(): Promise<void> {
+    const ack = this.waitForControlAck('close_stdin_ack')
+    try {
+      await this.sendJson({ type: 'close_stdin' })
+      await ack.promise
+    } catch (error) {
+      ack.cancel()
+      throw error
+    }
   }
 
   close(): void {
@@ -95,6 +115,10 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     try {
       const frame = JSON.parse(text) as ProcessFrame
       if (frame.type === 'pong' || frame.type === 'ready') return
+      if (frame.type === 'stdin_ack' || frame.type === 'close_stdin_ack') {
+        this.resolveControlAck(String(frame.type))
+        return
+      }
       if (frame.type === 'error') {
         this.finish(new SandboxError(String(frame.message ?? frame.code ?? 'process error')))
         return
@@ -116,6 +140,7 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
       if (waiter) waiter({ done: false, value: frame })
       else this.queue.push(frame)
     }
+    this.rejectControlAcks(error ?? new SandboxError('process websocket closed before acknowledgement'))
     this.flushDone()
   }
 
@@ -123,6 +148,53 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     for (const waiter of this.waiters.splice(0)) {
       waiter({ done: true, value: undefined })
     }
+  }
+
+  private waitForControlAck(type: string): { promise: Promise<void>; cancel: () => void } {
+    let entry: { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+    const promise = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.removeControlAck(type, entry)
+        reject(new TimeoutError())
+      }, this.requestTimeoutMs)
+      entry = { resolve, reject, timer }
+      const waiters = this.ackWaiters.get(type) ?? []
+      waiters.push(entry)
+      this.ackWaiters.set(type, waiters)
+    })
+
+    return {
+      promise,
+      cancel: () => {
+        this.removeControlAck(type, entry)
+        clearTimeout(entry.timer)
+      },
+    }
+  }
+
+  private resolveControlAck(type: string): void {
+    const entry = this.ackWaiters.get(type)?.shift()
+    if (!entry) return
+    clearTimeout(entry.timer)
+    entry.resolve()
+  }
+
+  private rejectControlAcks(error: Error): void {
+    for (const waiters of this.ackWaiters.values()) {
+      for (const entry of waiters.splice(0)) {
+        clearTimeout(entry.timer)
+        entry.reject(error)
+      }
+    }
+    this.ackWaiters.clear()
+  }
+
+  private removeControlAck(type: string, entry: { timer: ReturnType<typeof setTimeout> }): void {
+    const waiters = this.ackWaiters.get(type)
+    if (!waiters) return
+    const index = waiters.indexOf(entry as { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> })
+    if (index !== -1) waiters.splice(index, 1)
+    if (waiters.length === 0) this.ackWaiters.delete(type)
   }
 }
 

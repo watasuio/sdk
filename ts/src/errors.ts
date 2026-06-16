@@ -92,14 +92,14 @@ export function errorFromResponse(status: number, payload: unknown): Error {
     code ||
     `Request failed with status ${status}`
 
+  if (code === 'not_enough_space') return new NotEnoughSpaceError(message)
+  if (code === 'file_not_found') return new FileNotFoundError(message)
   if (status === 401 || status === 403) return new AuthenticationError(message)
   if (status === 404) return new NotFoundError(message)
   if (status === 409) return new ConflictError(message)
   if (status === 408 || status === 504) return new TimeoutError(message)
   if (status === 422 || status === 400) return new InvalidArgumentError(message)
   if (status === 429) return new RateLimitError(message)
-  if (code === 'not_enough_space') return new NotEnoughSpaceError(message)
-  if (code === 'file_not_found') return new FileNotFoundError(message)
   return new ApiError(message, status, code)
 }
 

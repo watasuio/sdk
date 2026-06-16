@@ -136,10 +136,10 @@ class Commands:
             handle_kill=lambda: self.kill(actual_pid),
             events=ProcessEventStream(socket, frames),
             handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(
-                data
+                data, wait_ack=True, request_timeout=request_timeout
             ),
-            handle_close_stdin=lambda request_timeout=None: socket.send_json(
-                {"type": "close_stdin"}
+            handle_close_stdin=lambda request_timeout=None: socket.close_stdin(
+                wait_ack=True, request_timeout=request_timeout
             ),
         )
 
@@ -182,10 +182,10 @@ class Commands:
             handle_kill=lambda: self.kill(pid),
             events=QueuedProcessEventStream(socket, first, frames),
             handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(
-                data
+                data, wait_ack=False
             ),
-            handle_close_stdin=lambda request_timeout=None: socket.send_json(
-                {"type": "close_stdin"}
+            handle_close_stdin=lambda request_timeout=None: socket.close_stdin(
+                wait_ack=False
             ),
         )
 
@@ -201,9 +201,9 @@ def _process_info(payload) -> ProcessInfo:
     process = payload.get("process") if isinstance(payload, dict) else None
     item = process or payload or {}
     return ProcessInfo(
-        pid=item.get("pid") or item.get("id"),
+        pid=item.get("id") or item.get("pid"),
         tag=item.get("tag"),
-        cmd=item.get("cmd"),
+        cmd=item.get("cmd") or item.get("command"),
         args=list(item.get("args") or []),
         envs=dict(item.get("envs") or item.get("environment") or {}),
         cwd=item.get("cwd"),

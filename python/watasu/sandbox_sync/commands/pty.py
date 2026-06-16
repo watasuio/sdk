@@ -68,10 +68,10 @@ class Pty:
             handle_kill=lambda: self.kill(pid),
             events=QueuedProcessEventStream(socket, first, frames),
             handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(
-                data
+                data, wait_ack=False
             ),
-            handle_close_stdin=lambda request_timeout=None: socket.send_json(
-                {"type": "close_stdin"}
+            handle_close_stdin=lambda request_timeout=None: socket.close_stdin(
+                wait_ack=False
             ),
         )
 
@@ -97,7 +97,7 @@ class Pty:
             handle_kill=lambda: self.kill(actual_pid),
             events=ProcessEventStream(socket, frames),
             handle_send_stdin=lambda data, request_timeout=None: socket.send_stdin(
-                data
+                data, wait_ack=True, request_timeout=request_timeout
             ),
         )
 

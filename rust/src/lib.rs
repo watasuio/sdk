@@ -57,7 +57,7 @@ pub use sandbox::{
     CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, ListOptions,
     NetworkUpdateOptions, RestoreOptions, Sandbox, SandboxInfo, SandboxInfoLifecycle,
     SandboxLifecycle, SandboxListPage, SandboxListQuery, SandboxMetrics, SnapshotInfo,
-    SnapshotListOptions, SnapshotListPage,
+    SnapshotListOptions, SnapshotListPage, VolumeMount,
 };
 pub use template::{
     BuildInfo, BuildStatusReason, LogEntry, Template, TemplateBuildOptions, TemplateBuildStatus,

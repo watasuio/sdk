@@ -76,6 +76,7 @@ class AsyncCommandHandle:
             self._wait_task = asyncio.create_task(
                 self._wait_with_callbacks(loop, on_stdout, on_stderr, on_pty)
             )
+            self._wait_task.add_done_callback(_observe_background_task_exception)
 
     async def _wait_with_callbacks(
         self,
@@ -888,6 +889,15 @@ def _thread_callback(loop, callback):
             asyncio.run_coroutine_threadsafe(result, loop).result()
 
     return wrapped
+
+
+def _observe_background_task_exception(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        return
 
 
 __all__ = [

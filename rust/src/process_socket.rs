@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -17,6 +18,7 @@ use crate::error::{Error, Result};
 /// Streaming WebSocket connection to the sandbox process runtime.
 pub struct ProcessSocket {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    pending_frames: VecDeque<Value>,
 }
 
 impl ProcessSocket {
@@ -28,7 +30,10 @@ impl ProcessSocket {
             HeaderValue::from_str(&format!("Bearer {token}"))?,
         );
         let (socket, _response) = connect_async(request).await?;
-        Ok(Self { socket })
+        Ok(Self {
+            socket,
+            pending_frames: VecDeque::new(),
+        })
     }
 
     /// Send a JSON frame to the process runtime.
@@ -41,12 +46,14 @@ impl ProcessSocket {
 
     /// Send stdin bytes encoded in the sandbox runtime protocol.
     pub async fn send_stdin(&mut self, data: impl AsRef<[u8]>) -> Result<()> {
-        self.send_json(&stdin_payload(data)).await
+        self.send_json(&stdin_payload(data)).await?;
+        self.wait_for_ack("stdin_ack").await
     }
 
     /// Close stdin for the attached process.
     pub async fn close_stdin(&mut self) -> Result<()> {
-        self.send_json(&close_stdin_payload()).await
+        self.send_json(&close_stdin_payload()).await?;
+        self.wait_for_ack("close_stdin_ack").await
     }
 
     /// Send a WebSocket ping frame.
@@ -65,6 +72,26 @@ impl ProcessSocket {
 
     /// Read the next JSON process frame.
     pub async fn next_frame(&mut self) -> Result<Option<Value>> {
+        if let Some(frame) = self.pending_frames.pop_front() {
+            return Ok(Some(frame));
+        }
+
+        self.read_frame().await
+    }
+
+    async fn wait_for_ack(&mut self, ack_type: &str) -> Result<()> {
+        while let Some(frame) = self.read_frame().await? {
+            if frame.get("type").and_then(Value::as_str) == Some(ack_type) {
+                return Ok(());
+            }
+            self.pending_frames.push_back(frame);
+        }
+        Err(Error::Sandbox(format!(
+            "process websocket closed before {ack_type}"
+        )))
+    }
+
+    async fn read_frame(&mut self) -> Result<Option<Value>> {
         let idle = Duration::from_secs((KEEPALIVE_PING_INTERVAL_SECS / 2).max(1));
 
         loop {

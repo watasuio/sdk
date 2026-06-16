@@ -30,6 +30,7 @@ class ProcessSocket:
         self.headers = dict(headers or {})
         self._ws = None
         self._closed = False
+        self._pending_frames: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
     def connect(self) -> "ProcessSocket":
         try:
@@ -53,12 +54,30 @@ class ProcessSocket:
     def send_json(self, payload: Dict[str, Any]) -> None:
         self._require_open().send(json.dumps(payload))
 
-    def send_stdin(self, data: Union[str, bytes]) -> None:
+    def send_stdin(
+        self,
+        data: Union[str, bytes],
+        *,
+        wait_ack: bool = True,
+        request_timeout: Optional[float] = None,
+    ) -> None:
         if isinstance(data, bytes):
             raw = data
         else:
             raw = data.encode("utf-8")
         self.send_json({"type": "stdin", "data": base64.b64encode(raw).decode("ascii")})
+        if wait_ack:
+            self.wait_for_ack("stdin_ack", timeout=request_timeout)
+
+    def close_stdin(
+        self,
+        *,
+        wait_ack: bool = True,
+        request_timeout: Optional[float] = None,
+    ) -> None:
+        self.send_json({"type": "close_stdin"})
+        if wait_ack:
+            self.wait_for_ack("close_stdin_ack", timeout=request_timeout)
 
     def send_signal(self, signal: str = "SIGKILL") -> None:
         self.send_json({"type": "signal", "signal": signal})
@@ -74,6 +93,12 @@ class ProcessSocket:
         next_ping = time.monotonic() + self.keepalive_interval
 
         while not self._closed:
+            try:
+                yield self._pending_frames.get_nowait()
+                continue
+            except queue.Empty:
+                pass
+
             now = time.monotonic()
             if now >= next_ping:
                 try:
@@ -119,7 +144,66 @@ class ProcessSocket:
                 raise SandboxException(
                     frame.get("message") or frame.get("code") or "process error"
                 )
+            if frame.get("type") in {"stdin_ack", "close_stdin_ack"}:
+                continue
             yield frame
+
+    def wait_for_ack(self, ack_type: str, timeout: Optional[float] = None) -> None:
+        ws = self._require_open()
+        deadline = None if timeout in (None, 0) else time.monotonic() + float(timeout)
+        next_ping = time.monotonic() + self.keepalive_interval
+
+        while not self._closed:
+            now = time.monotonic()
+            if now >= next_ping:
+                try:
+                    ws.ping("watasu-sdk")
+                except Exception as error:
+                    raise SandboxException(
+                        f"process websocket ping failed: {error}"
+                    ) from error
+                next_ping = now + self.keepalive_interval
+
+            socket_timeout = min(1.0, max(0.1, next_ping - now))
+            if deadline is not None:
+                remaining = deadline - now
+                if remaining <= 0:
+                    raise format_request_timeout_error()
+                socket_timeout = min(socket_timeout, remaining)
+
+            ws.settimeout(socket_timeout)
+            try:
+                message = ws.recv()
+            except TimeoutError:
+                continue
+            except Exception as error:
+                if _is_timeout_error(error):
+                    continue
+                if self._closed:
+                    return
+                raise SandboxException(f"process websocket failed: {error}") from error
+
+            if message is None:
+                raise SandboxException(f"process websocket closed before {ack_type}")
+            if isinstance(message, bytes):
+                raise SandboxException("process websocket returned binary frame")
+            try:
+                frame = json.loads(message)
+            except json.JSONDecodeError as error:
+                raise SandboxException(
+                    f"process websocket returned invalid JSON: {message}"
+                ) from error
+            if frame.get("type") in {"ready", "pong"}:
+                continue
+            if frame.get("type") == "error":
+                raise SandboxException(
+                    frame.get("message") or frame.get("code") or "process error"
+                )
+            if frame.get("type") == ack_type:
+                return
+            self._pending_frames.put(frame)
+
+        raise SandboxException(f"process websocket closed before {ack_type}")
 
     def _require_open(self):
         if self._ws is None:

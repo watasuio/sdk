@@ -94,17 +94,17 @@ export class CommandHandle implements Partial<CommandResult> {
 
   /** Send stdin bytes or text to the process. */
   async sendStdin(data: string | Uint8Array): Promise<void> {
-    this.socket.sendStdin(data)
+    await this.socket.sendStdin(data)
   }
 
   /** Close the stdin stream and signal EOF to the process. */
   async closeStdin(): Promise<void> {
-    this.socket.closeStdin()
+    await this.socket.closeStdin()
   }
 
   /** Resize the attached PTY stream when this handle was created as a PTY. */
   async resize(size: { cols: number; rows: number }): Promise<void> {
-    this.socket.sendJson({ type: 'resize', cols: size.cols, rows: size.rows })
+    await this.socket.sendJson({ type: 'resize', cols: size.cols, rows: size.rows })
   }
 
   /** Detach the local stream without killing the process. */
@@ -233,7 +233,7 @@ export class Commands {
     ).connect()
     const environment = { ...this.sandboxEnvs, ...(opts.envs ?? {}) }
     const processConfig = processStartConfig(cmd, opts)
-    socket.sendJson({
+    await socket.sendJson({
       type: 'start',
       id: opts.processID,
       cmd: processConfig.cmd,
@@ -288,10 +288,11 @@ function framePid(frame: ProcessFrame): number | string | undefined {
 function processInfo(value: unknown): ProcessInfo {
   const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   const process = item.process && typeof item.process === 'object' ? item.process as Record<string, unknown> : item
+  const stablePid = typeof process.id === 'number' || typeof process.id === 'string' ? process.id : framePid(process)
   return {
-    pid: framePid(process) ?? '',
+    pid: stablePid ?? '',
     tag: typeof process.tag === 'string' ? process.tag : undefined,
-    cmd: typeof process.cmd === 'string' ? process.cmd : undefined,
+    cmd: typeof process.cmd === 'string' ? process.cmd : typeof process.command === 'string' ? process.command : undefined,
     args: Array.isArray(process.args) ? process.args.map(String) : [],
     envs: recordOfStrings(process.envs ?? process.environment),
     cwd: typeof process.cwd === 'string' ? process.cwd : undefined,

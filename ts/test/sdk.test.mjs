@@ -9,6 +9,7 @@ import {
   CommandExitError,
   CommandHandle,
   ConnectionConfig,
+  FileNotFoundError,
   Filesystem,
   FilesystemWatcher,
   ProcessManager,
@@ -31,6 +32,7 @@ import {
   waitForTimeout,
   waitForURL,
 } from '../dist/index.js'
+import { errorFromResponse } from '../dist/errors.js'
 import {
   ConnectionConfig as CodeInterpreterConnectionConfig,
   Pty as CodeInterpreterPty,
@@ -95,6 +97,40 @@ test('connection config exposes sandbox URL helpers and abort signals', async ()
 test('stream frame helpers match runtime base64 protocol', () => {
   assert.equal(base64DecodeText('NAo='), '4\n')
   assert.equal(base64Encode(new TextEncoder().encode('hi\n')), 'aGkK')
+})
+
+test('process socket stdin waits for websocket send completion and runtime ack', async () => {
+  const socket = new ProcessSocket('http://localhost:49983', 'token', '/runtime/v1/process')
+  let callback
+  let sent
+  socket.ws = {
+    readyState: 1,
+    send(payload, done) {
+      sent = JSON.parse(payload)
+      callback = done
+    },
+  }
+
+  let settled = false
+  const pending = socket.sendStdin('hi\n').then(() => {
+    settled = true
+  })
+  await Promise.resolve()
+
+  assert.equal(settled, false)
+  assert.deepEqual(sent, { type: 'stdin', data: 'aGkK' })
+
+  callback()
+  await Promise.resolve()
+  assert.equal(settled, false)
+
+  socket.onMessage(JSON.stringify({ type: 'stdin_ack', pid: '123' }))
+  await pending
+  assert.equal(settled, true)
+})
+
+test('error mapper preserves explicit file not found code', () => {
+  assert.ok(errorFromResponse(404, { error: 'file_not_found' }) instanceof FileNotFoundError)
 })
 
 test('command handle raises on non-zero exit and preserves output', async () => {
@@ -168,6 +204,32 @@ test('command handle can close stdin without disconnecting', async () => {
   assert.equal(commands.supportsStdinClose, true)
   assert.equal(closeCount, 1)
   assert.deepEqual(sent, [{ type: 'close_stdin' }])
+})
+
+test('commands list prefers stable process id over guest os pid', async () => {
+  const commands = new Commands({
+    getJson(path) {
+      assert.equal(path, '/runtime/v1/process')
+      return Promise.resolve({
+        processes: [
+          {
+            id: 'proc-123',
+            pid: 456,
+            command: 'bash',
+            args: ['-lc', 'sleep 60'],
+            cwd: '/workspace',
+          },
+        ],
+      })
+    },
+  }, new ConnectionConfig({ apiKey: 'key' }))
+
+  const processes = await commands.list()
+
+  assert.equal(processes[0].pid, 'proc-123')
+  assert.equal(processes[0].cmd, 'bash')
+  assert.deepEqual(processes[0].args, ['-lc', 'sleep 60'])
+  assert.equal(processes[0].cwd, '/workspace')
 })
 
 test('pty kill forwards per-call request options', async () => {

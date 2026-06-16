@@ -300,13 +300,14 @@ fn frame_pid(frame: &Value) -> Option<String> {
 fn process_info(value: Value) -> ProcessInfo {
     let item = value.get("process").unwrap_or(&value);
     ProcessInfo {
-        pid: frame_pid(item).unwrap_or_default(),
+        pid: process_list_pid(item).unwrap_or_default(),
         tag: item
             .get("tag")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
         cmd: item
             .get("cmd")
+            .or_else(|| item.get("command"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
         args: item
@@ -329,5 +330,37 @@ fn process_info(value: Value) -> ProcessInfo {
             .get("cwd")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
+    }
+}
+
+fn process_list_pid(item: &Value) -> Option<String> {
+    item.get("id").or_else(|| item.get("pid")).map(|value| {
+        value
+            .as_str()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| value.to_string())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::process_info;
+
+    #[test]
+    fn process_info_prefers_stable_process_id_over_os_pid() {
+        let info = process_info(json!({
+            "id": "proc-123",
+            "pid": 456,
+            "command": "bash",
+            "args": ["-lc", "sleep 60"],
+            "cwd": "/workspace"
+        }));
+
+        assert_eq!(info.pid, "proc-123");
+        assert_eq!(info.cmd.as_deref(), Some("bash"));
+        assert_eq!(info.args, vec!["-lc".to_string(), "sleep 60".to_string()]);
+        assert_eq!(info.cwd.as_deref(), Some("/workspace"));
     }
 }

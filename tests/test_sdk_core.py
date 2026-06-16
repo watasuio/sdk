@@ -36,7 +36,8 @@ from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.filesystem.filesystem import FileType
 from watasu.sandbox.sandbox_api import sandbox_info_from_api
-from watasu.sandbox_async.main import AsyncCommands, AsyncPty
+from watasu.sandbox_async.main import AsyncCommandHandle, AsyncCommands, AsyncPty
+from watasu.sandbox_sync.commands.command import Commands as SyncCommands
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
 from watasu.sandbox_sync.filesystem.watch_handle import WatchHandle
@@ -129,6 +130,35 @@ def test_code_interpreter_package_re_exports_core_sdk_helpers():
     assert watasu_code_interpreter.ConnectionConfig is watasu.ConnectionConfig
     assert watasu_code_interpreter.Template is watasu.Template
     assert watasu_code_interpreter.PtySize is watasu.PtySize
+
+
+def test_commands_list_prefers_stable_process_id_over_guest_os_pid():
+    class FakeDataPlane:
+        base_url = "http://localhost:49983"
+        token = "data-token"
+
+        def get_json(self, path, request_timeout=None):
+            assert path == "/runtime/v1/process"
+            return {
+                "processes": [
+                    {
+                        "id": "proc-123",
+                        "pid": 456,
+                        "command": "bash",
+                        "args": ["-lc", "sleep 60"],
+                        "cwd": "/workspace",
+                    }
+                ]
+            }
+
+    commands = SyncCommands(FakeDataPlane(), ConnectionConfig(api_key="key"))
+
+    process = commands.list()[0]
+
+    assert process.pid == "proc-123"
+    assert process.cmd == "bash"
+    assert process.args == ["-lc", "sleep 60"]
+    assert process.cwd == "/workspace"
 
 
 def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatch):
@@ -391,6 +421,31 @@ def test_async_command_connect_pumps_configured_output_callbacks():
     assert result.exit_code == 0
 
 
+def test_async_command_handle_observes_background_callback_failures():
+    frames = iter([{"type": "exit", "exit_code": -9, "error": "killed"}])
+    handle = CommandHandle(pid=123, handle_kill=lambda: True, events=frames)
+
+    async def scenario():
+        async_handle = AsyncCommandHandle(handle, on_stdout=lambda _chunk: None)
+
+        for _ in range(20):
+            if async_handle._wait_task is not None and async_handle._wait_task.done():
+                break
+            await asyncio.sleep(0.01)
+
+        task = async_handle._wait_task
+        assert task is not None
+        assert task.done()
+        assert getattr(task, "_log_traceback", False) is False
+
+        with pytest.raises(CommandExitException) as exc:
+            await async_handle.wait()
+
+        assert exc.value.exit_code == -9
+
+    asyncio.run(scenario())
+
+
 def test_async_pty_create_pumps_configured_data_callback():
     class FakePty:
         def create(
@@ -465,10 +520,39 @@ def test_process_socket_base64_encodes_stdin_frames():
     )
     socket._ws = FakeWebSocket()
 
-    socket.send_stdin("hi\n")
+    socket.send_stdin("hi\n", wait_ack=False)
 
     assert socket.headers == {"x-sandbox": "sandbox"}
     assert json.loads(sent[0]) == {"type": "stdin", "data": "aGkK"}
+
+
+def test_process_socket_waits_for_stdin_ack_and_buffers_output():
+    sent = []
+    received = [
+        json.dumps({"type": "stdout", "data": "YmVmb3JlCg=="}),
+        json.dumps({"type": "stdin_ack", "pid": "123"}),
+    ]
+
+    class FakeWebSocket:
+        def send(self, payload):
+            sent.append(payload)
+
+        def settimeout(self, timeout):
+            self.timeout = timeout
+
+        def ping(self, payload):
+            self.ping_payload = payload
+
+        def recv(self):
+            return received.pop(0)
+
+    socket = ProcessSocket("https://sandbox.example", "token", "/runtime/v1/process")
+    socket._ws = FakeWebSocket()
+
+    socket.send_stdin("hi\n", request_timeout=1)
+
+    assert json.loads(sent[0]) == {"type": "stdin", "data": "aGkK"}
+    assert next(socket.frames(timeout=1)) == {"type": "stdout", "data": "YmVmb3JlCg=="}
 
 
 def test_data_plane_client_uses_sandbox_headers():
