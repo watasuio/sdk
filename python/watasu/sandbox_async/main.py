@@ -1462,21 +1462,77 @@ class AsyncSandbox:
             request_timeout=request_timeout,
         )
 
-    async def upload_url(self, *args, **kwargs) -> str:
+    async def upload_url(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        use_signature_expiration: Optional[int] = None,
+        expires_in_seconds: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> str:
         """Get a signed URL for uploading a file."""
-        return await asyncio.to_thread(self._sync.upload_url, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._sync.upload_url,
+            path,
+            user=user,
+            use_signature_expiration=use_signature_expiration,
+            expires_in_seconds=expires_in_seconds,
+            request_timeout=request_timeout,
+        )
 
-    async def download_url(self, *args, **kwargs) -> str:
+    async def download_url(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        use_signature_expiration: Optional[int] = None,
+        expires_in_seconds: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> str:
         """Get a signed URL for downloading a file."""
-        return await asyncio.to_thread(self._sync.download_url, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._sync.download_url,
+            path,
+            user=user,
+            use_signature_expiration=use_signature_expiration,
+            expires_in_seconds=expires_in_seconds,
+            request_timeout=request_timeout,
+        )
 
-    async def upload_url_info(self, *args, **kwargs) -> FileUrlInfo:
+    async def upload_url_info(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        use_signature_expiration: Optional[int] = None,
+        expires_in_seconds: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> FileUrlInfo:
         """Get signed upload URL metadata."""
-        return await asyncio.to_thread(self._sync.upload_url_info, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._sync.upload_url_info,
+            path,
+            user=user,
+            use_signature_expiration=use_signature_expiration,
+            expires_in_seconds=expires_in_seconds,
+            request_timeout=request_timeout,
+        )
 
-    async def download_url_info(self, *args, **kwargs) -> FileUrlInfo:
+    async def download_url_info(
+        self,
+        path: str,
+        user: Optional[Username] = None,
+        use_signature_expiration: Optional[int] = None,
+        expires_in_seconds: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> FileUrlInfo:
         """Get signed download URL metadata."""
-        return await asyncio.to_thread(self._sync.download_url_info, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._sync.download_url_info,
+            path,
+            user=user,
+            use_signature_expiration=use_signature_expiration,
+            expires_in_seconds=expires_in_seconds,
+            request_timeout=request_timeout,
+        )
 
     async def _update_network_instance(self, *args, **kwargs):
         """Atomically replace this sandbox's network egress policy."""

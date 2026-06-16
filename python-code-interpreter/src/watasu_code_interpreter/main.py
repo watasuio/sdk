@@ -120,12 +120,66 @@ class AsyncSandbox(BaseAsyncSandbox):
     default_template = Sandbox.default_template
 
     @classmethod
-    async def create(cls, *args: Any, **kwargs: Any) -> "AsyncSandbox":
+    async def create(
+        cls,
+        template: Optional[str] = None,
+        timeout: Optional[int] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        secure: bool = True,
+        allow_internet_access: bool = True,
+        mcp: Optional[Dict[str, Any]] = None,
+        network=None,
+        **opts: ApiParams,
+    ) -> "AsyncSandbox":
         """Create a code-interpreter sandbox and return async helpers."""
 
-        return cls(sync_sandbox=await asyncio.to_thread(Sandbox.create, *args, **kwargs))
+        return cls(
+            sync_sandbox=await asyncio.to_thread(
+                Sandbox.create,
+                template=template,
+                timeout=timeout,
+                metadata=metadata,
+                envs=envs,
+                secure=secure,
+                allow_internet_access=allow_internet_access,
+                mcp=mcp,
+                network=network,
+                **opts,
+            )
+        )
 
-    beta_create = create
+    @classmethod
+    async def beta_create(
+        cls,
+        template: Optional[str] = None,
+        timeout: Optional[int] = None,
+        auto_pause: bool = False,
+        metadata: Optional[Dict[str, str]] = None,
+        envs: Optional[Dict[str, str]] = None,
+        secure: bool = True,
+        allow_internet_access: bool = True,
+        mcp: Optional[Dict[str, Any]] = None,
+        network=None,
+        **opts: ApiParams,
+    ) -> "AsyncSandbox":
+        """Create a code-interpreter sandbox with beta lifecycle options."""
+
+        return cls(
+            sync_sandbox=await asyncio.to_thread(
+                Sandbox.beta_create,
+                template=template,
+                timeout=timeout,
+                auto_pause=auto_pause,
+                metadata=metadata,
+                envs=envs,
+                secure=secure,
+                allow_internet_access=allow_internet_access,
+                mcp=mcp,
+                network=network,
+                **opts,
+            )
+        )
 
     async def _connect_instance(
         self, timeout: Optional[int] = None, **opts: ApiParams

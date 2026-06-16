@@ -165,6 +165,43 @@ def test_public_team_ref_signatures_are_explicit():
     assert "team" in inspect.signature(AsyncVolume.list).parameters
 
 
+def test_async_python_signatures_are_explicit_for_ide_docs():
+    for method in (
+        AsyncSandbox.upload_url,
+        AsyncSandbox.download_url,
+        AsyncSandbox.upload_url_info,
+        AsyncSandbox.download_url_info,
+    ):
+        params = inspect.signature(method).parameters
+        assert "args" not in params
+        assert "kwargs" not in params
+        assert "path" in params
+        assert "user" in params
+        assert "use_signature_expiration" in params
+
+    create_params = inspect.signature(
+        watasu_code_interpreter.AsyncSandbox.create
+    ).parameters
+    assert "args" not in create_params
+    assert "opts" in create_params
+    for name in (
+        "template",
+        "timeout",
+        "metadata",
+        "envs",
+        "secure",
+        "allow_internet_access",
+        "mcp",
+        "network",
+    ):
+        assert name in create_params
+
+    beta_create_params = inspect.signature(
+        watasu_code_interpreter.AsyncSandbox.beta_create
+    ).parameters
+    assert "auto_pause" in beta_create_params
+
+
 def test_template_sync_and_async_import_paths_match_top_level_exports():
     assert TemplateSyncExport is Template
     assert TemplateSyncMain is Template
