@@ -416,6 +416,18 @@ test('process output preserves stdout stderr and exit code', () => {
   assert.equal(output.error, true)
 })
 
+test('process output keeps streamed output when terminal result is empty', () => {
+  const output = new ProcessOutput()
+
+  output.addStdout({ line: 'streamed-out', timestamp: 1, error: false, toString() { return this.line } })
+  output.addStderr({ line: 'streamed-err', timestamp: 2, error: true, toString() { return this.line } })
+  output.replace({ stdout: '', stderr: '', exitCode: 0 })
+
+  assert.equal(output.stdout, 'streamed-out')
+  assert.equal(output.stderr, 'streamed-err')
+  assert.equal(output.exitCode, 0)
+})
+
 test('process manager keeps options-form cmd as a shell command', async () => {
   const calls = []
   const manager = new ProcessManager({

@@ -43,9 +43,13 @@ export class ProcessOutput {
   }
 
   replace(result: CommandResult): void {
+    const streamedStdout = this.stdout
+    const streamedStderr = this.stderr
     this.messages = []
-    if (result.stdout) this.addStdout(processMessage(result.stdout, false))
-    if (result.stderr) this.addStderr(processMessage(result.stderr, true))
+    const stdout = result.stdout || streamedStdout
+    const stderr = result.stderr || streamedStderr
+    if (stdout) this.addStdout(processMessage(stdout, false))
+    if (stderr) this.addStderr(processMessage(stderr, true))
     this.setExitCode(result.exitCode)
   }
 }
