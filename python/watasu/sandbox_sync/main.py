@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from watasu._transport.control import ControlClient
 from watasu._transport.data_plane import DataPlaneClient
@@ -34,7 +34,6 @@ from watasu.sandbox_sync.commands.pty import Pty
 from watasu.sandbox_sync.filesystem.filesystem import Filesystem
 from watasu.sandbox_sync.git import Git
 from watasu.sandbox_sync.paginator import SandboxPaginator, SnapshotPaginator
-from watasu.stubs import unsupported
 
 
 class _DualMethod:
@@ -831,12 +830,6 @@ class Sandbox(SandboxBase):
         return file_url_info_from_api(payload.get("file_url") or payload)
 
 
-def _reject_unsupported_opts(opts: Dict, keys: Iterable[str]) -> None:
-    for key in keys:
-        if key in opts and opts[key] is not None:
-            unsupported(key)
-
-
 _API_PARAM_KEYS = {
     "api_key",
     "access_token",
@@ -943,7 +936,7 @@ def _lifecycle_payload(lifecycle: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if lifecycle is None:
         return {}
     if not isinstance(lifecycle, dict):
-        unsupported("lifecycle")
+        raise InvalidArgumentException("lifecycle must be a dictionary")
     on_timeout = lifecycle.get("on_timeout") or lifecycle.get("onTimeout") or "kill"
     auto_resume = _bool_value(lifecycle.get("auto_resume", lifecycle.get("autoResume", False)))
     if auto_resume and on_timeout != "pause":
@@ -955,7 +948,7 @@ def _lifecycle_payload(lifecycle: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _volume_mounts_payload(volume_mounts: Dict[str, Any]) -> List[Dict[str, str]]:
     if not isinstance(volume_mounts, dict):
-        unsupported("volume_mounts")
+        raise InvalidArgumentException("volume_mounts must be a dictionary")
     return [
         {"path": str(path), "name": _volume_name(volume)}
         for path, volume in volume_mounts.items()
@@ -970,7 +963,9 @@ def _volume_name(volume: Any) -> str:
     name = getattr(volume, "name", None)
     if name is not None:
         return str(name)
-    unsupported("volume_mounts")
+    raise InvalidArgumentException(
+        "volume_mounts values must be volume names, dictionaries with name, or Volume objects"
+    )
 
 
 def _bool_value(value: Any) -> bool:
@@ -1003,7 +998,7 @@ def _network_payload(
     payload: Dict[str, Any] = {}
     if network is not None:
         if not isinstance(network, dict):
-            unsupported("network payload")
+            raise InvalidArgumentException("network must be a dictionary")
         payload.update(_normalize_network_keys(network))
     if opts:
         payload.update(_normalize_network_keys(opts))
@@ -1041,14 +1036,14 @@ def _network_selector(selector: Any, rules: Dict[str, List[Dict[str, Any]]]) -> 
         return [selector]
     if isinstance(selector, (list, tuple, set)):
         return [str(item) for item in selector]
-    unsupported("network selectors")
+    raise InvalidArgumentException("network selectors must be strings or lists of strings")
 
 
 def _network_rules(value: Any) -> Dict[str, List[Dict[str, Any]]]:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        unsupported("network rules")
+        raise InvalidArgumentException("network rules must be a dictionary")
 
     rules: Dict[str, List[Dict[str, Any]]] = {}
     for host, host_rules in value.items():
@@ -1066,17 +1061,17 @@ def _rule_list(value: Any) -> List[Any]:
 
 def _network_rule(rule: Any) -> Dict[str, Any]:
     if not isinstance(rule, dict):
-        unsupported("network rules")
+        raise InvalidArgumentException("network rules must contain dictionaries")
     transform = rule.get("transform")
     if transform is None:
         return {}
     if not isinstance(transform, dict):
-        unsupported("network rule transforms")
+        raise InvalidArgumentException("network rule transforms must be dictionaries")
     headers = transform.get("headers")
     if headers is None:
         return {"transform": {}}
     if not isinstance(headers, dict):
-        unsupported("network rule transform headers")
+        raise InvalidArgumentException("network rule transform headers must be a dictionary")
     return {
         "transform": {
             "headers": {str(key): str(value) for key, value in headers.items()}

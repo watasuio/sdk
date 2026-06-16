@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Optional, TypedDict
 
 from watasu.connection_config import ConnectionConfig
+from watasu.exceptions import SandboxException
 
 
 class SandboxOpts(TypedDict, total=False):
@@ -86,7 +87,7 @@ class SandboxBase:
         Concrete sandbox classes override this method because Watasu resolves
         exposed-port hosts through the control plane.
         """
-        raise NotImplementedError("get_host must be implemented by Sandbox")
+        raise SandboxException("get_host is only available on a connected sandbox")
 
     def get_mcp_url(self) -> str:
         """Return the conventional MCP URL for this sandbox."""

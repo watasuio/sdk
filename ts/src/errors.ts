@@ -110,17 +110,6 @@ export class VolumeError extends Error {
   }
 }
 
-export function unsupported(feature: string): never {
-  throw new NotImplementedError(`${feature} is not supported by Watasu yet`)
-}
-
-export class NotImplementedError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'NotImplementedError'
-  }
-}
-
 export class ApiError extends SandboxError {
   constructor(
     message: string,

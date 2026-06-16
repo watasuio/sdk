@@ -13,7 +13,6 @@ export {
   InvalidArgumentError,
   NotEnoughSpaceError,
   NotFoundError,
-  NotImplementedError,
   RateLimitError,
   SandboxError,
   SandboxNotFoundError,
