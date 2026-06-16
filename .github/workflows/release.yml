@@ -116,10 +116,14 @@ jobs:
 
       - name: Publish TypeScript package
         working-directory: ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
 
       - name: Publish TypeScript Code Interpreter package
         working-directory: ts-code-interpreter
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
 
       - name: Authenticate crates.io trusted publisher
