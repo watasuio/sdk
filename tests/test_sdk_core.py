@@ -66,10 +66,38 @@ def test_connection_config_accepts_access_token_alias(monkeypatch):
 def test_connection_config_accepts_sandbox_url_override(monkeypatch):
     monkeypatch.delenv("WATASU_SANDBOX_URL", raising=False)
 
-    config = ConnectionConfig(api_key="key", sandbox_url="http://localhost:49983")
+    config = ConnectionConfig(
+        api_key="key",
+        sandbox_url="http://localhost:49983",
+        headers={"x-shared": "shared"},
+        extra_sandbox_headers={"x-sandbox": "sandbox"},
+    )
 
     assert config.sandbox_url == "http://localhost:49983"
     assert config.get_api_params()["sandbox_url"] == "http://localhost:49983"
+    assert config.sandbox_headers == {"x-shared": "shared", "x-sandbox": "sandbox"}
+    assert config.get_api_params()["extra_sandbox_headers"] == {
+        "x-sandbox": "sandbox"
+    }
+
+
+def test_connection_config_exposes_watasu_sandbox_host_helpers():
+    config = ConnectionConfig(api_key="key")
+
+    assert (
+        config.get_host("route-token", "watasuhost.com", 3000)
+        == "p3000-route-token.sandbox.watasuhost.com"
+    )
+    assert (
+        config.get_sandbox_url("route-token", "watasuhost.com")
+        == "https://route-token.sandbox.watasuhost.com"
+    )
+    assert (
+        ConnectionConfig(api_key="key", debug=True).get_host(
+            "route-token", "watasuhost.com", 3000
+        )
+        == "localhost:3000"
+    )
 
 
 def test_public_team_ref_signatures_are_explicit():
@@ -331,12 +359,33 @@ def test_process_socket_base64_encodes_stdin_frames():
         def send(self, payload):
             sent.append(payload)
 
-    socket = ProcessSocket("https://sandbox.example", "token", "/runtime/v1/process")
+    socket = ProcessSocket(
+        "https://sandbox.example",
+        "token",
+        "/runtime/v1/process",
+        headers={"x-sandbox": "sandbox"},
+    )
     socket._ws = FakeWebSocket()
 
     socket.send_stdin("hi\n")
 
+    assert socket.headers == {"x-sandbox": "sandbox"}
     assert json.loads(sent[0]) == {"type": "stdin", "data": "aGkK"}
+
+
+def test_data_plane_client_uses_sandbox_headers():
+    config = ConnectionConfig(
+        api_key="key",
+        headers={"x-shared": "shared"},
+        extra_sandbox_headers={"x-sandbox": "sandbox"},
+    )
+    data_plane = DataPlaneClient("https://sandbox.example", "data-token", config)
+
+    assert data_plane.headers == {
+        "x-shared": "shared",
+        "x-sandbox": "sandbox",
+        "Authorization": "Bearer data-token",
+    }
 
 
 def test_get_host_returns_host_only():

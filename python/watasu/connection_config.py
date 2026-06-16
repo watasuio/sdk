@@ -17,6 +17,7 @@ class ApiParams(TypedDict, total=False):
     domain: Optional[str]
     request_timeout: Optional[float]
     headers: Optional[Dict[str, str]]
+    extra_sandbox_headers: Optional[Dict[str, str]]
     proxy: Optional[ProxyTypes]
     api_url: Optional[str]
     sandbox_url: Optional[str]
@@ -40,6 +41,7 @@ class ConnectionConfig:
     domain: Optional[str] = None
     request_timeout: float = 60
     headers: Dict[str, str] = field(default_factory=dict)
+    extra_sandbox_headers: Dict[str, str] = field(default_factory=dict)
     proxy: Optional[ProxyTypes] = None
     api_url: Optional[str] = None
     sandbox_url: Optional[str] = None
@@ -53,6 +55,7 @@ class ConnectionConfig:
         domain: Optional[str] = None,
         request_timeout: Optional[float] = None,
         headers: Optional[Dict[str, str]] = None,
+        extra_sandbox_headers: Optional[Dict[str, str]] = None,
         proxy: Optional[ProxyTypes] = None,
         api_url: Optional[str] = None,
         sandbox_url: Optional[str] = None,
@@ -81,6 +84,7 @@ class ConnectionConfig:
             else float(os.environ.get("WATASU_REQUEST_TIMEOUT", "60"))
         )
         self.headers = dict(headers or {})
+        self.extra_sandbox_headers = dict(extra_sandbox_headers or {})
         self.proxy = proxy
         self.debug = (
             bool(debug)
@@ -102,6 +106,7 @@ class ConnectionConfig:
             "domain": self.domain,
             "request_timeout": self.request_timeout,
             "headers": dict(self.headers),
+            "extra_sandbox_headers": dict(self.extra_sandbox_headers),
             "proxy": self.proxy,
             "api_url": self.api_url,
             "sandbox_url": self.sandbox_url,
@@ -120,6 +125,29 @@ class ConnectionConfig:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
+
+    @property
+    def sandbox_headers(self) -> Dict[str, str]:
+        """HTTP headers to send to sandbox data-plane requests."""
+        return {**self.headers, **self.extra_sandbox_headers}
+
+    def get_sandbox_url(self, sandbox_id: str, sandbox_domain: Optional[str]) -> str:
+        """Return the sandbox data-plane API URL for a Watasu route token."""
+        if self.sandbox_url:
+            return self.sandbox_url
+        if self.debug:
+            return "http://localhost:49983"
+        domain = sandbox_domain or self.data_plane_domain
+        return f"https://{sandbox_id}.sandbox.{domain}"
+
+    def get_host(
+        self, sandbox_id: str, sandbox_domain: Optional[str], port: int
+    ) -> str:
+        """Return the public hostname for a Watasu sandbox route token and port."""
+        if self.debug:
+            return f"localhost:{port}"
+        domain = sandbox_domain or self.data_plane_domain
+        return f"p{port}-{sandbox_id}.sandbox.{domain}"
 
     def control_url(self, path: str) -> str:
         """Build an absolute control-plane API URL for a ``/v1`` path."""

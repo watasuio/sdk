@@ -20,12 +20,14 @@ class ProcessSocket:
         *,
         keepalive_interval: float = KEEPALIVE_PING_INTERVAL_SEC,
         request_timeout: Optional[float] = None,
+        headers: Optional[Dict[str, str]] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.path = path
         self.keepalive_interval = keepalive_interval
         self.request_timeout = request_timeout
+        self.headers = dict(headers or {})
         self._ws = None
         self._closed = False
 
@@ -40,7 +42,10 @@ class ProcessSocket:
         ws_url = _ws_url(self.base_url, self.path)
         self._ws = websocket.create_connection(
             ws_url,
-            header=[f"Authorization: Bearer {self.token}"],
+            header=[
+                *(f"{key}: {value}" for key, value in self.headers.items()),
+                f"Authorization: Bearer {self.token}",
+            ],
             timeout=self.request_timeout,
         )
         return self

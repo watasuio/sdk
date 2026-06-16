@@ -57,6 +57,10 @@ export class DataPlaneClient {
     private readonly config: ConnectionConfig
   ) {}
 
+  get headers(): Record<string, string> {
+    return this.config.headers
+  }
+
   getJson(path: string, opts: RequestOpts = {}) {
     return this.request(path, { ...opts, method: 'GET' }) as Promise<JsonRecord>
   }

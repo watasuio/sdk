@@ -69,4 +69,40 @@ export class ConnectionConfig {
       ? { ...this.headers, ...this.apiHeaders, Authorization: `Bearer ${this.apiKey}` }
       : { ...this.headers, ...this.apiHeaders }
   }
+
+  /** Return an abort signal that follows the caller signal and optional timeout. */
+  getSignal(requestTimeoutMs = this.requestTimeoutMs, signal = this.signal): AbortSignal | undefined {
+    if (requestTimeoutMs === undefined && signal === undefined) return undefined
+
+    const controller = new AbortController()
+    if (signal?.aborted) controller.abort()
+    else signal?.addEventListener('abort', () => controller.abort(), { once: true })
+
+    if (requestTimeoutMs > 0) {
+      const timeout = setTimeout(() => controller.abort(), requestTimeoutMs)
+      const maybeTimeout = timeout as { unref?: () => void }
+      if (typeof maybeTimeout.unref === 'function') maybeTimeout.unref()
+      controller.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
+    }
+
+    return controller.signal
+  }
+
+  /** Return the sandbox data-plane API URL for a Watasu route token. */
+  getSandboxUrl(sandboxId: string, opts: { sandboxDomain?: string; envdPort: number }): string {
+    if (this.sandboxUrl) return this.sandboxUrl
+    if (this.debug) return `http://localhost:${opts.envdPort}`
+    return `https://${sandboxId}.sandbox.${opts.sandboxDomain ?? this.dataPlaneDomain}`
+  }
+
+  /** Return the direct sandbox data-plane API URL for a Watasu route token. */
+  getSandboxDirectUrl(sandboxId: string, opts: { sandboxDomain?: string; envdPort: number }): string {
+    return this.getSandboxUrl(sandboxId, opts)
+  }
+
+  /** Return the public hostname for a Watasu sandbox route token and port. */
+  getHost(sandboxId: string, port: number, sandboxDomain = this.dataPlaneDomain): string {
+    if (this.debug) return `localhost:${port}`
+    return `p${port}-${sandboxId}.sandbox.${sandboxDomain}`
+  }
 }

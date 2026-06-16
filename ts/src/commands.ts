@@ -220,7 +220,8 @@ export class Commands {
       this.dataPlane.baseUrl,
       this.dataPlane.token,
       `/runtime/v1/process/${pid}/connect?since=0`,
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      this.config.headers
     ).connect()
     const first = await nextStarted(socket)
     const actualPid = framePid(first) ?? pid
@@ -233,7 +234,8 @@ export class Commands {
       this.dataPlane.baseUrl,
       this.dataPlane.token,
       '/runtime/v1/process',
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      this.config.headers
     ).connect()
     const environment = { ...this.sandboxEnvs, ...(opts.envVars ?? opts.envs ?? {}) }
     const processConfig = processStartConfig(cmd, opts)

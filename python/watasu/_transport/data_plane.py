@@ -24,7 +24,10 @@ class DataPlaneClient:
 
     @property
     def headers(self) -> Dict[str, str]:
-        return {"Authorization": f"Bearer {self.token}"}
+        return {
+            **self.config.sandbox_headers,
+            "Authorization": f"Bearer {self.token}",
+        }
 
     def url(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"

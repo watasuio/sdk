@@ -64,6 +64,29 @@ test('connection config keeps API headers and caller signal', () => {
   assert.equal(config.signal, controller.signal)
 })
 
+test('connection config exposes sandbox URL helpers and abort signals', async () => {
+  const config = new ConnectionConfig({ apiKey: 'key', requestTimeoutMs: 100 })
+  assert.equal(config.getHost('route-token', 3000), 'p3000-route-token.sandbox.watasuhost.com')
+  assert.equal(
+    config.getSandboxUrl('route-token', { sandboxDomain: 'watasuhost.com', envdPort: 49983 }),
+    'https://route-token.sandbox.watasuhost.com'
+  )
+  assert.equal(
+    new ConnectionConfig({ apiKey: 'key', sandboxUrl: 'http://localhost:49983' }).getSandboxDirectUrl('route-token', { sandboxDomain: 'watasuhost.com', envdPort: 49983 }),
+    'http://localhost:49983'
+  )
+
+  const timeoutSignal = config.getSignal(5)
+  assert.equal(timeoutSignal.aborted, false)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(timeoutSignal.aborted, true)
+
+  const controller = new AbortController()
+  const callerSignal = config.getSignal(1000, controller.signal)
+  controller.abort()
+  assert.equal(callerSignal.aborted, true)
+})
+
 test('stream frame helpers match runtime base64 protocol', () => {
   assert.equal(base64DecodeText('NAo='), '4\n')
   assert.equal(base64Encode(new TextEncoder().encode('hi\n')), 'aGkK')

@@ -36,7 +36,8 @@ export class Pty {
       this.dataPlane.baseUrl,
       this.dataPlane.token,
       '/runtime/v1/process',
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      this.config.headers
     ).connect()
     const envs = { TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', ...(opts.envVars ?? opts.envs ?? {}) }
     const size = opts.size ?? { cols: opts.cols ?? 80, rows: opts.rows ?? 24 }
@@ -65,7 +66,8 @@ export class Pty {
       this.dataPlane.baseUrl,
       this.dataPlane.token,
       `/runtime/v1/process/${pid}/connect?since=0`,
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      this.config.headers
     ).connect()
     const first = await nextStarted(socket)
     const actualPid = framePid(first) ?? pid

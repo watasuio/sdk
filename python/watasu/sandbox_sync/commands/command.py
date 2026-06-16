@@ -126,6 +126,7 @@ class Commands:
             self._data_plane.token,
             f"/runtime/v1/process/{pid}/connect?since=0",
             request_timeout=request_timeout,
+            headers=self._connection_config.sandbox_headers,
         ).connect()
         frames = socket.frames(timeout=timeout)
         first = _next_started(frames)
@@ -157,6 +158,7 @@ class Commands:
             self._data_plane.token,
             "/runtime/v1/process",
             request_timeout=request_timeout,
+            headers=self._connection_config.sandbox_headers,
         ).connect()
         environment = {**self._sandbox_envs, **dict(envs or {})}
         socket.send_json(

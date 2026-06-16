@@ -223,6 +223,7 @@ class Filesystem:
             self._data_plane.token,
             f"/runtime/v1/files/watch?{query}",
             request_timeout=request_timeout,
+            headers=self._data_plane.config.sandbox_headers,
         ).connect()
         return WatchHandle(socket, socket.frames(timeout=0))
 

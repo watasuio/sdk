@@ -19,12 +19,13 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
     private readonly baseUrl: string,
     private readonly token: string,
     private readonly path: string,
-    private readonly requestTimeoutMs = 60_000
+    private readonly requestTimeoutMs = 60_000,
+    private readonly headers: Record<string, string> = {}
   ) {}
 
   async connect(): Promise<this> {
     const ws = new WebSocket(wsUrl(this.baseUrl, this.path), {
-      headers: { Authorization: `Bearer ${this.token}` },
+      headers: { ...this.headers, Authorization: `Bearer ${this.token}` },
     })
     this.ws = ws
 

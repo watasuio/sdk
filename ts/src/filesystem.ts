@@ -130,7 +130,8 @@ export class FilesystemWatcher {
       this.dataPlane.baseUrl,
       this.dataPlane.token,
       withQuery('/runtime/v1/files/watch', { path: this.path, recursive: nextOpts.recursive ?? false, include_entry: nextOpts.includeEntry }),
-      nextOpts.requestTimeoutMs
+      nextOpts.requestTimeoutMs,
+      this.dataPlane.headers
     ).connect()
     this.handle = new WatchHandle(socket, socket, async (event) => {
       for (const listener of this.listeners) await listener(event)
