@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { Commands } from './commands.js'
 import { ConnectionConfig, ConnectionOpts, SESSION_OPERATION_REQUEST_TIMEOUT_MS } from './connectionConfig.js'
 import { DataPlaneClient, ControlClient, withQuery } from './transport.js'
-import { ConflictError, FileNotFoundError, NotFoundError, SandboxError, unsupported } from './errors.js'
+import { ConflictError, FileNotFoundError, NotFoundError, SandboxError } from './errors.js'
 import { Filesystem } from './filesystem.js'
 import { Git } from './git.js'
 import { Pty } from './pty.js'
@@ -37,7 +37,22 @@ export interface SandboxLifecycle {
   autoResume?: boolean
 }
 
-export type SandboxNetworkSelector = string | string[]
+export type SandboxNetworkTransform = {
+  headers?: Record<string, string>
+}
+
+export type SandboxNetworkRule = {
+  transform?: SandboxNetworkTransform
+}
+
+export type SandboxNetworkRules = Record<string, SandboxNetworkRule[]> | Map<string, SandboxNetworkRule[]>
+
+export interface SandboxNetworkSelectorContext {
+  allTraffic: string
+  rules: Map<string, SandboxNetworkRule[]>
+}
+
+export type SandboxNetworkSelector = string | string[] | ((ctx: SandboxNetworkSelectorContext) => string[])
 
 export interface SandboxNetworkUpdate {
   allowOut?: SandboxNetworkSelector
@@ -48,17 +63,13 @@ export interface SandboxNetworkUpdate {
   egressProfile?: string
   egressProfiles?: string[]
   networkClass?: string
-  rules?: unknown
+  rules?: SandboxNetworkRules
   maskRequestHost?: string
 }
 
 export type SandboxNetworkOpts = SandboxNetworkUpdate
 export type SandboxNetworkInfo = SandboxNetworkUpdate
-export type SandboxNetworkRule = Record<string, unknown>
 export type SandboxNetworkRuleInfo = Record<string, unknown>
-export type SandboxNetworkRules = SandboxNetworkRule[]
-export type SandboxNetworkSelectorContext = Record<string, unknown>
-export type SandboxNetworkTransform = Record<string, unknown>
 export type SandboxOpts = SandboxCreateOpts
 export type SandboxApiOpts = ConnectionOpts
 export type SandboxState = string
@@ -933,20 +944,41 @@ function putIfPresent(target: Record<string, unknown>, key: string, value: unkno
 
 function networkUpdatePayload(network: SandboxNetworkUpdate | undefined): Record<string, unknown> {
   if (network === undefined) return {}
-  if (typeof network !== 'object' || network === null) unsupported('network callable rules')
-  if (network.rules !== undefined) unsupported('network rules')
-  if (network.maskRequestHost !== undefined) unsupported('network request host masking')
+  const rules = network.rules instanceof Map
+    ? network.rules
+    : new Map(Object.entries(network.rules ?? {}))
 
   return compactRecord({
-    allow_out: network.allowOut,
-    deny_out: network.denyOut,
+    allow_out: resolveNetworkSelector(network.allowOut, rules),
+    deny_out: resolveNetworkSelector(network.denyOut, rules),
     allow_internet_access: network.allowInternetAccess,
     allow_package_registry_access: network.allowPackageRegistryAccess,
     allow_public_traffic: network.allowPublicTraffic,
     egress_profile: network.egressProfile,
     egress_profiles: network.egressProfiles,
     network_class: network.networkClass,
+    rules: network.rules === undefined ? undefined : resolveNetworkRules(rules),
+    mask_request_host: network.maskRequestHost,
   })
+}
+
+function resolveNetworkSelector(
+  selector: SandboxNetworkSelector | undefined,
+  rules: Map<string, SandboxNetworkRule[]>
+): string[] | undefined {
+  if (selector === undefined) return undefined
+  if (typeof selector === 'function') return selector({ allTraffic: ALL_TRAFFIC, rules }).map(String)
+  if (typeof selector === 'string') return [selector]
+  return selector.map(String)
+}
+
+function resolveNetworkRules(rules: Map<string, SandboxNetworkRule[]>): Record<string, Array<{ transform?: SandboxNetworkTransform }>> {
+  return Object.fromEntries(
+    Array.from(rules.entries()).map(([host, hostRules]) => [
+      host,
+      hostRules.map((rule) => rule.transform === undefined ? {} : { transform: rule.transform }),
+    ])
+  )
 }
 
 function record(value: unknown): Record<string, unknown> {

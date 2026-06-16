@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
 ALL_TRAFFIC = "0.0.0.0/0"
 
@@ -10,11 +13,9 @@ SandboxQuery = Dict[str, Any]
 SandboxLifecycle = Dict[str, Any]
 SandboxNetworkOpts = Dict[str, Any]
 SandboxNetworkUpdate = Dict[str, Any]
-SandboxNetworkRules = List[Dict[str, Any]]
 SandboxNetworkRule = Dict[str, Any]
+SandboxNetworkRules = Dict[str, List[SandboxNetworkRule]]
 SandboxNetworkRuleInfo = Dict[str, Any]
-SandboxNetworkSelector = Any
-SandboxNetworkSelectorContext = Dict[str, Any]
 SandboxNetworkTransform = Any
 McpServer = Dict[str, Any]
 GitHubMcpServer = Dict[str, Any]
@@ -23,6 +24,20 @@ GitStatus = Dict[str, Any]
 GitBranches = Dict[str, Any]
 GitFileStatus = Dict[str, Any]
 GitResetMode = str
+
+
+@dataclass(frozen=True)
+class SandboxNetworkSelectorContext:
+    """Context passed to callable network selectors."""
+
+    all_traffic: str
+    rules: Mapping[str, List[SandboxNetworkRule]]
+
+
+SandboxNetworkSelector = Union[
+    List[str],
+    Callable[[SandboxNetworkSelectorContext], List[str]],
+]
 
 
 @dataclass
@@ -209,5 +224,27 @@ def _bool(value: Any) -> bool:
     return False
 
 
-def get_signature(*_args: Any, **_kwargs: Any) -> str:
-    raise NotImplementedError("get_signature is not supported by Watasu yet")
+def get_signature(
+    path: str,
+    operation: str,
+    user: Optional[str],
+    envd_access_token: Optional[str],
+    expiration_in_seconds: Optional[int] = None,
+) -> Dict[str, Optional[Union[str, int]]]:
+    """Generate the v1 signature used by signed sandbox file URLs."""
+
+    if not envd_access_token:
+        raise ValueError("Access token is not set and signature cannot be generated")
+
+    expiration = (
+        int(time.time()) + expiration_in_seconds if expiration_in_seconds else None
+    )
+    user = user or ""
+    raw = (
+        f"{path}:{operation}:{user}:{envd_access_token}"
+        if expiration is None
+        else f"{path}:{operation}:{user}:{envd_access_token}:{expiration}"
+    )
+    digest = hashlib.sha256(raw.encode("utf-8")).digest()
+    encoded = base64.b64encode(digest).rstrip(b"=").decode("ascii")
+    return {"signature": f"v1_{encoded}", "expiration": expiration}

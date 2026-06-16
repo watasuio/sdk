@@ -199,14 +199,20 @@ with Sandbox.create() as sbx:
 ```python
 with Sandbox.create(
     network={
-        "allow_out": ["pypi.org:443"],
+        "allow_out": lambda ctx: list(ctx.rules.keys()) + ["pypi.org:443"],
         "deny_out": ["169.254.169.254"],
+        "rules": {
+            "api.example.com": [
+                {"transform": {"headers": {"authorization": "Bearer token"}}}
+            ]
+        },
+        "mask_request_host": "${PORT}-sandbox.example.com",
     }
 ) as sbx:
     sbx.update_network(
         allow_internet_access=False,
         allow_package_registry_access=True,
-        allow_out=["pypi.org:443", "registry.npmjs.org:443"],
+        allow_out=["registry.npmjs.org:443"],
     )
 ```
 

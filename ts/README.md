@@ -182,15 +182,21 @@ await sbx.kill()
 ```ts
 const sbx = await Sandbox.create({
   network: {
-    allowOut: ['pypi.org:443'],
+    allowOut: ({ rules }) => [...rules.keys(), 'pypi.org:443'],
     denyOut: ['169.254.169.254'],
+    rules: {
+      'api.example.com': [
+        { transform: { headers: { authorization: 'Bearer token' } } },
+      ],
+    },
+    maskRequestHost: '${PORT}-sandbox.example.com',
   },
 })
 
 await sbx.updateNetwork({
   allowInternetAccess: false,
   allowPackageRegistryAccess: true,
-  allowOut: ['pypi.org:443', 'registry.npmjs.org:443'],
+  allowOut: ['registry.npmjs.org:443'],
 })
 ```
 

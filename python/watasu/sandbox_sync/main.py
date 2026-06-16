@@ -19,8 +19,10 @@ from watasu.exceptions import (
 )
 from watasu.sandbox.main import SandboxBase
 from watasu.sandbox.sandbox_api import (
+    ALL_TRAFFIC,
     FileUrlInfo,
     SandboxInfo,
+    SandboxNetworkSelectorContext,
     SnapshotInfo,
     file_url_info_from_api,
     sandbox_info_from_api,
@@ -991,6 +993,7 @@ _NETWORK_KEY_ALIASES = {
     "allowInternetAccess": "allow_internet_access",
     "allowPackageRegistryAccess": "allow_package_registry_access",
     "allowPublicTraffic": "allow_public_traffic",
+    "maskRequestHost": "mask_request_host",
     "egressProfile": "egress_profile",
     "egressProfiles": "egress_profiles",
     "networkClass": "network_class",
@@ -1004,11 +1007,11 @@ def _network_payload(
     payload: Dict[str, Any] = {}
     if network is not None:
         if not isinstance(network, dict):
-            unsupported("network callable rules")
+            unsupported("network payload")
         payload.update(_normalize_network_keys(network))
     if opts:
         payload.update(_normalize_network_keys(opts))
-    _reject_unsupported_network(payload)
+    payload = _resolve_network_payload(payload)
     return payload
 
 
@@ -1020,14 +1023,69 @@ def _normalize_network_keys(network: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _reject_unsupported_network(network: Dict[str, Any]) -> None:
-    if "rules" in network:
-        unsupported("network rules")
-    if "mask_request_host" in network or "maskRequestHost" in network:
-        unsupported("network request host masking")
+def _resolve_network_payload(network: Dict[str, Any]) -> Dict[str, Any]:
+    rules = _network_rules(network.get("rules"))
+    resolved = dict(network)
+
     for key in ("allow_out", "deny_out"):
-        if callable(network.get(key)):
-            unsupported("network callable selectors")
+        selector = resolved.get(key)
+        if selector is not None:
+            resolved[key] = _network_selector(selector, rules)
+
+    if "rules" in resolved:
+        resolved["rules"] = rules
+
+    return resolved
+
+
+def _network_selector(selector: Any, rules: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+    if callable(selector):
+        selector = selector(SandboxNetworkSelectorContext(ALL_TRAFFIC, rules))
+    if isinstance(selector, str):
+        return [selector]
+    if isinstance(selector, (list, tuple, set)):
+        return [str(item) for item in selector]
+    unsupported("network selectors")
+
+
+def _network_rules(value: Any) -> Dict[str, List[Dict[str, Any]]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        unsupported("network rules")
+
+    rules: Dict[str, List[Dict[str, Any]]] = {}
+    for host, host_rules in value.items():
+        rules[str(host)] = [_network_rule(rule) for rule in _rule_list(host_rules)]
+    return rules
+
+
+def _rule_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def _network_rule(rule: Any) -> Dict[str, Any]:
+    if not isinstance(rule, dict):
+        unsupported("network rules")
+    transform = rule.get("transform")
+    if transform is None:
+        return {}
+    if not isinstance(transform, dict):
+        unsupported("network rule transforms")
+    headers = transform.get("headers")
+    if headers is None:
+        return {"transform": {}}
+    if not isinstance(headers, dict):
+        unsupported("network rule transform headers")
+    return {
+        "transform": {
+            "headers": {str(key): str(value) for key, value in headers.items()}
+        }
+    }
 
 
 def _host_only(value: str) -> str:

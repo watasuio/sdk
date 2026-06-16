@@ -636,9 +636,15 @@ test('sandbox create uses root snake_case API payload', async () => {
       },
       team: 'watasu',
       network: {
-        allowOut: ['pypi.org:443'],
+        allowOut: ({ rules }) => [...rules.keys(), 'pypi.org:443'],
         denyOut: ['10.0.0.0/8'],
         allowPackageRegistryAccess: true,
+        rules: {
+          'api.example.com': [
+            { transform: { headers: { authorization: 'Bearer token' } } },
+          ],
+        },
+        maskRequestHost: '${PORT}-sandbox.example.com',
       },
     })
 
@@ -655,9 +661,15 @@ test('sandbox create uses root snake_case API payload', async () => {
         { path: '/workspace/cache', name: 'cache' },
         { path: '/data/models', name: 'models' },
       ],
-      allow_out: ['pypi.org:443'],
+      allow_out: ['api.example.com', 'pypi.org:443'],
       deny_out: ['10.0.0.0/8'],
       allow_package_registry_access: true,
+      rules: {
+        'api.example.com': [
+          { transform: { headers: { authorization: 'Bearer token' } } },
+        ],
+      },
+      mask_request_host: '${PORT}-sandbox.example.com',
       team: 'watasu',
     })
   } finally {
@@ -1133,6 +1145,10 @@ test('sandbox updateNetwork uses snake_case API payload', async () => {
       denyOut: ['10.0.0.0/8'],
       allowInternetAccess: false,
       allowPackageRegistryAccess: true,
+      rules: new Map([
+        ['registry.npmjs.org', [{ transform: { headers: { authorization: 'Bearer token' } } }]],
+      ]),
+      maskRequestHost: '${PORT}-sandbox.example.com',
     })
 
     assert.deepEqual(requests, [
@@ -1144,6 +1160,12 @@ test('sandbox updateNetwork uses snake_case API payload', async () => {
           deny_out: ['10.0.0.0/8'],
           allow_internet_access: false,
           allow_package_registry_access: true,
+          rules: {
+            'registry.npmjs.org': [
+              { transform: { headers: { authorization: 'Bearer token' } } },
+            ],
+          },
+          mask_request_host: '${PORT}-sandbox.example.com',
         },
       },
     ])
@@ -1164,10 +1186,15 @@ test('sandbox static updateNetwork uses snake_case API payload', async () => {
     await Sandbox.updateNetwork(
       'network-sandbox',
       {
-        allowOut: ['registry.npmjs.org:443'],
+        allowOut: ({ rules }) => [...rules.keys()],
         denyOut: ['10.0.0.0/8'],
         allowInternetAccess: false,
         allowPackageRegistryAccess: true,
+        rules: {
+          'registry.npmjs.org': [
+            { transform: { headers: { authorization: 'Bearer token' } } },
+          ],
+        },
       },
       { apiKey: 'key' }
     )
@@ -1177,10 +1204,15 @@ test('sandbox static updateNetwork uses snake_case API payload', async () => {
         url: 'https://api.watasu.io/v1/sandboxes/network-sandbox/network',
         method: 'PUT',
         body: {
-          allow_out: ['registry.npmjs.org:443'],
+          allow_out: ['registry.npmjs.org'],
           deny_out: ['10.0.0.0/8'],
           allow_internet_access: false,
           allow_package_registry_access: true,
+          rules: {
+            'registry.npmjs.org': [
+              { transform: { headers: { authorization: 'Bearer token' } } },
+            ],
+          },
         },
       },
     ])

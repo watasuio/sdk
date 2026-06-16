@@ -1313,9 +1313,15 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
             "/data/models": {"name": "models"},
         },
         network={
-            "allowOut": ["pypi.org:443"],
+            "allowOut": lambda ctx: list(ctx.rules.keys()) + ["pypi.org:443"],
             "denyOut": ["10.0.0.0/8"],
             "allowPackageRegistryAccess": True,
+            "rules": {
+                "api.example.com": [
+                    {"transform": {"headers": {"authorization": "Bearer token"}}}
+                ]
+            },
+            "maskRequestHost": "${PORT}-sandbox.example.com",
         },
     )
 
@@ -1332,9 +1338,18 @@ def test_sandbox_create_uses_base_template_and_watasu_payload(monkeypatch):
         {"path": "/data/models", "name": "models"},
     ]
     assert captured["kwargs"]["json"]["team"] == "watasu"
-    assert captured["kwargs"]["json"]["allow_out"] == ["pypi.org:443"]
+    assert captured["kwargs"]["json"]["allow_out"] == [
+        "api.example.com",
+        "pypi.org:443",
+    ]
     assert captured["kwargs"]["json"]["deny_out"] == ["10.0.0.0/8"]
     assert captured["kwargs"]["json"]["allow_package_registry_access"] is True
+    assert captured["kwargs"]["json"]["rules"] == {
+        "api.example.com": [
+            {"transform": {"headers": {"authorization": "Bearer token"}}}
+        ]
+    }
+    assert captured["kwargs"]["json"]["mask_request_host"] == "${PORT}-sandbox.example.com"
 
 
 def test_sandbox_create_rejects_invalid_lifecycle_boolean():
@@ -1590,6 +1605,9 @@ def test_python_sandbox_main_imports():
     assert ImportedMcpServer is McpServer
     assert ImportedAllTraffic == ALL_TRAFFIC
     assert imported_get_signature is get_signature
+    signature = get_signature("/workspace/a.txt", "read", "user", "token")
+    assert signature["expiration"] is None
+    assert signature["signature"].startswith("v1_")
     assert Sandbox.default_template == "base"
     assert Sandbox.default_sandbox_timeout == 300
     assert Sandbox.default_mcp_template == "mcp-gateway"
@@ -1685,9 +1703,19 @@ def test_sandbox_update_network_uses_snake_case_payload(monkeypatch):
     assert (
         sbx.update_network(
             {
-                "allowOut": ["registry.npmjs.org:443"],
+                "allowOut": lambda ctx: list(ctx.rules.keys()),
                 "denyOut": ["10.0.0.0/8"],
                 "allowInternetAccess": False,
+                "rules": {
+                    "registry.npmjs.org": [
+                        {
+                            "transform": {
+                                "headers": {"authorization": "Bearer token"}
+                            }
+                        }
+                    ]
+                },
+                "maskRequestHost": "${PORT}-sandbox.example.com",
             },
             allow_package_registry_access=True,
             request_timeout=3,
@@ -1701,10 +1729,20 @@ def test_sandbox_update_network_uses_snake_case_payload(monkeypatch):
             "/sandboxes/network-sandbox/network",
             {
                 "json": {
-                    "allow_out": ["registry.npmjs.org:443"],
+                    "allow_out": ["registry.npmjs.org"],
                     "deny_out": ["10.0.0.0/8"],
                     "allow_internet_access": False,
                     "allow_package_registry_access": True,
+                    "rules": {
+                        "registry.npmjs.org": [
+                            {
+                                "transform": {
+                                    "headers": {"authorization": "Bearer token"}
+                                }
+                            }
+                        ]
+                    },
+                    "mask_request_host": "${PORT}-sandbox.example.com",
                 },
                 "resource": "sandbox",
                 "request_timeout": 3,
@@ -1730,9 +1768,18 @@ def test_sandbox_update_network_class_uses_snake_case_payload(monkeypatch):
         Sandbox.update_network(
             "network-sandbox",
             {
-                "allowOut": ["registry.npmjs.org:443"],
+                "allowOut": lambda ctx: list(ctx.rules.keys()),
                 "denyOut": ["10.0.0.0/8"],
                 "allowInternetAccess": False,
+                "rules": {
+                    "registry.npmjs.org": [
+                        {
+                            "transform": {
+                                "headers": {"authorization": "Bearer token"}
+                            }
+                        }
+                    ]
+                },
             },
             allow_package_registry_access=True,
             api_key="key",
@@ -1748,10 +1795,19 @@ def test_sandbox_update_network_class_uses_snake_case_payload(monkeypatch):
             "/sandboxes/network-sandbox/network",
             {
                 "json": {
-                    "allow_out": ["registry.npmjs.org:443"],
+                    "allow_out": ["registry.npmjs.org"],
                     "deny_out": ["10.0.0.0/8"],
                     "allow_internet_access": False,
                     "allow_package_registry_access": True,
+                    "rules": {
+                        "registry.npmjs.org": [
+                            {
+                                "transform": {
+                                    "headers": {"authorization": "Bearer token"}
+                                }
+                            }
+                        ]
+                    },
                 },
                 "resource": "sandbox",
                 "request_timeout": 3,
