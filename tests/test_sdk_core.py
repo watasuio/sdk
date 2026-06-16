@@ -2208,6 +2208,12 @@ def test_template_builder_compatibility_serializers_and_mcp_helper(tmp_path):
         "ready_cmd": "sleep 20",
     }
 
+    assert Template().from_image(
+        "python:3.12",
+        username="registry-user",
+        password="registry-password",
+    ).to_build_spec() == {"base": "base"}
+
     mcp_template = Template().from_template("mcp-gateway").add_mcp_server(
         ["exa", "brave"]
     )

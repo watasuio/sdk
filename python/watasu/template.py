@@ -151,10 +151,11 @@ class TemplateBase:
 
     def from_image(
         self,
-        base_image: str,
-        credentials: Optional[Dict[str, str]] = None,
+        image: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
     ) -> "TemplateBase":
-        """Accept image-shaped builder code while using Watasu's package-spec base."""
+        """Accept Docker-image-shaped builder code while using Watasu's package-spec base."""
         self._base = self._base or "base"
         return self
 
