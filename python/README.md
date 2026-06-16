@@ -224,7 +224,6 @@ template = (
 build = Template.build_in_background(
     template,
     "python-ci:stable",
-    tags=["stable"],
     cpu_count=2,
     memory_mb=2048,
 )

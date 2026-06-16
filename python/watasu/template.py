@@ -501,10 +501,7 @@ class Template(TemplateBase):
     @staticmethod
     def build(
         template: "TemplateBase",
-        name: Optional[str] = None,
-        *,
-        alias: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        alias: str,
         cpu_count: int = 2,
         memory_mb: int = 1024,
         skip_cache: bool = False,
@@ -514,9 +511,7 @@ class Template(TemplateBase):
         """Build a Watasu template and wait until the build finishes."""
         build_info = Template.build_in_background(
             template,
-            name,
-            alias=alias,
-            tags=tags,
+            alias,
             cpu_count=cpu_count,
             memory_mb=memory_mb,
             skip_cache=skip_cache,
@@ -529,10 +524,7 @@ class Template(TemplateBase):
     @staticmethod
     def build_in_background(
         template: "TemplateBase",
-        name: Optional[str] = None,
-        *,
-        alias: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        alias: str,
         cpu_count: int = 2,
         memory_mb: int = 1024,
         skip_cache: bool = False,
@@ -540,12 +532,10 @@ class Template(TemplateBase):
         **opts: ApiParams,
     ) -> BuildInfo:
         """Start a Watasu template build and return its identifiers."""
-        build_name = _normalize_build_name(name, alias)
         config = ConnectionConfig(**opts)
         control = ControlClient(config)
         payload: Dict[str, Any] = {
-            "name": build_name,
-            "tags": tags,
+            "name": alias,
             "cpu_count": cpu_count,
             "memory_mb": memory_mb,
             "skip_cache": skip_cache or template._force,
@@ -629,36 +619,87 @@ class AsyncTemplate(TemplateBase):
     """Async wrapper around the Watasu template builder helpers."""
 
     @staticmethod
-    async def build(*args: Any, **kwargs: Any) -> BuildInfo:
-        return await asyncio.to_thread(Template.build, *args, **kwargs)
+    async def build(
+        template: "TemplateBase",
+        alias: str,
+        cpu_count: int = 2,
+        memory_mb: int = 1024,
+        skip_cache: bool = False,
+        on_build_logs: Optional[Callable[[LogEntry], None]] = None,
+        **opts: ApiParams,
+    ) -> BuildInfo:
+        return await asyncio.to_thread(
+            Template.build,
+            template,
+            alias,
+            cpu_count=cpu_count,
+            memory_mb=memory_mb,
+            skip_cache=skip_cache,
+            on_build_logs=on_build_logs,
+            **opts,
+        )
 
     @staticmethod
-    async def build_in_background(*args: Any, **kwargs: Any) -> BuildInfo:
-        return await asyncio.to_thread(Template.build_in_background, *args, **kwargs)
+    async def build_in_background(
+        template: "TemplateBase",
+        alias: str,
+        cpu_count: int = 2,
+        memory_mb: int = 1024,
+        skip_cache: bool = False,
+        on_build_logs: Optional[Callable[[LogEntry], None]] = None,
+        **opts: ApiParams,
+    ) -> BuildInfo:
+        return await asyncio.to_thread(
+            Template.build_in_background,
+            template,
+            alias,
+            cpu_count=cpu_count,
+            memory_mb=memory_mb,
+            skip_cache=skip_cache,
+            on_build_logs=on_build_logs,
+            **opts,
+        )
 
     @staticmethod
-    async def get_build_status(*args: Any, **kwargs: Any) -> TemplateBuildStatusResponse:
-        return await asyncio.to_thread(Template.get_build_status, *args, **kwargs)
+    async def get_build_status(
+        build_info: BuildInfo,
+        logs_offset: int = 0,
+        **opts: ApiParams,
+    ) -> TemplateBuildStatusResponse:
+        return await asyncio.to_thread(
+            Template.get_build_status,
+            build_info,
+            logs_offset=logs_offset,
+            **opts,
+        )
 
     @staticmethod
-    async def exists(*args: Any, **kwargs: Any) -> bool:
-        return await asyncio.to_thread(Template.exists, *args, **kwargs)
+    async def exists(name: str, **opts: ApiParams) -> bool:
+        return await asyncio.to_thread(Template.exists, name, **opts)
 
     @staticmethod
-    async def alias_exists(*args: Any, **kwargs: Any) -> bool:
-        return await asyncio.to_thread(Template.alias_exists, *args, **kwargs)
+    async def alias_exists(alias: str, **opts: ApiParams) -> bool:
+        return await asyncio.to_thread(Template.alias_exists, alias, **opts)
 
     @staticmethod
-    async def assign_tags(*args: Any, **kwargs: Any) -> TemplateTagInfo:
-        return await asyncio.to_thread(Template.assign_tags, *args, **kwargs)
+    async def assign_tags(
+        target_name: str,
+        tags: Union[str, List[str]],
+        **opts: ApiParams,
+    ) -> TemplateTagInfo:
+        return await asyncio.to_thread(Template.assign_tags, target_name, tags, **opts)
 
     @staticmethod
-    async def remove_tags(*args: Any, **kwargs: Any) -> None:
-        await asyncio.to_thread(Template.remove_tags, *args, **kwargs)
+    async def remove_tags(
+        name: str,
+        tags: Union[str, List[str]],
+        **opts: ApiParams,
+    ) -> None:
+        await asyncio.to_thread(Template.remove_tags, name, tags, **opts)
 
     @staticmethod
-    async def get_tags(*args: Any, **kwargs: Any) -> List[TemplateTag]:
-        return await asyncio.to_thread(Template.get_tags, *args, **kwargs)
+    async def get_tags(template_id: str, **opts: ApiParams) -> List[TemplateTag]:
+        return await asyncio.to_thread(Template.get_tags, template_id, **opts)
 
 
 TemplateClass = type
@@ -721,13 +762,6 @@ def _wait_for_build_finish(
             message = build_status.reason.message if build_status.reason else "Template build failed"
             raise BuildException(message)
         time.sleep(TemplateBase._logs_refresh_frequency)
-
-
-def _normalize_build_name(name: Optional[str], alias: Optional[str]) -> str:
-    value = name or alias
-    if not value:
-        raise InvalidArgumentException("name is required")
-    return value
 
 
 def _build_info(payload: Dict[str, Any]) -> BuildInfo:

@@ -2099,7 +2099,6 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
     build = Template.build_in_background(
         template,
         "python-ci:stable",
-        tags=["stable"],
         cpu_count=4,
         memory_mb=4096,
         skip_cache=True,
@@ -2116,7 +2115,6 @@ def test_template_builder_sends_snake_case_payloads(monkeypatch, tmp_path):
             "https://api.watasu.io/v1/templates",
             {
                 "name": "python-ci:stable",
-                "tags": ["stable"],
                 "cpu_count": 4,
                 "memory_mb": 4096,
                 "skip_cache": True,
@@ -2213,6 +2211,14 @@ def test_template_builder_compatibility_serializers_and_mcp_helper(tmp_path):
         username="registry-user",
         password="registry-password",
     ).to_build_spec() == {"base": "base"}
+    assert list(inspect.signature(AsyncTemplate.build).parameters)[:6] == [
+        "template",
+        "alias",
+        "cpu_count",
+        "memory_mb",
+        "skip_cache",
+        "on_build_logs",
+    ]
 
     mcp_template = Template().from_template("mcp-gateway").add_mcp_server(
         ["exa", "brave"]
