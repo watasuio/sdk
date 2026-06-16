@@ -1247,6 +1247,8 @@ class AsyncSandbox:
         allow_internet_access: bool = True,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
+        volume_mounts: Optional[Dict[str, Any]] = None,
+        lifecycle=None,
         team: Optional[str] = None,
         **opts: ApiParams,
     ) -> "AsyncSandbox":
@@ -1262,6 +1264,8 @@ class AsyncSandbox:
                 allow_internet_access=allow_internet_access,
                 mcp=mcp,
                 network=network,
+                volume_mounts=volume_mounts,
+                lifecycle=lifecycle,
                 auto_pause=auto_pause,
                 team=team,
                 **opts,
@@ -1383,33 +1387,81 @@ class AsyncSandbox:
 
     get_metrics = _AsyncDualMethod(_get_metrics_instance, _get_metrics_class)
 
-    async def _create_snapshot_instance(self, *args, **kwargs) -> SnapshotInfo:
+    async def _create_snapshot_instance(
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        expires_at: Optional[str] = None,
+        quiesce_mode: Optional[str] = None,
+        **opts: ApiParams,
+    ) -> SnapshotInfo:
         """Create a Watasu checkpoint using snapshot naming."""
-        return await asyncio.to_thread(self._sync.create_snapshot, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._sync.create_snapshot,
+            name=name,
+            metadata=metadata,
+            expires_at=expires_at,
+            quiesce_mode=quiesce_mode,
+            **opts,
+        )
 
     @classmethod
     async def _create_snapshot_class(
-        cls, sandbox_id: str, *args, **kwargs
+        cls,
+        sandbox_id: str,
+        name: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        expires_at: Optional[str] = None,
+        quiesce_mode: Optional[str] = None,
+        **opts: ApiParams,
     ) -> SnapshotInfo:
         """Create a Watasu checkpoint by sandbox id."""
         return await asyncio.to_thread(
-            Sandbox.create_snapshot, sandbox_id, *args, **kwargs
+            Sandbox.create_snapshot,
+            sandbox_id,
+            name=name,
+            metadata=metadata,
+            expires_at=expires_at,
+            quiesce_mode=quiesce_mode,
+            **opts,
         )
 
     create_snapshot = _AsyncDualMethod(
         _create_snapshot_instance, _create_snapshot_class
     )
 
-    def _list_snapshots_instance(self, **opts: ApiParams) -> AsyncSnapshotPaginator:
+    def _list_snapshots_instance(
+        self,
+        limit: Optional[int] = None,
+        next_token: Optional[str] = None,
+        **opts: ApiParams,
+    ) -> AsyncSnapshotPaginator:
         """List checkpoints for this sandbox using snapshot naming."""
-        return AsyncSnapshotPaginator(lambda: self._sync.list_snapshots(**opts))
+        return AsyncSnapshotPaginator(
+            lambda: self._sync.list_snapshots(
+                limit=limit,
+                next_token=next_token,
+                **opts,
+            )
+        )
 
     @classmethod
     def _list_snapshots_class(
-        cls, sandbox_id: Optional[str] = None, **opts: ApiParams
+        cls,
+        sandbox_id: Optional[str] = None,
+        limit: Optional[int] = None,
+        next_token: Optional[str] = None,
+        **opts: ApiParams,
     ) -> AsyncSnapshotPaginator:
         """List checkpoints visible to the configured API token."""
-        return AsyncSnapshotPaginator(lambda: Sandbox.list_snapshots(sandbox_id, **opts))
+        return AsyncSnapshotPaginator(
+            lambda: Sandbox.list_snapshots(
+                sandbox_id,
+                limit=limit,
+                next_token=next_token,
+                **opts,
+            )
+        )
 
     list_snapshots = _AsyncDualMethod(_list_snapshots_instance, _list_snapshots_class)
 
@@ -1534,14 +1586,38 @@ class AsyncSandbox:
             request_timeout=request_timeout,
         )
 
-    async def _update_network_instance(self, *args, **kwargs):
+    async def _update_network_instance(
+        self,
+        network: Optional[Dict[str, Any]] = None,
+        *,
+        request_timeout: Optional[float] = None,
+        **opts: Any,
+    ):
         """Atomically replace this sandbox's network egress policy."""
-        return await asyncio.to_thread(self._sync.update_network, *args, **kwargs)
+        return await asyncio.to_thread(
+            self._sync.update_network,
+            network,
+            request_timeout=request_timeout,
+            **opts,
+        )
 
     @classmethod
-    async def _update_network_class(cls, sandbox_id: str, *args, **kwargs):
+    async def _update_network_class(
+        cls,
+        sandbox_id: str,
+        network: Optional[Dict[str, Any]] = None,
+        *,
+        request_timeout: Optional[float] = None,
+        **opts: Any,
+    ):
         """Atomically replace a sandbox network egress policy by id."""
-        return await asyncio.to_thread(Sandbox.update_network, sandbox_id, *args, **kwargs)
+        return await asyncio.to_thread(
+            Sandbox.update_network,
+            sandbox_id,
+            network,
+            request_timeout=request_timeout,
+            **opts,
+        )
 
     update_network = _AsyncDualMethod(_update_network_instance, _update_network_class)
 

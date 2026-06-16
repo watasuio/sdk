@@ -243,6 +243,8 @@ class Sandbox(SandboxBase):
         allow_internet_access: bool = True,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
+        volume_mounts: Optional[Dict[str, Any]] = None,
+        lifecycle=None,
         team: Optional[str] = None,
         **opts: ApiParams,
     ) -> "Sandbox":
@@ -256,6 +258,8 @@ class Sandbox(SandboxBase):
             allow_internet_access=allow_internet_access,
             mcp=mcp,
             network=network,
+            volume_mounts=volume_mounts,
+            lifecycle=lifecycle,
             auto_pause=auto_pause,
             team=team,
             **opts,

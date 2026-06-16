@@ -14,6 +14,7 @@ from .models import (
     OutputHandler,
     OutputMessage,
     Result,
+    RunCodeLanguage,
 )
 
 _code_interpreter_all = [
@@ -32,6 +33,7 @@ _code_interpreter_all = [
     "OutputHandler",
     "OutputMessage",
     "Result",
+    "RunCodeLanguage",
     "Sandbox",
 ]
 

@@ -3,12 +3,16 @@ from __future__ import annotations
 import json as jsonlib
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Literal, Optional, TypeVar, Union
 
 from .charts import ChartTypes, _deserialize_chart
 
 T = TypeVar("T")
 OutputHandler = Callable[[T], Any]
+RunCodeLanguage = Union[
+    Literal["python", "javascript", "typescript", "r", "java", "bash"],
+    str,
+]
 
 
 class MIMEType(str):

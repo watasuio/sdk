@@ -130,6 +130,8 @@ class AsyncSandbox(BaseAsyncSandbox):
         allow_internet_access: bool = True,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
+        volume_mounts: Optional[Dict[str, Any]] = None,
+        lifecycle=None,
         **opts: ApiParams,
     ) -> "AsyncSandbox":
         """Create a code-interpreter sandbox and return async helpers."""
@@ -145,6 +147,8 @@ class AsyncSandbox(BaseAsyncSandbox):
                 allow_internet_access=allow_internet_access,
                 mcp=mcp,
                 network=network,
+                volume_mounts=volume_mounts,
+                lifecycle=lifecycle,
                 **opts,
             )
         )
@@ -161,6 +165,8 @@ class AsyncSandbox(BaseAsyncSandbox):
         allow_internet_access: bool = True,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
+        volume_mounts: Optional[Dict[str, Any]] = None,
+        lifecycle=None,
         **opts: ApiParams,
     ) -> "AsyncSandbox":
         """Create a code-interpreter sandbox with beta lifecycle options."""
@@ -177,6 +183,8 @@ class AsyncSandbox(BaseAsyncSandbox):
                 allow_internet_access=allow_internet_access,
                 mcp=mcp,
                 network=network,
+                volume_mounts=volume_mounts,
+                lifecycle=lifecycle,
                 **opts,
             )
         )

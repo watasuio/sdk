@@ -193,6 +193,8 @@ def test_async_python_signatures_are_explicit_for_ide_docs():
         "allow_internet_access",
         "mcp",
         "network",
+        "volume_mounts",
+        "lifecycle",
     ):
         assert name in create_params
 
@@ -200,6 +202,27 @@ def test_async_python_signatures_are_explicit_for_ide_docs():
         watasu_code_interpreter.AsyncSandbox.beta_create
     ).parameters
     assert "auto_pause" in beta_create_params
+    assert "volume_mounts" in beta_create_params
+    assert "lifecycle" in beta_create_params
+
+    for method in (
+        AsyncSandbox.create_snapshot,
+        AsyncSandbox.list_snapshots,
+        AsyncSandbox.update_network,
+    ):
+        params = inspect.signature(method).parameters
+        assert "args" not in params
+        assert "kwargs" not in params
+
+    snapshot_params = inspect.signature(AsyncSandbox.create_snapshot).parameters
+    assert "name" in snapshot_params
+    assert "opts" in snapshot_params
+    list_snapshots_params = inspect.signature(AsyncSandbox.list_snapshots).parameters
+    assert "limit" in list_snapshots_params
+    assert "next_token" in list_snapshots_params
+    update_network_params = inspect.signature(AsyncSandbox.update_network).parameters
+    assert "network" in update_network_params
+    assert "opts" in update_network_params
 
 
 def test_template_sync_and_async_import_paths_match_top_level_exports():
@@ -235,6 +258,7 @@ def test_code_interpreter_package_re_exports_core_sdk_helpers():
     assert ci_constants.DEFAULT_TEMPLATE == "code-interpreter"
     assert ci_constants.DEFAULT_TIMEOUT == 300
     assert ci_constants.JUPYTER_PORT == 49999
+    assert watasu_code_interpreter.RunCodeLanguage is ci_models.RunCodeLanguage
     assert isinstance(
         ci_exceptions.format_request_timeout_error(), watasu.TimeoutException
     )
