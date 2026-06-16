@@ -625,22 +625,22 @@ export class Sandbox {
 
   /** Fetch latest sandbox metrics. */
   async getMetrics(opts: SandboxMetricsOpts = {}): Promise<SandboxMetrics[]> {
-    return Sandbox.getMetrics(this.sandboxId, { ...this.configOptions(), ...opts })
+    return Sandbox.getMetrics(this.sandboxId, { ...this.resolveApiOpts(), ...opts })
   }
 
   /** Create a Watasu checkpoint using snapshot naming. */
   async createSnapshot(opts: CreateSnapshotOpts = {}): Promise<SnapshotInfo> {
-    return Sandbox.createSnapshot(this.sandboxId, { ...this.configOptions(), ...opts })
+    return Sandbox.createSnapshot(this.sandboxId, { ...this.resolveApiOpts(), ...opts })
   }
 
   /** Delete a snapshot by id. */
   async deleteSnapshot(snapshotId: string, opts: ConnectionOpts = {}): Promise<boolean> {
-    return Sandbox.deleteSnapshot(snapshotId, { ...this.configOptions(), ...opts })
+    return Sandbox.deleteSnapshot(snapshotId, { ...this.resolveApiOpts(), ...opts })
   }
 
   /** List checkpoints for this sandbox using snapshot naming. */
   listSnapshots(opts: Omit<SnapshotListOpts, 'sandboxId'> = {}): SnapshotPaginator {
-    return Sandbox.listSnapshots({ ...this.configOptions(), ...opts, sandboxId: this.sandboxId })
+    return Sandbox.listSnapshots({ ...this.resolveApiOpts(), ...opts, sandboxId: this.sandboxId })
   }
 
   /** Restore a checkpoint into a new sandbox and return its control-plane info. */
@@ -720,13 +720,13 @@ export class Sandbox {
 
   /** Atomically replace this sandbox's network egress policy. */
   async updateNetwork(network: SandboxNetworkUpdate, opts: SandboxNetworkUpdateOpts = {}): Promise<void> {
-    const sandbox = await Sandbox.putNetwork(this.sandboxId, network, { ...this.configOptions(), ...opts })
+    const sandbox = await Sandbox.putNetwork(this.sandboxId, network, { ...this.resolveApiOpts(), ...opts })
     this.sandbox = sandbox ?? this.sandbox
   }
 
   /** Pause this sandbox. Returns false when it was already paused. */
   async betaPause(opts: ConnectionOpts = {}): Promise<boolean> {
-    return Sandbox.betaPause(this.sandboxId, { ...this.configOptions(), ...opts })
+    return Sandbox.betaPause(this.sandboxId, { ...this.resolveApiOpts(), ...opts })
   }
 
   /** Pause this sandbox. Returns false when it was already paused. */
@@ -784,7 +784,7 @@ export class Sandbox {
     })
   }
 
-  private configOptions(): ConnectionOpts {
+  private resolveApiOpts(): ConnectionOpts {
     return {
       apiKey: this.config.apiKey,
       apiUrl: this.config.apiUrl,
