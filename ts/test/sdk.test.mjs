@@ -1352,6 +1352,24 @@ test('template builder sends snake_case build payloads and parses status', async
       start_cmd: 'npm start',
       ready_cmd: 'sleep 1',
     })
+    const devcontainerTemplate = Template()
+      .fromTemplate('devcontainer')
+      .gitClone('https://example.test/project.git', '/workspace/project')
+      .betaDevContainerPrebuild('/workspace/project')
+      .betaSetDevContainerStart('/workspace/project')
+    assert.deepEqual(JSON.parse(await Template.toJSON(devcontainerTemplate)), {
+      base: 'devcontainer',
+      setup: [
+        'git clone https://example.test/project.git /workspace/project',
+        'devcontainer build --workspace-folder /workspace/project',
+      ],
+      start_cmd: 'sudo devcontainer up --workspace-folder /workspace/project && sudo /prepare-exec.sh /workspace/project | sudo tee /devcontainer.sh > /dev/null && sudo chmod +x /devcontainer.sh && sudo touch /devcontainer.up',
+      ready_cmd: '[ -f /devcontainer.up ]',
+    })
+    assert.throws(
+      () => Template().betaDevContainerPrebuild('/workspace/project'),
+      /devcontainer template/
+    )
     assert.equal(Template.toDockerfile(template), [
       'FROM base',
       'RUN apt-get update && apt-get install -y git',

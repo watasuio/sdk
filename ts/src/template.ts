@@ -462,6 +462,19 @@ export class TemplateBase {
     return this
   }
 
+  betaDevContainerPrebuild(devcontainerDirectory: string): TemplateBuilder {
+    this.requireDevContainerTemplate('betaDevContainerPrebuild')
+    return this.runCmd(`devcontainer build --workspace-folder ${devcontainerDirectory}`, { user: 'root' })
+  }
+
+  betaSetDevContainerStart(devcontainerDirectory: string): TemplateFinal {
+    this.requireDevContainerTemplate('betaSetDevContainerStart')
+    return this.setStartCmd(
+      `sudo devcontainer up --workspace-folder ${devcontainerDirectory} && sudo /prepare-exec.sh ${devcontainerDirectory} | sudo tee /devcontainer.sh > /dev/null && sudo chmod +x /devcontainer.sh && sudo touch /devcontainer.up`,
+      waitForFile('/devcontainer.up')
+    )
+  }
+
   setEnvs(envs: Record<string, string>): TemplateBuilder {
     Object.assign(this.env, envs)
     return this
@@ -486,6 +499,12 @@ export class TemplateBase {
 
   private addPackages(manager: string, packages: string[]) {
     this.packages[manager] = [...(this.packages[manager] ?? []), ...packages]
+  }
+
+  private requireDevContainerTemplate(method: string) {
+    if (this.base !== 'devcontainer') {
+      throw new SandboxError(`${method} can only be used with the devcontainer template`)
+    }
   }
 
   private addCopySource(source: string, dest: string, options: CopyOptions, multipleSources: boolean) {
