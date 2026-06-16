@@ -694,6 +694,104 @@ test('sandbox create uses root snake_case API payload', async () => {
   }
 })
 
+test('sandbox protected create and connect helpers expose session details', async () => {
+  class InspectableSandbox extends Sandbox {
+    static createRaw(template, timeoutMs, opts) {
+      return this.createSandbox(template, timeoutMs, opts)
+    }
+
+    static connectRaw(sandboxId, opts) {
+      return this.connectSandbox(sandboxId, opts)
+    }
+  }
+
+  const originalFetch = globalThis.fetch
+  const requests = []
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      const method = init.method ?? 'GET'
+      const body = init.body === undefined ? undefined : JSON.parse(init.body)
+      requests.push({ url: String(url), method, body })
+
+      if (method === 'POST' && String(url).endsWith('/sandboxes')) {
+        return new Response(
+          JSON.stringify({
+            sandbox: { id: 'created', template_id: 'base', envd_version: '0.6.3' },
+            session: {
+              data_plane_url: 'https://route.sandbox.watasuhost.com',
+              token: 'data-token',
+              sandbox_domain: 'sandbox.watasuhost.com',
+              traffic_access_token: 'traffic-token',
+            },
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        )
+      }
+
+      if (method === 'GET' && String(url).endsWith('/sandboxes/existing')) {
+        return new Response(
+          JSON.stringify({ sandbox: { id: 'existing', envd_version: '0.6.3' } }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      }
+
+      return new Response(
+        JSON.stringify({
+          sandbox: { id: 'existing', envd_version: '0.6.4' },
+          session: {
+            data_plane_url: 'https://existing.sandbox.watasuhost.com',
+            token: 'existing-token',
+            sandbox_domain: 'sandbox.watasuhost.com',
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    }
+
+    const created = await InspectableSandbox.createRaw('base', 60_000, {
+      apiKey: 'key',
+      envs: { HELLO: 'world' },
+      team: 'watasu',
+    })
+    const connected = await InspectableSandbox.connectRaw('existing', {
+      apiKey: 'key',
+      timeoutMs: 90_000,
+    })
+
+    assert.equal(created.sandboxId, 'created')
+    assert.equal(created.sandboxDomain, 'sandbox.watasuhost.com')
+    assert.equal(created.envdVersion, '0.6.3')
+    assert.equal(created.envdAccessToken, 'data-token')
+    assert.equal(created.trafficAccessToken, 'traffic-token')
+    assert.equal(connected.sandboxId, 'existing')
+    assert.equal(connected.envdVersion, '0.6.4')
+    assert.equal(connected.envdAccessToken, 'existing-token')
+    assert.deepEqual(requests, [
+      {
+        url: 'https://api.watasu.io/v1/sandboxes',
+        method: 'POST',
+        body: {
+          timeout: 60,
+          metadata: {},
+          env_vars: { HELLO: 'world' },
+          secure: true,
+          allow_internet_access: true,
+          template_id: 'base',
+          team: 'watasu',
+        },
+      },
+      { url: 'https://api.watasu.io/v1/sandboxes/existing', method: 'GET', body: undefined },
+      {
+        url: 'https://api.watasu.io/v1/sandboxes/existing/resume',
+        method: 'POST',
+        body: { timeout: 90 },
+      },
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('sandbox getFullInfo aliases getInfo', async () => {
   const originalFetch = globalThis.fetch
   const requests = []

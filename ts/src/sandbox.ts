@@ -114,6 +114,19 @@ export interface SandboxInfoLifecycle {
   autoResume: boolean
 }
 
+type SandboxConnectionDetails = {
+  sandboxId: string
+  sandboxDomain: string | undefined
+  envdVersion: string
+  envdAccessToken: string | undefined
+  trafficAccessToken: string | undefined
+  connectionConfig: ConnectionConfig
+  control: ControlClient
+  session: unknown
+  sandbox: Record<string, unknown>
+  envs?: Record<string, string>
+}
+
 export interface SandboxMetrics {
   sandboxId?: string
   state?: string
@@ -339,43 +352,78 @@ export class Sandbox {
       ? templateOrOpts
       : templateOrOpts?.template ?? (sandboxOpts.mcp === undefined ? this.defaultTemplate : undefined)
 
-    const config = new ConnectionConfig(sandboxOpts)
+    const sandboxInfo = await this.createSandbox(
+      template,
+      sandboxOpts.timeoutMs ?? this.defaultSandboxTimeoutMs,
+      sandboxOpts
+    )
+    return new this({
+      sandboxId: sandboxInfo.sandboxId,
+      connectionConfig: sandboxInfo.connectionConfig,
+      control: sandboxInfo.control,
+      session: sandboxInfo.session,
+      sandbox: sandboxInfo.sandbox,
+      envs: sandboxInfo.envs,
+    })
+  }
+
+  protected static createSandbox(template: string, timeoutMs: number, opts?: SandboxCreateOpts): Promise<SandboxConnectionDetails>
+  protected static createSandbox(template: string | undefined, timeoutMs: number, opts?: SandboxCreateOpts): Promise<SandboxConnectionDetails>
+  protected static async createSandbox(
+    template: string | undefined,
+    timeoutMs: number,
+    opts: SandboxCreateOpts = {}
+  ): Promise<SandboxConnectionDetails> {
+    const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
     const sandboxPayload: Record<string, unknown> = {
-      timeout: Math.ceil((sandboxOpts.timeoutMs ?? 300_000) / 1000),
-      metadata: sandboxOpts.metadata ?? {},
-      env_vars: sandboxOpts.envs ?? {},
-      secure: sandboxOpts.secure ?? true,
-      allow_internet_access: sandboxOpts.allowInternetAccess ?? true,
+      timeout: Math.ceil(timeoutMs / 1000),
+      metadata: opts.metadata ?? {},
+      env_vars: opts.envs ?? {},
+      secure: opts.secure ?? true,
+      allow_internet_access: opts.allowInternetAccess ?? true,
     }
     putIfPresent(sandboxPayload, 'template_id', template)
-    putIfPresent(sandboxPayload, 'mcp', sandboxOpts.mcp)
-    putIfPresent(sandboxPayload, 'lifecycle', lifecyclePayload(sandboxOpts.lifecycle))
-    putIfPresent(sandboxPayload, 'volume_mounts', volumeMountsPayload(sandboxOpts.volumeMounts))
-    Object.assign(sandboxPayload, networkUpdatePayload(sandboxOpts.network))
-    putIfPresent(sandboxPayload, 'team', sandboxOpts.team)
+    putIfPresent(sandboxPayload, 'mcp', opts.mcp)
+    putIfPresent(sandboxPayload, 'lifecycle', lifecyclePayload(opts.lifecycle))
+    putIfPresent(sandboxPayload, 'volume_mounts', volumeMountsPayload(opts.volumeMounts))
+    Object.assign(sandboxPayload, networkUpdatePayload(opts.network))
+    putIfPresent(sandboxPayload, 'team', opts.team)
 
     const response = await control.post('/sandboxes', {
       json: sandboxPayload,
-      requestTimeoutMs: sessionOperationRequestTimeout(config, sandboxOpts),
-      signal: sandboxOpts.signal,
+      requestTimeoutMs: sessionOperationRequestTimeout(config, opts),
+      signal: opts.signal,
     })
     const sandbox = record(response.sandbox ?? response)
     const sandboxId = sandbox.id ?? sandbox.sandbox_id
     if (sandboxId === undefined) throw new SandboxError('create response did not include sandbox id')
-    const sandboxInstance = new this({
+    return sandboxConnectionDetails({
       sandboxId: String(sandboxId),
-      connectionConfig: config,
+      config,
       control,
       session: response.session,
       sandbox,
-      envs: sandboxOpts.envs,
+      envs: opts.envs,
     })
-    return sandboxInstance
   }
 
   /** Connect to an existing sandbox and return it with a fresh data-plane session. */
   static async connect(sandboxId: string, opts: SandboxConnectOpts = {}): Promise<Sandbox> {
+    const sandboxInfo = await this.connectSandbox(sandboxId, opts)
+    return new this({
+      sandboxId: sandboxInfo.sandboxId,
+      connectionConfig: sandboxInfo.connectionConfig,
+      control: sandboxInfo.control,
+      session: sandboxInfo.session,
+      sandbox: sandboxInfo.sandbox,
+    })
+  }
+
+  protected static async connectSandbox(
+    sandboxId: string,
+    opts: SandboxConnectOpts = {}
+  ): Promise<SandboxConnectionDetails> {
     const config = new ConnectionConfig(opts)
     const control = new ControlClient(config)
     const info = await control.get(`/sandboxes/${sandboxId}`, {
@@ -387,9 +435,9 @@ export class Sandbox {
       requestTimeoutMs: sessionOperationRequestTimeout(config, opts),
       signal: opts.signal,
     })
-    return new this({
+    return sandboxConnectionDetails({
       sandboxId,
-      connectionConfig: config,
+      config,
       control,
       session: response.session,
       sandbox: record(response.sandbox ?? info.sandbox ?? {}),
@@ -810,6 +858,29 @@ function fileUrlInfo(payload: Record<string, unknown>): FileUrlInfo {
     url: String(payload.url ?? ''),
     expiresAt: typeof payload.expires_at === 'string' ? payload.expires_at : typeof payload.expiresAt === 'string' ? payload.expiresAt : undefined,
     raw: payload,
+  }
+}
+
+function sandboxConnectionDetails(opts: {
+  sandboxId: string
+  config: ConnectionConfig
+  control: ControlClient
+  session: unknown
+  sandbox: Record<string, unknown>
+  envs?: Record<string, string>
+}): SandboxConnectionDetails {
+  const session = record(opts.session)
+  return {
+    sandboxId: opts.sandboxId,
+    sandboxDomain: stringValue(session.sandbox_domain ?? session.sandboxDomain ?? opts.sandbox.sandbox_domain ?? opts.sandbox.domain),
+    envdVersion: stringValue(session.envd_version ?? session.envdVersion ?? opts.sandbox.envd_version ?? opts.sandbox.envdVersion) ?? '',
+    envdAccessToken: stringValue(session.envd_access_token ?? session.envdAccessToken ?? session.token),
+    trafficAccessToken: stringValue(session.traffic_access_token ?? session.trafficAccessToken ?? opts.sandbox.traffic_access_token ?? opts.sandbox.trafficAccessToken),
+    connectionConfig: opts.config,
+    control: opts.control,
+    session: opts.session,
+    sandbox: opts.sandbox,
+    envs: opts.envs,
   }
 }
 
