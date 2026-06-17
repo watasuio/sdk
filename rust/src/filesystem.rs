@@ -55,6 +55,13 @@ impl WriteEntry {
     }
 }
 
+/// Options for bounded file reads.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileReadOptions {
+    /// Maximum bytes to read before failing. When omitted, the full file is read.
+    pub max_bytes: Option<usize>,
+}
+
 /// Filesystem event returned by a watch stream.
 #[derive(Clone, Debug, Default)]
 pub struct FilesystemEvent {
@@ -129,8 +136,21 @@ impl Filesystem {
 
     /// Read a file as raw bytes.
     pub async fn read_bytes(&self, path: &str) -> Result<Vec<u8>> {
+        self.read_bytes_with_options(path, FileReadOptions::default())
+            .await
+    }
+
+    /// Read a file as raw bytes with an optional SDK-side byte cap.
+    pub async fn read_bytes_with_options(
+        &self,
+        path: &str,
+        opts: FileReadOptions,
+    ) -> Result<Vec<u8>> {
         self.data_plane
-            .get_bytes(&format!("/runtime/v1/files?path={}", urlencoding(path)))
+            .get_bytes_with_limit(
+                &format!("/runtime/v1/files?path={}", urlencoding(path)),
+                opts.max_bytes,
+            )
             .await
     }
 

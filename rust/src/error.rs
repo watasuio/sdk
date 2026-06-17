@@ -33,6 +33,18 @@ pub enum Error {
     /// A requested file path did not exist.
     #[error("file not found: {0}")]
     FileNotFound(String),
+    /// A bounded stream exceeded the configured byte limit.
+    #[error(
+        "{stream} exceeded configured byte limit of {max_bytes} bytes (saw {actual_bytes} bytes)"
+    )]
+    ByteLimitExceeded {
+        /// Stream name, such as `file`.
+        stream: &'static str,
+        /// Configured byte limit.
+        max_bytes: usize,
+        /// Bytes reported or observed before the operation stopped.
+        actual_bytes: usize,
+    },
     /// A command exited with a non-zero code and preserved output.
     #[error("command exited with code {}", result.exit_code)]
     CommandExit {

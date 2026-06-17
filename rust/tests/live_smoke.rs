@@ -4,13 +4,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::json;
 use watasu::{
     CommandOptions, ConnectionConfig, ConnectionOptions, CreateOptions, CreateSnapshotOptions,
-    Error, FileUrlOptions, GitAddOptions, GitCloneOptions, GitCommitOptions, GitConfigOptions,
-    GitConfigureUserOptions, GitCredentialOptions, GitDeleteBranchOptions, GitInitOptions,
-    GitRemoteAddOptions, GitRemoteOperationOptions, GitRequestOptions, GitResetOptions,
-    GitRestoreOptions, NetworkUpdateOptions, ProcessStartOptions, PtyCreateOptions, PtySize,
-    Sandbox, SandboxListQuery, SnapshotListOptions, Template, TemplateBuilder, Volume,
-    VolumeCreateOptions, VolumeListOptions, VolumeMount, VolumeWriteOptions, WatchOptions,
-    WriteEntry,
+    Error, FileReadOptions, FileUrlOptions, GitAddOptions, GitCloneOptions, GitCommitOptions,
+    GitConfigOptions, GitConfigureUserOptions, GitCredentialOptions, GitDeleteBranchOptions,
+    GitInitOptions, GitRemoteAddOptions, GitRemoteOperationOptions, GitRequestOptions,
+    GitResetOptions, GitRestoreOptions, NetworkUpdateOptions, ProcessRunOptions,
+    ProcessStartOptions, PtyCreateOptions, PtySize, Sandbox, SandboxListQuery, SnapshotListOptions,
+    Template, TemplateBuilder, Volume, VolumeCreateOptions, VolumeListOptions, VolumeMount,
+    VolumeWriteOptions, WatchOptions, WriteEntry,
 };
 
 const REQUEST_TIMEOUT_SECS: u64 = 240;
@@ -218,7 +218,7 @@ async fn live_broad_rust_sdk_smoke() -> watasu::Result<()> {
                 .await?,
             "a"
         );
-        let _ = restored.kill().await;
+        assert!(Sandbox::kill_by_id(&restored.sandbox_id, conn()).await?);
         restored_sandbox = None;
         assert!(sbx.delete_snapshot(&snapshot.snapshot_id).await?);
         snapshots.pop();
@@ -311,6 +311,23 @@ async fn exercise_files(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
     let bytes_path = format!("{dir}/bytes.bin");
     wait_text_file(sbx, &hello_path, "file-ok", "text file read").await?;
     wait_bytes_file(sbx, &bytes_path, vec![4, 5, 6], "bytes file read").await?;
+    assert_eq!(
+        sbx.files
+            .read_bytes_with_options(&bytes_path, FileReadOptions { max_bytes: Some(3) })
+            .await?,
+        vec![4, 5, 6]
+    );
+    assert!(matches!(
+        sbx.files
+            .read_bytes_with_options(&bytes_path, FileReadOptions { max_bytes: Some(2) })
+            .await
+            .unwrap_err(),
+        Error::ByteLimitExceeded {
+            stream: "file",
+            max_bytes: 2,
+            ..
+        }
+    ));
     wait_file_info_name(sbx, &hello_path, "hello.txt", "file info").await?;
     wait_directory_contains(sbx, &dir, "hello.txt", "directory listing").await?;
     wait_file_exists(sbx, &hello_path, "file exists").await?;
@@ -529,8 +546,42 @@ async fn exercise_commands(sbx: &Sandbox) -> watasu::Result<()> {
         .await?;
     assert_eq!(process.stdout, b"typed-ok");
     assert_eq!(process.stderr, b"typed-err");
+    assert_eq!(process.pty, b"");
+    assert_eq!(process.stdout_bytes, 8);
+    assert_eq!(process.stderr_bytes, 9);
+    assert_eq!(process.pty_bytes, 0);
+    assert!(!process.stdout_truncated);
+    assert!(!process.stderr_truncated);
+    assert!(process.pid.is_some());
     assert_eq!(process.exit_code, 7);
     assert_eq!(process.stdout_text_lossy(), "typed-ok");
+
+    let capped = sbx
+        .commands
+        .run_process_with_options(ProcessRunOptions {
+            start: ProcessStartOptions {
+                cmd: "/bin/sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    "printf 1234567890; printf abcdef >&2; exit 5".to_string(),
+                ],
+                timeout_ms: Some(30_000),
+                check: false,
+                ..ProcessStartOptions::default()
+            },
+            max_stdout_bytes: Some(4),
+            max_stderr_bytes: Some(2),
+            max_pty_bytes: Some(1),
+        })
+        .await?;
+    assert_eq!(capped.stdout, b"1234");
+    assert_eq!(capped.stderr, b"ab");
+    assert_eq!(capped.stdout_bytes, 10);
+    assert_eq!(capped.stderr_bytes, 6);
+    assert_eq!(capped.exit_code, 5);
+    assert!(capped.stdout_truncated);
+    assert!(capped.stderr_truncated);
+    assert!(capped.pid.is_some());
 
     let checked_error = sbx
         .commands

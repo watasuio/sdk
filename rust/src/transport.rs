@@ -110,7 +110,11 @@ impl DataPlaneClient {
         .await
     }
 
-    pub(crate) async fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
+    pub(crate) async fn get_bytes_with_limit(
+        &self,
+        path: &str,
+        max_bytes: Option<usize>,
+    ) -> Result<Vec<u8>> {
         let response = self
             .client
             .get(join_url(&self.base_url, path))
@@ -123,7 +127,7 @@ impl DataPlaneClient {
                 &read_json_or_text(response).await?,
             ));
         }
-        Ok(response.bytes().await?.to_vec())
+        read_limited_bytes(response, max_bytes).await
     }
 
     pub(crate) async fn put_bytes(&self, path: &str, data: Vec<u8>) -> Result<Value> {
@@ -138,6 +142,34 @@ impl DataPlaneClient {
         )
         .await
     }
+}
+
+async fn read_limited_bytes(mut response: Response, max_bytes: Option<usize>) -> Result<Vec<u8>> {
+    if let (Some(content_length), Some(max_bytes)) = (response.content_length(), max_bytes) {
+        if content_length > max_bytes as u64 {
+            return Err(Error::ByteLimitExceeded {
+                stream: "file",
+                max_bytes,
+                actual_bytes: content_length as usize,
+            });
+        }
+    }
+
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if let Some(max_bytes) = max_bytes {
+            let actual_bytes = bytes.len().saturating_add(chunk.len());
+            if actual_bytes > max_bytes {
+                return Err(Error::ByteLimitExceeded {
+                    stream: "file",
+                    max_bytes,
+                    actual_bytes,
+                });
+            }
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 async fn json_response(response: Response) -> Result<Value> {

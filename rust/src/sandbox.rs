@@ -481,6 +481,18 @@ impl Sandbox {
         Ok(true)
     }
 
+    /// Destroy a sandbox by id without opening or resuming a data-plane session.
+    pub async fn kill_by_id(
+        sandbox_id: impl ToString,
+        connection: ConnectionOptions,
+    ) -> Result<bool> {
+        let sandbox_id = sandbox_id.to_string();
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        control.delete(&format!("/sandboxes/{sandbox_id}")).await?;
+        Ok(true)
+    }
+
     /// Fetch sandbox metrics by id.
     pub async fn get_metrics_by_id(
         sandbox_id: impl ToString,

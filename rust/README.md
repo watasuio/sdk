@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.46"
+watasu = "0.1.47"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -35,16 +35,15 @@ typed `/runtime/v1/process` start fields and byte-preserving output:
 
 ```rust
 use serde_json::json;
-use watasu::{CreateOptions, ProcessStartOptions, Sandbox};
+use watasu::{CreateOptions, ProcessRunOptions, ProcessStartOptions, Sandbox};
 
 # async fn run() -> watasu::Result<()> {
 let sbx = Sandbox::create(CreateOptions::default()).await?;
 let mut envs = serde_json::Map::new();
 envs.insert("MODE".into(), json!("ci"));
 
-let result = sbx
-    .commands
-    .run_process(ProcessStartOptions {
+let result = sbx.commands.run_process_with_options(ProcessRunOptions {
+    start: ProcessStartOptions {
         cmd: "python3".into(),
         args: vec!["script.py".into()],
         cwd: Some("/workspace".into()),
@@ -52,10 +51,47 @@ let result = sbx
         tag: Some("tool-call".into()),
         check: false,
         ..Default::default()
-    })
-    .await?;
+    },
+    max_stdout_bytes: Some(64 * 1024),
+    max_stderr_bytes: Some(64 * 1024),
+    max_pty_bytes: Some(64 * 1024),
+}).await?;
 
-println!("exit={} stdout={} bytes", result.exit_code, result.stdout.len());
+println!(
+    "exit={} stdout={} stored={} truncated={}",
+    result.exit_code,
+    result.stdout_bytes,
+    result.stdout.len(),
+    result.stdout_truncated
+);
+# Ok(())
+# }
+```
+
+Read a file with an SDK-side memory cap:
+
+```rust
+use watasu::{CreateOptions, FileReadOptions, Sandbox};
+
+# async fn run() -> watasu::Result<()> {
+let sbx = Sandbox::create(CreateOptions::default()).await?;
+let bytes = sbx.files.read_bytes_with_options(
+    "/workspace/output.json",
+    FileReadOptions {
+        max_bytes: Some(1024 * 1024),
+    },
+).await?;
+# Ok(())
+# }
+```
+
+Destroy a sandbox by id without opening a data-plane session:
+
+```rust
+use watasu::{ConnectionOptions, Sandbox};
+
+# async fn run(sandbox_id: String) -> watasu::Result<()> {
+Sandbox::kill_by_id(sandbox_id, ConnectionOptions::default()).await?;
 # Ok(())
 # }
 ```
