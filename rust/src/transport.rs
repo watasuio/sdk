@@ -28,6 +28,16 @@ impl ControlClient {
         self.request(Method::POST, path, Some(body)).await
     }
 
+    pub(crate) async fn post_idempotent(
+        &self,
+        path: &str,
+        body: Value,
+        idempotency_key: Option<&str>,
+    ) -> Result<Value> {
+        self.request_with_idempotency(Method::POST, path, Some(body), idempotency_key)
+            .await
+    }
+
     pub(crate) async fn put(&self, path: &str, body: Value) -> Result<Value> {
         self.request(Method::PUT, path, Some(body)).await
     }
@@ -45,11 +55,25 @@ impl ControlClient {
     }
 
     async fn request(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
+        self.request_with_idempotency(method, path, body, None)
+            .await
+    }
+
+    async fn request_with_idempotency(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        idempotency_key: Option<&str>,
+    ) -> Result<Value> {
         let api_key = self.config.api_key.as_ref().ok_or(Error::MissingApiKey)?;
         let mut request = self
             .client
             .request(method, join_url(&self.config.api_url, path))
             .bearer_auth(api_key);
+        if let Some(idempotency_key) = idempotency_key {
+            request = request.header("Idempotency-Key", idempotency_key);
+        }
         if let Some(body) = body {
             request = request.json(&body);
         }

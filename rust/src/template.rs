@@ -383,6 +383,151 @@ pub struct TemplateTag {
     pub created_at: Option<String>,
 }
 
+/// Options for creating a sandbox template through `/sandbox_templates`.
+#[derive(Clone, Debug, Default)]
+pub struct SandboxTemplateCreateOptions {
+    /// Connection options.
+    pub connection: ConnectionOptions,
+    /// Team slug/name that should own the template.
+    pub team: Option<String>,
+    /// Stable template slug.
+    pub slug: String,
+    /// Human-readable template name.
+    pub name: String,
+    /// Optional template description.
+    pub description: Option<String>,
+    /// Caller metadata stored with the template.
+    pub metadata: serde_json::Map<String, Value>,
+    /// Optional idempotency key for retry-safe creates.
+    pub idempotency_key: Option<String>,
+}
+
+/// Sandbox template metadata returned by `/sandbox_templates`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SandboxTemplateInfo {
+    /// Template id.
+    pub template_id: String,
+    /// Stable template slug.
+    pub slug: String,
+    /// Human-readable template name.
+    pub name: String,
+    /// Owning team name, when team-owned.
+    pub team: Option<String>,
+    /// Visibility, such as `provider` or `team`.
+    pub visibility: Option<String>,
+    /// Template lifecycle status.
+    pub status: Option<String>,
+    /// Optional template description.
+    pub description: Option<String>,
+    /// Caller metadata stored with the template.
+    pub metadata: serde_json::Map<String, Value>,
+    /// Raw API payload for forward-compatible callers.
+    pub raw: Value,
+}
+
+/// Runtime baseline for a sandbox template version.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SandboxTemplateRuntimeBaseline {
+    /// vCPU count.
+    pub cpu: Option<u64>,
+    /// Memory in MiB.
+    pub memory_mb: Option<u64>,
+}
+
+/// Options for creating a sandbox template version.
+#[derive(Clone, Debug)]
+pub struct SandboxTemplateVersionCreateOptions {
+    /// Connection options.
+    pub connection: ConnectionOptions,
+    /// Version string unique within the template.
+    pub version: String,
+    /// Source kind. Defaults to `package_spec`.
+    pub source_kind: String,
+    /// CPU/memory baseline. Disk is platform-managed and intentionally not exposed.
+    pub runtime_baseline: Option<SandboxTemplateRuntimeBaseline>,
+    /// Package-spec build payload.
+    pub build_spec: Value,
+    /// Optional architecture, such as `x86_64`.
+    pub architecture: Option<String>,
+    /// Default guest user.
+    pub default_user: Option<String>,
+    /// Default working directory.
+    pub workdir: Option<String>,
+    /// Caller metadata stored with the version.
+    pub metadata: serde_json::Map<String, Value>,
+    /// Optional idempotency key for retry-safe creates.
+    pub idempotency_key: Option<String>,
+}
+
+impl Default for SandboxTemplateVersionCreateOptions {
+    fn default() -> Self {
+        Self {
+            connection: ConnectionOptions::default(),
+            version: String::new(),
+            source_kind: "package_spec".to_string(),
+            runtime_baseline: None,
+            build_spec: Value::Object(Default::default()),
+            architecture: None,
+            default_user: None,
+            workdir: None,
+            metadata: Default::default(),
+            idempotency_key: None,
+        }
+    }
+}
+
+/// Sandbox template version metadata returned by `/sandbox_templates/:id/versions`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SandboxTemplateVersionInfo {
+    /// Template version id.
+    pub template_version_id: String,
+    /// Parent template id.
+    pub template_id: String,
+    /// Parent template slug.
+    pub template_slug: Option<String>,
+    /// Version string.
+    pub version: String,
+    /// Provider status, such as `draft`, `building`, `ready`, or `failed`.
+    pub status: String,
+    /// Architecture, when returned.
+    pub architecture: Option<String>,
+    /// Source kind, when returned.
+    pub source_kind: Option<String>,
+    /// Default guest user.
+    pub default_user: Option<String>,
+    /// Default working directory.
+    pub workdir: Option<String>,
+    /// Runtime CPU/memory baseline.
+    pub runtime_baseline: Option<SandboxTemplateRuntimeBaseline>,
+    /// Redacted build spec returned by the API.
+    pub build_spec: Value,
+    /// Build log entry count.
+    pub build_log_entry_count: usize,
+    /// Last build log entries returned with the version payload.
+    pub latest_build_log_entries: Vec<Value>,
+    /// Build failure summary, if failed.
+    pub build_failure: Option<Value>,
+    /// Last error message, if any.
+    pub last_error_message: Option<String>,
+    /// Build completion timestamp, if built.
+    pub built_at: Option<String>,
+    /// Raw API payload for forward-compatible callers.
+    pub raw: Value,
+}
+
+/// Build logs for a sandbox template version.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SandboxTemplateVersionBuildLogs {
+    /// Template version id.
+    pub template_version_id: String,
+    /// Provider status.
+    pub status: String,
+    /// Persisted build log entries.
+    pub entries: Vec<Value>,
+    /// Raw API payload for forward-compatible callers.
+    pub raw: Value,
+}
+
 /// Template build API.
 pub struct Template;
 
@@ -546,6 +691,166 @@ impl Template {
             .unwrap_or_default();
         Ok(tags)
     }
+
+    /// List accessible sandbox templates using the `/sandbox_templates` API.
+    pub async fn list_sandbox_templates(
+        connection: ConnectionOptions,
+    ) -> Result<Vec<SandboxTemplateInfo>> {
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        let response = control.get("/sandbox_templates").await?;
+        Ok(response
+            .get("sandbox_templates")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| sandbox_template_info(&value))
+            .collect())
+    }
+
+    /// Find an accessible sandbox template by slug.
+    pub async fn find_sandbox_template_by_slug(
+        slug: impl AsRef<str>,
+        connection: ConnectionOptions,
+    ) -> Result<Option<SandboxTemplateInfo>> {
+        let slug = slug.as_ref();
+        Ok(Self::list_sandbox_templates(connection)
+            .await?
+            .into_iter()
+            .find(|template| template.slug == slug))
+    }
+
+    /// Create a team-owned sandbox template using the `/sandbox_templates` API.
+    pub async fn create_sandbox_template(
+        opts: SandboxTemplateCreateOptions,
+    ) -> Result<SandboxTemplateInfo> {
+        let config = ConnectionConfig::new(opts.connection.clone());
+        let control = ControlClient::new(config)?;
+        let response = control
+            .post_idempotent(
+                "/sandbox_templates",
+                sandbox_template_create_payload(&opts),
+                opts.idempotency_key.as_deref(),
+            )
+            .await?;
+        Ok(sandbox_template_info(
+            response.get("sandbox_template").unwrap_or(&response),
+        ))
+    }
+
+    /// List versions for an accessible sandbox template.
+    pub async fn list_sandbox_template_versions(
+        template_id: impl AsRef<str>,
+        connection: ConnectionOptions,
+    ) -> Result<Vec<SandboxTemplateVersionInfo>> {
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        let response = control
+            .get(&format!(
+                "/sandbox_templates/{}/versions",
+                encode_path(template_id.as_ref())
+            ))
+            .await?;
+        Ok(response
+            .get("sandbox_template_versions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| sandbox_template_version_info(&value))
+            .collect())
+    }
+
+    /// Create a sandbox template version using the `/sandbox_templates/:id/versions` API.
+    pub async fn create_sandbox_template_version(
+        template_id: impl AsRef<str>,
+        opts: SandboxTemplateVersionCreateOptions,
+    ) -> Result<SandboxTemplateVersionInfo> {
+        let config = ConnectionConfig::new(opts.connection.clone());
+        let control = ControlClient::new(config)?;
+        let response = control
+            .post_idempotent(
+                &format!(
+                    "/sandbox_templates/{}/versions",
+                    encode_path(template_id.as_ref())
+                ),
+                sandbox_template_version_create_payload(&opts),
+                opts.idempotency_key.as_deref(),
+            )
+            .await?;
+        Ok(sandbox_template_version_info(
+            response
+                .get("sandbox_template_version")
+                .unwrap_or(&response),
+        ))
+    }
+
+    /// Get a sandbox template version by template id and version id.
+    pub async fn get_sandbox_template_version(
+        template_id: impl AsRef<str>,
+        template_version_id: impl AsRef<str>,
+        connection: ConnectionOptions,
+    ) -> Result<SandboxTemplateVersionInfo> {
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        let response = control
+            .get(&format!(
+                "/sandbox_templates/{}/versions/{}",
+                encode_path(template_id.as_ref()),
+                encode_path(template_version_id.as_ref())
+            ))
+            .await?;
+        Ok(sandbox_template_version_info(
+            response
+                .get("sandbox_template_version")
+                .unwrap_or(&response),
+        ))
+    }
+
+    /// Get persisted build logs for a sandbox template version.
+    pub async fn get_sandbox_template_version_build_logs(
+        template_id: impl AsRef<str>,
+        template_version_id: impl AsRef<str>,
+        connection: ConnectionOptions,
+    ) -> Result<SandboxTemplateVersionBuildLogs> {
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        let response = control
+            .get(&format!(
+                "/sandbox_templates/{}/versions/{}/build_logs",
+                encode_path(template_id.as_ref()),
+                encode_path(template_version_id.as_ref())
+            ))
+            .await?;
+        Ok(sandbox_template_build_logs(
+            response
+                .get("sandbox_template_version_build_logs")
+                .unwrap_or(&response),
+        ))
+    }
+
+    /// Delete a sandbox template version. Returns `false` when it is already missing.
+    pub async fn delete_sandbox_template_version(
+        template_id: impl AsRef<str>,
+        template_version_id: impl AsRef<str>,
+        connection: ConnectionOptions,
+    ) -> Result<bool> {
+        let config = ConnectionConfig::new(connection);
+        let control = ControlClient::new(config)?;
+        match control
+            .delete(&format!(
+                "/sandbox_templates/{}/versions/{}",
+                encode_path(template_id.as_ref()),
+                encode_path(template_version_id.as_ref())
+            ))
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(Error::NotFound(_)) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 fn build_info(value: &Value) -> Result<BuildInfo> {
@@ -624,6 +929,128 @@ fn template_tag(value: &Value) -> TemplateTag {
     }
 }
 
+fn sandbox_template_create_payload(opts: &SandboxTemplateCreateOptions) -> Value {
+    let mut template = serde_json::Map::new();
+    template.insert("slug".into(), json!(opts.slug));
+    template.insert("name".into(), json!(opts.name));
+    if let Some(team) = &opts.team {
+        template.insert("team".into(), json!(team));
+    }
+    if let Some(description) = &opts.description {
+        template.insert("description".into(), json!(description));
+    }
+    if !opts.metadata.is_empty() {
+        template.insert("metadata".into(), Value::Object(opts.metadata.clone()));
+    }
+    json!({"sandbox_template": template})
+}
+
+fn sandbox_template_version_create_payload(opts: &SandboxTemplateVersionCreateOptions) -> Value {
+    let mut version = serde_json::Map::new();
+    version.insert("version".into(), json!(opts.version));
+    version.insert("source_kind".into(), json!(opts.source_kind));
+    version.insert("build_spec".into(), opts.build_spec.clone());
+    if let Some(baseline) = &opts.runtime_baseline {
+        version.insert(
+            "runtime_baseline".into(),
+            runtime_baseline_payload(baseline),
+        );
+    }
+    if let Some(architecture) = &opts.architecture {
+        version.insert("architecture".into(), json!(architecture));
+    }
+    if let Some(default_user) = &opts.default_user {
+        version.insert("default_user".into(), json!(default_user));
+    }
+    if let Some(workdir) = &opts.workdir {
+        version.insert("workdir".into(), json!(workdir));
+    }
+    if !opts.metadata.is_empty() {
+        version.insert("metadata".into(), Value::Object(opts.metadata.clone()));
+    }
+    json!({"sandbox_template_version": version})
+}
+
+fn runtime_baseline_payload(baseline: &SandboxTemplateRuntimeBaseline) -> Value {
+    let mut payload = serde_json::Map::new();
+    if let Some(cpu) = baseline.cpu {
+        payload.insert("cpu".into(), json!(cpu));
+    }
+    if let Some(memory_mb) = baseline.memory_mb {
+        payload.insert("memory_mb".into(), json!(memory_mb));
+    }
+    Value::Object(payload)
+}
+
+fn sandbox_template_info(value: &Value) -> SandboxTemplateInfo {
+    SandboxTemplateInfo {
+        template_id: string_field(value, "id"),
+        slug: string_field(value, "slug"),
+        name: string_field(value, "name"),
+        team: optional_string_field(value, "team"),
+        visibility: optional_string_field(value, "visibility"),
+        status: optional_string_field(value, "status"),
+        description: optional_string_field(value, "description"),
+        metadata: map_field(value, "metadata"),
+        raw: value.clone(),
+    }
+}
+
+fn sandbox_template_version_info(value: &Value) -> SandboxTemplateVersionInfo {
+    SandboxTemplateVersionInfo {
+        template_version_id: string_field(value, "id"),
+        template_id: string_field(value, "template_id"),
+        template_slug: optional_string_field(value, "template_slug"),
+        version: string_field(value, "version"),
+        status: string_field(value, "status"),
+        architecture: optional_string_field(value, "architecture"),
+        source_kind: optional_string_field(value, "source_kind"),
+        default_user: optional_string_field(value, "default_user"),
+        workdir: optional_string_field(value, "workdir"),
+        runtime_baseline: value
+            .get("runtime_baseline")
+            .and_then(runtime_baseline_info),
+        build_spec: value
+            .get("build_spec")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Default::default())),
+        build_log_entry_count: value
+            .get("build_log_entry_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default() as usize,
+        latest_build_log_entries: value
+            .get("latest_build_log_entries")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        build_failure: value.get("build_failure").cloned(),
+        last_error_message: optional_string_field(value, "last_error_message"),
+        built_at: optional_string_field(value, "built_at"),
+        raw: value.clone(),
+    }
+}
+
+fn runtime_baseline_info(value: &Value) -> Option<SandboxTemplateRuntimeBaseline> {
+    let object = value.as_object()?;
+    Some(SandboxTemplateRuntimeBaseline {
+        cpu: object.get("cpu").and_then(Value::as_u64),
+        memory_mb: object.get("memory_mb").and_then(Value::as_u64),
+    })
+}
+
+fn sandbox_template_build_logs(value: &Value) -> SandboxTemplateVersionBuildLogs {
+    SandboxTemplateVersionBuildLogs {
+        template_version_id: string_field(value, "template_version_id"),
+        status: string_field(value, "status"),
+        entries: value
+            .get("entries")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        raw: value.clone(),
+    }
+}
+
 fn string_field(value: &Value, key: &str) -> String {
     value
         .get(key)
@@ -635,6 +1062,23 @@ fn string_field(value: &Value, key: &str) -> String {
                 .and_then(Value::as_u64)
                 .map(|v| v.to_string())
         })
+        .unwrap_or_default()
+}
+
+fn optional_string_field(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|value| {
+        value
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| value.as_u64().map(|v| v.to_string()))
+    })
+}
+
+fn map_field(value: &Value, key: &str) -> serde_json::Map<String, Value> {
+    value
+        .get(key)
+        .and_then(Value::as_object)
+        .cloned()
         .unwrap_or_default()
 }
 
@@ -713,5 +1157,122 @@ mod tests {
                 "setup": ["mcp-gateway pull exa brave"],
             })
         );
+    }
+
+    #[test]
+    fn sandbox_template_create_payload_wraps_template_attrs() {
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("bridge_managed".into(), json!(true));
+
+        assert_eq!(
+            sandbox_template_create_payload(&SandboxTemplateCreateOptions {
+                slug: "python".into(),
+                name: "Python".into(),
+                team: Some("watasu".into()),
+                description: Some("Python runtime".into()),
+                metadata,
+                ..SandboxTemplateCreateOptions::default()
+            }),
+            json!({
+                "sandbox_template": {
+                    "slug": "python",
+                    "name": "Python",
+                    "team": "watasu",
+                    "description": "Python runtime",
+                    "metadata": {"bridge_managed": true}
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn sandbox_template_version_payload_omits_platform_managed_disk() {
+        let payload =
+            sandbox_template_version_create_payload(&SandboxTemplateVersionCreateOptions {
+                version: "2026-06-18".into(),
+                runtime_baseline: Some(SandboxTemplateRuntimeBaseline {
+                    cpu: Some(2),
+                    memory_mb: Some(2048),
+                }),
+                build_spec: json!({
+                    "packages": {"apt": ["git"]},
+                    "setup": ["echo ready"]
+                }),
+                architecture: Some("x86_64".into()),
+                default_user: Some("root".into()),
+                workdir: Some("/workspace".into()),
+                ..SandboxTemplateVersionCreateOptions::default()
+            });
+
+        assert_eq!(
+            payload,
+            json!({
+                "sandbox_template_version": {
+                    "version": "2026-06-18",
+                    "source_kind": "package_spec",
+                    "runtime_baseline": {"cpu": 2, "memory_mb": 2048},
+                    "build_spec": {
+                        "packages": {"apt": ["git"]},
+                        "setup": ["echo ready"]
+                    },
+                    "architecture": "x86_64",
+                    "default_user": "root",
+                    "workdir": "/workspace"
+                }
+            })
+        );
+        assert!(payload
+            .pointer("/sandbox_template_version/runtime_baseline/disk_mb")
+            .is_none());
+    }
+
+    #[test]
+    fn sandbox_template_version_info_maps_build_contract() {
+        let info = sandbox_template_version_info(&json!({
+            "id": 42,
+            "template_id": 17,
+            "template_slug": "python",
+            "version": "v1",
+            "status": "failed",
+            "architecture": "x86_64",
+            "source_kind": "package_spec",
+            "default_user": "root",
+            "workdir": "/workspace",
+            "runtime_baseline": {"cpu": 2, "memory_mb": 2048},
+            "build_spec": {"packages": {"pip": ["pytest"]}},
+            "build_log_entry_count": 2,
+            "latest_build_log_entries": [{"level": "error", "message": "boom"}],
+            "build_failure": {"message": "boom"},
+            "last_error_message": "boom",
+            "built_at": "2026-06-18T00:00:00Z"
+        }));
+
+        assert_eq!(info.template_version_id, "42");
+        assert_eq!(info.template_id, "17");
+        assert_eq!(info.template_slug.as_deref(), Some("python"));
+        assert_eq!(info.status, "failed");
+        assert_eq!(
+            info.runtime_baseline,
+            Some(SandboxTemplateRuntimeBaseline {
+                cpu: Some(2),
+                memory_mb: Some(2048)
+            })
+        );
+        assert_eq!(info.build_log_entry_count, 2);
+        assert_eq!(info.latest_build_log_entries.len(), 1);
+        assert_eq!(info.last_error_message.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn sandbox_template_build_logs_maps_entries() {
+        let logs = sandbox_template_build_logs(&json!({
+            "template_version_id": 42,
+            "status": "building",
+            "entries": [{"level": "info", "message": "start"}]
+        }));
+
+        assert_eq!(logs.template_version_id, "42");
+        assert_eq!(logs.status, "building");
+        assert_eq!(logs.entries.len(), 1);
     }
 }

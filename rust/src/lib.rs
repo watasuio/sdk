@@ -63,9 +63,11 @@ pub use sandbox::{
     SnapshotListOptions, SnapshotListPage, VolumeMount,
 };
 pub use template::{
-    BuildInfo, BuildStatusReason, LogEntry, Template, TemplateBuildOptions, TemplateBuildStatus,
-    TemplateBuildStatusOptions, TemplateBuildStatusResponse, TemplateBuilder, TemplateTag,
-    TemplateTagInfo,
+    BuildInfo, BuildStatusReason, LogEntry, SandboxTemplateCreateOptions, SandboxTemplateInfo,
+    SandboxTemplateRuntimeBaseline, SandboxTemplateVersionBuildLogs,
+    SandboxTemplateVersionCreateOptions, SandboxTemplateVersionInfo, Template,
+    TemplateBuildOptions, TemplateBuildStatus, TemplateBuildStatusOptions,
+    TemplateBuildStatusResponse, TemplateBuilder, TemplateTag, TemplateTagInfo,
 };
 pub use volume::{
     Volume, VolumeCreateOptions, VolumeEntryStat, VolumeInfo, VolumeListOptions, VolumeWriteOptions,

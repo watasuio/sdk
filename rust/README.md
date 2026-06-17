@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.47"
+watasu = "0.1.48"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -92,6 +92,49 @@ use watasu::{ConnectionOptions, Sandbox};
 
 # async fn run(sandbox_id: String) -> watasu::Result<()> {
 Sandbox::kill_by_id(sandbox_id, ConnectionOptions::default()).await?;
+# Ok(())
+# }
+```
+
+Manage sandbox templates through the admin template API:
+
+```rust
+use serde_json::json;
+use watasu::{
+    ConnectionOptions, SandboxTemplateCreateOptions, SandboxTemplateRuntimeBaseline,
+    SandboxTemplateVersionCreateOptions, Template,
+};
+
+# async fn run() -> watasu::Result<()> {
+let template = Template::create_sandbox_template(SandboxTemplateCreateOptions {
+    slug: "python".into(),
+    name: "Python".into(),
+    team: Some("watasu".into()),
+    description: Some("Python runtime".into()),
+    ..Default::default()
+}).await?;
+
+let version = Template::create_sandbox_template_version(
+    &template.template_id,
+    SandboxTemplateVersionCreateOptions {
+        version: "2026-06-18".into(),
+        runtime_baseline: Some(SandboxTemplateRuntimeBaseline {
+            cpu: Some(2),
+            memory_mb: Some(2048),
+        }),
+        build_spec: json!({
+            "packages": {"apt": ["git"]},
+            "setup": ["echo ready"]
+        }),
+        ..Default::default()
+    },
+).await?;
+
+let logs = Template::get_sandbox_template_version_build_logs(
+    &template.template_id,
+    &version.template_version_id,
+    ConnectionOptions::default(),
+).await?;
 # Ok(())
 # }
 ```
