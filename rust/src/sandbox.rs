@@ -23,7 +23,7 @@ pub struct CreateOptions {
     pub envs: serde_json::Map<String, Value>,
     /// Whether the sandbox may access the public internet.
     pub allow_internet_access: bool,
-    /// Explicit template version id. Encoded in the template ref on the wire.
+    /// Explicit template version id. Sent as `template_version_id` on the wire.
     pub template_version_id: Option<u64>,
     /// Team slug to create the sandbox under.
     pub team: Option<String>,
@@ -338,43 +338,9 @@ impl Sandbox {
     pub async fn create(opts: CreateOptions) -> Result<Self> {
         let config = ConnectionConfig::new(opts.connection.clone());
         let control = ControlClient::new(config.clone())?;
-        let mut sandbox = serde_json::Map::new();
-        let template_id = match opts.template_version_id {
-            Some(version_id) => format!("{}:{version_id}", opts.template),
-            None => opts.template,
-        };
-        sandbox.insert("template".into(), Value::String(template_id));
-        sandbox.insert("timeout".into(), Value::from(opts.timeout_seconds));
-        sandbox.insert("metadata".into(), Value::Object(opts.metadata));
-        sandbox.insert("envs".into(), Value::Object(opts.envs.clone()));
-        sandbox.insert(
-            "allow_internet_access".into(),
-            Value::Bool(opts.allow_internet_access),
-        );
-        put_if_some(&mut sandbox, "cpu_count", opts.cpu);
-        put_if_some(&mut sandbox, "memory_mb", opts.memory_mb);
-        put_if_some_string(&mut sandbox, "network_class", opts.network_class);
-        if let Some(network) = opts.network {
-            merge_object(&mut sandbox, network_payload(network));
-        }
-        if let Some(lifecycle) = opts.lifecycle {
-            sandbox.insert("lifecycle".into(), lifecycle_payload(lifecycle)?);
-        }
-        put_if_non_empty_volume_mounts(&mut sandbox, opts.volume_mounts);
-        put_if_some_bool(
-            &mut sandbox,
-            "allow_package_registry_access",
-            opts.allow_package_registry_access,
-        );
-        if let Some(exposed_ports) = opts.exposed_ports {
-            sandbox.insert("exposed_ports".into(), exposed_ports);
-        }
-        if let Some(team) = opts.team {
-            sandbox.insert("team".into(), Value::String(team));
-        }
-
-        let response = control.post("/sandboxes", Value::Object(sandbox)).await?;
-        Self::from_response(config, control, response, opts.envs)
+        let envs = opts.envs.clone();
+        let response = control.post("/sandboxes", create_payload(&opts)?).await?;
+        Self::from_response(config, control, response, envs)
     }
 
     /// Connect to an existing sandbox and return it with a fresh data-plane session.
@@ -853,6 +819,45 @@ fn query_value(value: &Value) -> String {
         .unwrap_or_else(|| value.to_string())
 }
 
+fn create_payload(opts: &CreateOptions) -> Result<Value> {
+    let mut sandbox = serde_json::Map::new();
+    if let Some(version_id) = opts.template_version_id {
+        sandbox.insert("template_version_id".into(), Value::from(version_id));
+    } else {
+        sandbox.insert("template".into(), Value::String(opts.template.clone()));
+    }
+    sandbox.insert("timeout".into(), Value::from(opts.timeout_seconds));
+    sandbox.insert("metadata".into(), Value::Object(opts.metadata.clone()));
+    sandbox.insert("envs".into(), Value::Object(opts.envs.clone()));
+    sandbox.insert(
+        "allow_internet_access".into(),
+        Value::Bool(opts.allow_internet_access),
+    );
+    put_if_some(&mut sandbox, "cpu_count", opts.cpu);
+    put_if_some(&mut sandbox, "memory_mb", opts.memory_mb);
+    put_if_some_string(&mut sandbox, "network_class", opts.network_class.clone());
+    if let Some(network) = opts.network.clone() {
+        merge_object(&mut sandbox, network_payload(network));
+    }
+    if let Some(lifecycle) = opts.lifecycle.clone() {
+        sandbox.insert("lifecycle".into(), lifecycle_payload(lifecycle)?);
+    }
+    put_if_non_empty_volume_mounts(&mut sandbox, opts.volume_mounts.clone());
+    put_if_some_bool(
+        &mut sandbox,
+        "allow_package_registry_access",
+        opts.allow_package_registry_access,
+    );
+    if let Some(exposed_ports) = opts.exposed_ports.clone() {
+        sandbox.insert("exposed_ports".into(), exposed_ports);
+    }
+    if let Some(team) = opts.team.clone() {
+        sandbox.insert("team".into(), Value::String(team));
+    }
+
+    Ok(Value::Object(sandbox))
+}
+
 fn snapshot_list_path(opts: &SnapshotListOptions) -> String {
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     if let Some(sandbox_id) = &opts.sandbox_id {
@@ -1178,9 +1183,10 @@ mod tests {
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
     use super::{
-        data_plane_from_session, metrics_list, network_payload, put_if_non_empty_volume_mounts,
-        sandbox_info, sandbox_list_path, sandbox_network_path, snapshot_info, snapshot_list_path,
-        ListOptions, NetworkUpdateOptions, SandboxListQuery, SnapshotListOptions, VolumeMount,
+        create_payload, data_plane_from_session, metrics_list, network_payload,
+        put_if_non_empty_volume_mounts, sandbox_info, sandbox_list_path, sandbox_network_path,
+        snapshot_info, snapshot_list_path, CreateOptions, ListOptions, NetworkUpdateOptions,
+        SandboxListQuery, SnapshotListOptions, VolumeMount,
     };
 
     #[test]
@@ -1233,6 +1239,42 @@ mod tests {
                 "deny_out": ["10.0.0.0/8"]
             })
         );
+    }
+
+    #[test]
+    fn sandbox_create_uses_template_slug_payload_by_default() {
+        let payload = create_payload(&CreateOptions {
+            template: "python".to_string(),
+            timeout_seconds: 1_200,
+            ..CreateOptions::default()
+        })
+        .expect("create payload");
+
+        assert_eq!(
+            payload,
+            json!({
+                "template": "python",
+                "timeout": 1200,
+                "metadata": {},
+                "envs": {},
+                "allow_internet_access": true
+            })
+        );
+    }
+
+    #[test]
+    fn sandbox_create_sends_template_version_id_as_field() {
+        let payload = create_payload(&CreateOptions {
+            template: "base".to_string(),
+            template_version_id: Some(19),
+            timeout_seconds: 1_200,
+            ..CreateOptions::default()
+        })
+        .expect("create payload");
+
+        assert_eq!(payload["template_version_id"], json!(19));
+        assert!(payload.get("template").is_none());
+        assert_eq!(payload["timeout"], json!(1_200));
     }
 
     #[test]
