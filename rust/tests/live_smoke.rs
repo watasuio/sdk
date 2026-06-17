@@ -7,9 +7,10 @@ use watasu::{
     Error, FileUrlOptions, GitAddOptions, GitCloneOptions, GitCommitOptions, GitConfigOptions,
     GitConfigureUserOptions, GitCredentialOptions, GitDeleteBranchOptions, GitInitOptions,
     GitRemoteAddOptions, GitRemoteOperationOptions, GitRequestOptions, GitResetOptions,
-    GitRestoreOptions, NetworkUpdateOptions, PtyCreateOptions, PtySize, Sandbox, SandboxListQuery,
-    SnapshotListOptions, Template, TemplateBuilder, Volume, VolumeCreateOptions, VolumeListOptions,
-    VolumeMount, VolumeWriteOptions, WatchOptions, WriteEntry,
+    GitRestoreOptions, NetworkUpdateOptions, ProcessStartOptions, PtyCreateOptions, PtySize,
+    Sandbox, SandboxListQuery, SnapshotListOptions, Template, TemplateBuilder, Volume,
+    VolumeCreateOptions, VolumeListOptions, VolumeMount, VolumeWriteOptions, WatchOptions,
+    WriteEntry,
 };
 
 const REQUEST_TIMEOUT_SECS: u64 = 240;
@@ -507,6 +508,45 @@ async fn exercise_commands(sbx: &Sandbox) -> watasu::Result<()> {
     cat.send_stdin("stdin-ok\n").await?;
     cat.close_stdin().await?;
     assert_eq!(cat.wait().await?.stdout, "stdin-ok\n");
+
+    let mut process_envs = serde_json::Map::new();
+    process_envs.insert("WATASU_TYPED_VALUE".into(), json!("typed-ok"));
+    let process = sbx
+        .commands
+        .run_process(ProcessStartOptions {
+            cmd: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "printf \"$WATASU_TYPED_VALUE\"; printf typed-err >&2; exit 7".to_string(),
+            ],
+            cwd: Some("/tmp".to_string()),
+            envs: process_envs,
+            tag: Some("typed-live-smoke".to_string()),
+            timeout_ms: Some(30_000),
+            check: false,
+            ..ProcessStartOptions::default()
+        })
+        .await?;
+    assert_eq!(process.stdout, b"typed-ok");
+    assert_eq!(process.stderr, b"typed-err");
+    assert_eq!(process.exit_code, 7);
+    assert_eq!(process.stdout_text_lossy(), "typed-ok");
+
+    let checked_error = sbx
+        .commands
+        .run_process(ProcessStartOptions {
+            cmd: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "exit 9".to_string()],
+            check: true,
+            timeout_ms: Some(30_000),
+            ..ProcessStartOptions::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        checked_error,
+        Error::CommandExit { result } if result.exit_code == 9
+    ));
 
     let mut sleeper = sbx.commands.run_background("sleep 60").await?;
     assert!(sbx

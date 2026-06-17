@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.45"
+watasu = "0.1.46"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -29,6 +29,36 @@ async fn main() -> watasu::Result<()> {
 
 `Sandbox::create` and `Sandbox::connect` return only after the Watasu API
 supplies a usable data-plane session. The crate does not poll sandbox readiness.
+
+Use `commands.run(...)` for shell snippets. Use `run_process` when you need the
+typed `/runtime/v1/process` start fields and byte-preserving output:
+
+```rust
+use serde_json::json;
+use watasu::{CreateOptions, ProcessStartOptions, Sandbox};
+
+# async fn run() -> watasu::Result<()> {
+let sbx = Sandbox::create(CreateOptions::default()).await?;
+let mut envs = serde_json::Map::new();
+envs.insert("MODE".into(), json!("ci"));
+
+let result = sbx
+    .commands
+    .run_process(ProcessStartOptions {
+        cmd: "python3".into(),
+        args: vec!["script.py".into()],
+        cwd: Some("/workspace".into()),
+        envs,
+        tag: Some("tool-call".into()),
+        check: false,
+        ..Default::default()
+    })
+    .await?;
+
+println!("exit={} stdout={} bytes", result.exit_code, result.stdout.len());
+# Ok(())
+# }
+```
 
 ```rust
 # async fn run(mut sbx: watasu::Sandbox) -> watasu::Result<()> {

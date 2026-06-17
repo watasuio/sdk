@@ -154,12 +154,16 @@ pub(crate) fn close_stdin_payload() -> Value {
     serde_json::json!({"type": "close_stdin"})
 }
 
-/// Decode base64 stdout/stderr frame data from the sandbox runtime protocol.
-pub fn decode_runtime_data(value: &str) -> String {
+/// Decode base64 stdout/stderr frame data from the sandbox runtime protocol as bytes.
+pub fn decode_runtime_data_bytes(value: &str) -> Vec<u8> {
     BASE64
         .decode(value)
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .unwrap_or_else(|_| value.to_string())
+        .unwrap_or_else(|_| value.as_bytes().to_vec())
+}
+
+/// Decode base64 stdout/stderr frame data from the sandbox runtime protocol as UTF-8 text.
+pub fn decode_runtime_data(value: &str) -> String {
+    String::from_utf8_lossy(&decode_runtime_data_bytes(value)).into_owned()
 }
 
 fn ws_url(base_url: &str, path: &str) -> Result<String> {
@@ -183,7 +187,7 @@ fn ws_url(base_url: &str, path: &str) -> Result<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{close_stdin_payload, stdin_payload};
+    use super::{close_stdin_payload, decode_runtime_data_bytes, stdin_payload};
 
     #[test]
     fn process_input_payloads_match_runtime_protocol() {
@@ -192,5 +196,13 @@ mod tests {
             json!({"type": "stdin", "data": "aGkK"})
         );
         assert_eq!(close_stdin_payload(), json!({"type": "close_stdin"}));
+    }
+
+    #[test]
+    fn runtime_data_decoder_preserves_bytes() {
+        assert_eq!(
+            decode_runtime_data_bytes("AJ+Slg=="),
+            vec![0, 159, 146, 150]
+        );
     }
 }

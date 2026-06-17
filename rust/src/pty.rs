@@ -82,6 +82,7 @@ impl Pty {
             pid,
             socket,
             Commands::new(self.data_plane.clone(), Default::default()),
+            false,
         ))
     }
 
@@ -100,6 +101,7 @@ impl Pty {
             actual_pid,
             socket,
             Commands::new(self.data_plane.clone(), Default::default()),
+            false,
         ))
     }
 

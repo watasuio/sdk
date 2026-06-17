@@ -40,6 +40,7 @@ mod volume;
 
 pub use commands::{
     CommandExit, CommandHandle, CommandOptions, CommandResult, Commands, ProcessInfo,
+    ProcessResult, ProcessStartOptions,
 };
 pub use config::{ConnectionConfig, ConnectionOptions, KEEPALIVE_PING_INTERVAL_SECS};
 pub use error::{Error, Result};
@@ -51,7 +52,9 @@ pub use git::{
     GitFileStatus, GitInitOptions, GitRemoteAddOptions, GitRemoteOperationOptions,
     GitRequestOptions, GitResetOptions, GitRestoreOptions, GitStatus,
 };
-pub use process_socket::{decode_runtime_data, encode_runtime_data, ProcessSocket};
+pub use process_socket::{
+    decode_runtime_data, decode_runtime_data_bytes, encode_runtime_data, ProcessSocket,
+};
 pub use pty::{Pty, PtyCreateOptions, PtySize};
 pub use sandbox::{
     CreateOptions, CreateSnapshotOptions, FileUrlInfo, FileUrlOptions, ListOptions,
