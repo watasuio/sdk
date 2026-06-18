@@ -83,6 +83,47 @@ export interface FilesystemWriteOpts extends FilesystemRequestOpts {
   metadata?: Record<string, string>
 }
 
+export interface ApplyDiffOpts extends FilesystemRequestOpts {
+  cwd?: string
+}
+
+export interface ApplyDiffFailedHunk {
+  index: number
+  oldStart: number
+}
+
+export interface ApplyDiffFailure {
+  path: string
+  error: string
+  failedHunk?: ApplyDiffFailedHunk
+}
+
+export interface ApplyDiffFileSummary {
+  path: string
+  sourcePath?: string
+  kind: string
+  added: number
+  removed: number
+}
+
+export interface ApplyDiffSummary {
+  requested: number
+  applied: number
+  failed: number
+}
+
+export interface ApplyDiffReport {
+  status: 'applied' | 'partial' | 'failed' | string
+  parsedDiffBlocks: number
+  patches: number
+  files: ApplyDiffFileSummary[]
+  summary: ApplyDiffSummary
+  applied: string[]
+  failed: ApplyDiffFailure[]
+  touched: string[]
+  raw: Record<string, unknown>
+}
+
 /** Live filesystem watcher. Call `stop()` to close the local watch stream. */
 export class WatchHandle {
   private readonly done: Promise<void>
@@ -296,6 +337,18 @@ export class Filesystem {
     return entryInfo(payload.file ?? payload)
   }
 
+  /** Apply a git-style unified diff or Codex apply_patch payload inside the sandbox. */
+  async applyDiff(diff: string, opts: ApplyDiffOpts = {}): Promise<ApplyDiffReport> {
+    const payload = await this.dataPlane.postJson('/runtime/v1/files/apply_diff', {
+      ...requestOpts(opts),
+      json: {
+        diff,
+        ...(opts.cwd ? { cwd: opts.cwd } : {}),
+      },
+    })
+    return applyDiffReport(payload)
+  }
+
   /** Create a directory. */
   async makeDir(path: string, opts: FilesystemRequestOpts = {}): Promise<boolean> {
     await this.dataPlane.postJson(withQuery('/runtime/v1/directories', { path }), opts)
@@ -434,6 +487,66 @@ function filesystemEvent(value: unknown): FilesystemEvent {
     entry: item.file && typeof item.file === 'object' ? entryInfo(item.file) : undefined,
     raw: item,
   }
+}
+
+function applyDiffReport(value: unknown): ApplyDiffReport {
+  const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    status: String(item.status ?? ''),
+    parsedDiffBlocks: requiredNumber(item.parsed_diff_blocks),
+    patches: requiredNumber(item.patches),
+    files: Array.isArray(item.files) ? item.files.map(applyDiffFileSummary) : [],
+    summary: applyDiffSummary(item.summary),
+    applied: stringArray(item.applied),
+    failed: Array.isArray(item.failed) ? item.failed.map(applyDiffFailure) : [],
+    touched: stringArray(item.touched),
+    raw: item,
+  }
+}
+
+function applyDiffSummary(value: unknown): ApplyDiffSummary {
+  const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    requested: requiredNumber(item.requested),
+    applied: requiredNumber(item.applied),
+    failed: requiredNumber(item.failed),
+  }
+}
+
+function applyDiffFileSummary(value: unknown): ApplyDiffFileSummary {
+  const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    path: String(item.path ?? ''),
+    sourcePath: typeof item.source_path === 'string' ? item.source_path : undefined,
+    kind: String(item.kind ?? ''),
+    added: requiredNumber(item.added),
+    removed: requiredNumber(item.removed),
+  }
+}
+
+function applyDiffFailure(value: unknown): ApplyDiffFailure {
+  const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const failedHunk = item.failed_hunk && typeof item.failed_hunk === 'object'
+    ? item.failed_hunk as Record<string, unknown>
+    : undefined
+  return {
+    path: String(item.path ?? ''),
+    error: String(item.error ?? ''),
+    failedHunk: failedHunk
+      ? {
+          index: requiredNumber(failedHunk.index),
+          oldStart: requiredNumber(failedHunk.old_start),
+        }
+      : undefined,
+  }
+}
+
+function requiredNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
 function normalizeEventType(value: string): FilesystemEvent['type'] {

@@ -34,6 +34,11 @@ from .sandbox.commands.command_handle import (
 )
 from .sandbox.commands.main import ProcessInfo
 from .sandbox.filesystem.filesystem import (
+    ApplyDiffFailedHunk,
+    ApplyDiffFailure,
+    ApplyDiffFileSummary,
+    ApplyDiffReport,
+    ApplyDiffSummary,
     EntryInfo,
     FileType,
     FilesystemEvent,
@@ -120,6 +125,11 @@ from .volume import (
 
 __all__ = [
     "ALL_TRAFFIC",
+    "ApplyDiffFailedHunk",
+    "ApplyDiffFailure",
+    "ApplyDiffFileSummary",
+    "ApplyDiffReport",
+    "ApplyDiffSummary",
     "ApiClient",
     "ApiParams",
     "AsyncSandbox",

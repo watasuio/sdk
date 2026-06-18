@@ -62,6 +62,82 @@ pub struct FileReadOptions {
     pub max_bytes: Option<usize>,
 }
 
+/// Options for applying a patch payload inside the sandbox.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplyDiffOptions {
+    /// Optional working directory used to resolve relative patch paths.
+    pub cwd: Option<String>,
+}
+
+/// Failed hunk metadata returned by `Filesystem::apply_diff`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplyDiffFailedHunk {
+    /// One-based hunk index within the failed file patch.
+    pub index: usize,
+    /// Original starting line from the failed hunk.
+    pub old_start: usize,
+}
+
+/// One failed file patch returned by `Filesystem::apply_diff`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplyDiffFailure {
+    /// Path that failed to apply.
+    pub path: String,
+    /// Human-readable failure reason.
+    pub error: String,
+    /// Failed hunk details when available.
+    pub failed_hunk: Option<ApplyDiffFailedHunk>,
+}
+
+/// Per-file patch summary returned by `Filesystem::apply_diff`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplyDiffFileSummary {
+    /// Target path.
+    pub path: String,
+    /// Source path for move/rename patches.
+    pub source_path: Option<String>,
+    /// Patch kind such as `created`, `updated`, or `deleted`.
+    pub kind: String,
+    /// Added line count.
+    pub added: usize,
+    /// Removed line count.
+    pub removed: usize,
+}
+
+/// Aggregate patch summary returned by `Filesystem::apply_diff`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplyDiffSummary {
+    /// Number of file patches requested.
+    pub requested: usize,
+    /// Number of file patches applied.
+    pub applied: usize,
+    /// Number of file patches that failed.
+    pub failed: usize,
+}
+
+/// Structured result returned by `Filesystem::apply_diff`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ApplyDiffReport {
+    /// Overall status: `applied`, `partial`, or `failed`.
+    pub status: String,
+    /// Number of parsed diff blocks.
+    pub parsed_diff_blocks: usize,
+    /// Number of parsed file patches.
+    pub patches: usize,
+    /// Per-file patch summaries.
+    pub files: Vec<ApplyDiffFileSummary>,
+    /// Aggregate patch summary.
+    pub summary: ApplyDiffSummary,
+    /// Paths successfully applied.
+    pub applied: Vec<String>,
+    /// Per-file failures.
+    pub failed: Vec<ApplyDiffFailure>,
+    /// Paths touched by the operation.
+    pub touched: Vec<String>,
+    /// Raw runtime response.
+    pub raw: Value,
+}
+
 /// Filesystem event returned by a watch stream.
 #[derive(Clone, Debug, Default)]
 pub struct FilesystemEvent {
@@ -250,6 +326,18 @@ impl Filesystem {
         Ok(entry_info(payload.get("file").unwrap_or(&payload)))
     }
 
+    /// Apply a git-style unified diff or Codex apply_patch payload inside the sandbox.
+    pub async fn apply_diff(&self, diff: &str, opts: ApplyDiffOptions) -> Result<ApplyDiffReport> {
+        let payload = self
+            .data_plane
+            .post_json(
+                "/runtime/v1/files/apply_diff",
+                apply_diff_payload(diff, &opts),
+            )
+            .await?;
+        Ok(apply_diff_report(payload))
+    }
+
     /// Create a directory.
     pub async fn make_dir(&self, path: &str) -> Result<bool> {
         self.data_plane
@@ -344,6 +432,103 @@ fn filesystem_event(value: Value) -> FilesystemEvent {
     }
 }
 
+fn apply_diff_report(value: Value) -> ApplyDiffReport {
+    ApplyDiffReport {
+        status: value
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        parsed_diff_blocks: usize_value(value.get("parsed_diff_blocks")),
+        patches: usize_value(value.get("patches")),
+        files: value
+            .get("files")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(apply_diff_file_summary)
+            .collect(),
+        summary: apply_diff_summary(value.get("summary").unwrap_or(&Value::Null)),
+        applied: string_vec(value.get("applied")),
+        failed: value
+            .get("failed")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(apply_diff_failure)
+            .collect(),
+        touched: string_vec(value.get("touched")),
+        raw: value,
+    }
+}
+
+fn apply_diff_summary(value: &Value) -> ApplyDiffSummary {
+    ApplyDiffSummary {
+        requested: usize_value(value.get("requested")),
+        applied: usize_value(value.get("applied")),
+        failed: usize_value(value.get("failed")),
+    }
+}
+
+fn apply_diff_file_summary(value: Value) -> ApplyDiffFileSummary {
+    ApplyDiffFileSummary {
+        path: value
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        source_path: value
+            .get("source_path")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        kind: value
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        added: usize_value(value.get("added")),
+        removed: usize_value(value.get("removed")),
+    }
+}
+
+fn apply_diff_failure(value: Value) -> ApplyDiffFailure {
+    let failed_hunk = value.get("failed_hunk").and_then(|hunk| {
+        hunk.as_object().map(|_| ApplyDiffFailedHunk {
+            index: usize_value(hunk.get("index")),
+            old_start: usize_value(hunk.get("old_start")),
+        })
+    });
+    ApplyDiffFailure {
+        path: value
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        error: value
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        failed_hunk,
+    }
+}
+
+fn usize_value(value: Option<&Value>) -> usize {
+    value.and_then(Value::as_u64).unwrap_or(0) as usize
+}
+
+fn string_vec(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
 fn urlencoding(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
@@ -362,11 +547,19 @@ fn write_files_payload(files: &[WriteEntry]) -> Value {
     })
 }
 
+fn apply_diff_payload(diff: &str, opts: &ApplyDiffOptions) -> Value {
+    let mut payload = serde_json::json!({ "diff": diff });
+    if let Some(cwd) = opts.cwd.as_deref().filter(|cwd| !cwd.is_empty()) {
+        payload["cwd"] = Value::String(cwd.to_string());
+    }
+    payload
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::{write_files_payload, WriteEntry};
+    use super::{apply_diff_payload, write_files_payload, ApplyDiffOptions, WriteEntry};
 
     #[test]
     fn write_files_payload_uses_snake_case_base64_entries() {
@@ -380,6 +573,22 @@ mod tests {
                     {"path": "/tmp/a.txt", "data_base64": "YWJj"},
                     {"path": "/tmp/b.bin", "data_base64": "AAEC"}
                 ]
+            })
+        );
+    }
+
+    #[test]
+    fn apply_diff_payload_uses_snake_case_route_body() {
+        assert_eq!(
+            apply_diff_payload(
+                "diff --git a/a.txt b/a.txt",
+                &ApplyDiffOptions {
+                    cwd: Some("/workspace/app".to_string()),
+                }
+            ),
+            json!({
+                "diff": "diff --git a/a.txt b/a.txt",
+                "cwd": "/workspace/app"
             })
         );
     }

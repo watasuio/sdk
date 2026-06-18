@@ -11,6 +11,7 @@ from watasu.sandbox.commands.command_handle import CommandResult, PtyOutput, Std
 from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.commands.main import ProcessInfo
 from watasu.sandbox.filesystem.filesystem import (
+    ApplyDiffReport,
     EntryInfo,
     FilesystemEvent,
     WriteEntry,
@@ -370,6 +371,22 @@ class AsyncFilesystem:
             self._files.rename,
             old_path,
             new_path,
+            user=user,
+            request_timeout=request_timeout,
+        )
+
+    async def apply_diff(
+        self,
+        diff: str,
+        cwd: Optional[str] = None,
+        user: Optional[Username] = None,
+        request_timeout: Optional[float] = None,
+    ) -> ApplyDiffReport:
+        """Apply a git-style unified diff or Codex apply_patch payload."""
+        return await asyncio.to_thread(
+            self._files.apply_diff,
+            diff,
+            cwd=cwd,
             user=user,
             request_timeout=request_timeout,
         )

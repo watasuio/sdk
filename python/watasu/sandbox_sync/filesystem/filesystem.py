@@ -10,9 +10,11 @@ from watasu._transport.data_plane import DataPlaneClient
 from watasu._transport.process_ws import ProcessSocket
 from watasu.exceptions import FileNotFoundException, InvalidArgumentException
 from watasu.sandbox.filesystem.filesystem import (
+    ApplyDiffReport,
     EntryInfo,
     WriteEntry,
     WriteInfo,
+    apply_diff_report_from_api,
     entry_from_api,
     write_info_from_api,
 )
@@ -188,6 +190,25 @@ class Filesystem:
             resource="file",
         )
         return entry_from_api(payload["file"])
+
+    def apply_diff(
+        self,
+        diff: str,
+        cwd: Optional[str] = None,
+        user=None,
+        request_timeout: Optional[float] = None,
+    ) -> ApplyDiffReport:
+        """Apply a git-style unified diff or Codex apply_patch payload."""
+        body = {"diff": diff}
+        if cwd:
+            body["cwd"] = cwd
+        payload = self._data_plane.post_json(
+            "/runtime/v1/files/apply_diff",
+            json=body,
+            request_timeout=request_timeout,
+            resource="file",
+        )
+        return apply_diff_report_from_api(payload)
 
     def make_dir(
         self, path: str, user=None, request_timeout: Optional[float] = None

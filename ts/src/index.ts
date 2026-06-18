@@ -93,6 +93,12 @@ export {
   WatchHandle,
 } from './filesystem.js'
 export type {
+  ApplyDiffFailure,
+  ApplyDiffFailedHunk,
+  ApplyDiffFileSummary,
+  ApplyDiffOpts,
+  ApplyDiffReport,
+  ApplyDiffSummary,
   EntryInfo,
   FilesystemEvent,
   FilesystemReadOpts,

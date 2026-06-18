@@ -240,7 +240,7 @@ for sandbox in page.sandboxes {
 
 ```rust
 use watasu::{
-    CreateOptions, GitAddOptions, GitCloneOptions, GitCommitOptions,
+    ApplyDiffOptions, CreateOptions, GitAddOptions, GitCloneOptions, GitCommitOptions,
     GitConfigureUserOptions, GitInitOptions, GitRemoteOperationOptions, GitResetOptions,
     GitRestoreOptions, PtyCreateOptions, Sandbox, WatchOptions, WriteEntry,
 };
@@ -354,6 +354,14 @@ sbx.files
         WriteEntry::new("/workspace/project/b.bin", [0, 1, 2]),
     ])
     .await?;
+let patch = sbx
+    .files
+    .apply_diff(
+        "*** Begin Patch\n*** Update File: /workspace/project/a.txt\n@@\n-alpha\n+beta\n*** End Patch",
+        ApplyDiffOptions::default(),
+    )
+    .await?;
+println!("{}", patch.status);
 
 let mut terminal = sbx.pty.create(PtyCreateOptions::default()).await?;
 terminal.send_stdin("echo hello\n").await?;

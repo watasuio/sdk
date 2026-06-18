@@ -156,6 +156,15 @@ await sbx.files.writeFiles([
   { path: '/workspace/project/a.txt', data: 'alpha' },
   { path: '/workspace/project/b.bin', data: new Uint8Array([0, 1, 2]) },
 ])
+const patch = await sbx.files.applyDiff(
+  `*** Begin Patch
+*** Update File: /workspace/project/a.txt
+@@
+-alpha
++beta
+*** End Patch`
+)
+console.log(patch.status)
 
 const watcher = sbx.files.watchDir('/workspace/project')
 watcher.addEventListener((event) => {

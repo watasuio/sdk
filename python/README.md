@@ -182,6 +182,15 @@ with Sandbox.create() as sbx:
             {"path": "/workspace/project/b.bin", "data": b"\x00\x01\x02"},
         ]
     )
+    patch = sbx.files.apply_diff(
+        """*** Begin Patch
+*** Update File: /workspace/project/a.txt
+@@
+-alpha
++beta
+*** End Patch"""
+    )
+    print(patch.status)
 
     terminal = sbx.pty.create(PtySize(rows=30, cols=100))
     terminal.send_stdin("echo hello\n")

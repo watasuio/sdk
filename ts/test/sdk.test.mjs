@@ -581,6 +581,39 @@ test('filesystem writeFiles uses snake_case batch route', async () => {
   ])
 })
 
+test('filesystem applyDiff uses runtime apply_diff route', async () => {
+  const calls = []
+  const fs = new Filesystem({
+    postJson(path, opts) {
+      calls.push([path, opts])
+      return Promise.resolve({
+        status: 'partial',
+        parsed_diff_blocks: 1,
+        patches: 2,
+        files: [{ path: 'a.txt', source_path: null, kind: 'updated', added: 1, removed: 1 }],
+        summary: { requested: 2, applied: 1, failed: 1 },
+        applied: ['a.txt'],
+        failed: [{ path: 'b.txt', error: 'failed', failed_hunk: { index: 1, old_start: 3 } }],
+        touched: ['a.txt'],
+      })
+    },
+  })
+
+  const report = await fs.applyDiff('diff --git a/a.txt b/a.txt', { cwd: '/workspace/app', requestTimeoutMs: 123 })
+
+  assert.equal(report.status, 'partial')
+  assert.equal(report.parsedDiffBlocks, 1)
+  assert.equal(report.summary.failed, 1)
+  assert.equal(report.files[0].sourcePath, undefined)
+  assert.deepEqual(report.failed[0].failedHunk, { index: 1, oldStart: 3 })
+  assert.deepEqual(calls, [
+    ['/runtime/v1/files/apply_diff', {
+      requestTimeoutMs: 123,
+      json: { diff: 'diff --git a/a.txt b/a.txt', cwd: '/workspace/app' },
+    }],
+  ])
+})
+
 test('filesystem write overload accepts batches and browser data objects', async () => {
   const calls = []
   const fs = new Filesystem({
