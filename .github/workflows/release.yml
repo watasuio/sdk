@@ -93,7 +93,9 @@ jobs:
           cargo check --no-default-features --features native-tls
           cargo check --no-default-features --features rustls-tls-native-roots
           cargo doc --no-deps
-          cargo publish --dry-run
+          # Version preparation mutates Cargo.toml and Cargo.lock before the
+          # workflow commits the release bump.
+          cargo publish --dry-run --allow-dirty
 
       - name: Commit release bump and tag
         run: |
