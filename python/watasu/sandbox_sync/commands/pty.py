@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Optional, Union
+from urllib.parse import quote
 
 from watasu._transport.data_plane import DataPlaneClient
 from watasu._transport.process_ws import (
@@ -85,7 +86,7 @@ class Pty:
         socket = ProcessSocket(
             self._data_plane.base_url,
             self._data_plane.token,
-            f"/runtime/v1/process/{pid}/connect?since=0",
+            f"/runtime/v1/process/{_path_component(pid)}/connect?since=0",
             request_timeout=request_timeout,
             headers=self._connection_config.sandbox_headers,
         ).connect()
@@ -127,12 +128,16 @@ class Pty:
 
     def kill(self, pid, request_timeout: Optional[float] = None) -> bool:
         """Kill a running PTY by process id."""
-        self._data_plane.post_json(
-            f"/runtime/v1/process/{pid}/signal",
-            json={"signal": "SIGKILL"},
+        self._data_plane.delete_json(
+            f"/runtime/v1/process/{_path_component(pid)}",
+            params={"signal": "SIGKILL", "kill_group": "true"},
             request_timeout=request_timeout,
         )
         return True
+
+
+def _path_component(value) -> str:
+    return quote(str(value), safe="")
 
 
 def _next_started(frames):

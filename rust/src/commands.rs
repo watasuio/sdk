@@ -42,6 +42,35 @@ pub struct ProcessInfo {
     pub cwd: Option<String>,
 }
 
+/// Current status for one sandbox process.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProcessStatus {
+    /// Stable runtime process id.
+    pub pid: String,
+    /// Stable runtime process id, when returned separately by the data plane.
+    pub id: Option<String>,
+    /// Guest operating-system pid, when exposed by the runtime.
+    pub os_pid: Option<u32>,
+    /// Executable command.
+    pub command: Option<String>,
+    /// Command arguments.
+    pub args: Vec<String>,
+    /// Current working directory.
+    pub cwd: Option<String>,
+    /// Runtime user.
+    pub user: Option<String>,
+    /// Whether the process was started with a PTY.
+    pub pty: Option<bool>,
+    /// Runtime status such as `running`, `succeeded`, `failed`, `killed`, or `timed_out`.
+    pub status: String,
+    /// Runtime start timestamp.
+    pub started_at: Option<String>,
+    /// Runtime finish timestamp.
+    pub finished_at: Option<String>,
+    /// Process exit code, if finished.
+    pub exit_code: Option<i32>,
+}
+
 /// Options for starting a sandbox command.
 #[derive(Clone, Debug, Default)]
 pub struct CommandOptions {
@@ -54,6 +83,8 @@ pub struct CommandOptions {
 /// Options for starting a typed sandbox process.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessStartOptions {
+    /// Optional caller-supplied stable process id.
+    pub id: Option<String>,
     /// Executable path or command name.
     pub cmd: String,
     /// Command arguments.
@@ -76,6 +107,7 @@ pub struct ProcessStartOptions {
 impl Default for ProcessStartOptions {
     fn default() -> Self {
         Self {
+            id: None,
             cmd: String::new(),
             args: Vec::new(),
             cwd: None,
@@ -86,6 +118,66 @@ impl Default for ProcessStartOptions {
             check: false,
         }
     }
+}
+
+/// Options for reading available process output without blocking.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReadProcessOutputOptions {
+    /// First cursor to return. When omitted, the runtime starts at cursor `0`.
+    pub since: Option<u64>,
+    /// Maximum output bytes to return across all events.
+    pub limit_bytes: Option<usize>,
+}
+
+/// Options for stopping a sandbox process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StopProcessOptions {
+    /// Signal name or number. Defaults to `TERM`.
+    pub signal: Option<String>,
+    /// Whether to signal the full process group. Defaults to true.
+    pub kill_group: bool,
+    /// Grace period before the runtime escalates to `KILL`, in milliseconds.
+    pub grace_ms: Option<u64>,
+}
+
+impl Default for StopProcessOptions {
+    fn default() -> Self {
+        Self {
+            signal: None,
+            kill_group: true,
+            grace_ms: None,
+        }
+    }
+}
+
+/// One byte-preserving output event from a sandbox process.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProcessOutputEvent {
+    /// Monotonic cursor for this event.
+    pub cursor: u64,
+    /// Event stream type, usually `stdout`, `stderr`, or `pty`.
+    pub r#type: String,
+    /// Event bytes decoded from the runtime base64 payload.
+    pub data: Vec<u8>,
+}
+
+/// Nonblocking snapshot of available process output.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProcessOutput {
+    /// Stable runtime process id.
+    pub pid: String,
+    /// Current process status.
+    pub status: String,
+    /// Process exit code, if finished.
+    pub exit_code: Option<i32>,
+    /// Runtime finish timestamp.
+    pub finished_at: Option<String>,
+    /// Cursor to use for the next output poll.
+    pub next_cursor: u64,
+    /// Whether older events were evicted before the requested cursor.
+    pub truncated_before_cursor: bool,
+    /// Output events available in this snapshot.
+    pub events: Vec<ProcessOutputEvent>,
 }
 
 /// Options for running a typed sandbox process with bounded output capture.
@@ -191,12 +283,14 @@ impl Commands {
 
     /// Send `SIGKILL` to a process by pid.
     pub async fn kill(&self, pid: impl ToString) -> Result<bool> {
-        self.data_plane
-            .post_json(
-                &format!("/runtime/v1/process/{}/signal", pid.to_string()),
-                serde_json::json!({"signal": "SIGKILL"}),
-            )
-            .await?;
+        self.stop_process(
+            pid,
+            StopProcessOptions {
+                signal: Some("SIGKILL".to_string()),
+                ..StopProcessOptions::default()
+            },
+        )
+        .await?;
         Ok(true)
     }
 
@@ -261,16 +355,66 @@ impl Commands {
 
     /// Reconnect to a live process stream by pid.
     pub async fn connect(&self, pid: impl ToString) -> Result<CommandHandle> {
+        self.connect_since(pid, 0).await
+    }
+
+    /// Reconnect to a live process stream by pid starting at a cursor.
+    pub async fn connect_since(&self, pid: impl ToString, cursor: u64) -> Result<CommandHandle> {
         let pid = pid.to_string();
+        let encoded_pid = path_component(&pid);
         let mut socket = ProcessSocket::connect(
             &self.data_plane.base_url,
             &self.data_plane.token,
-            &format!("/runtime/v1/process/{pid}/connect?since=0"),
+            &format!("/runtime/v1/process/{encoded_pid}/connect?since={cursor}"),
         )
         .await?;
         let first = next_started(&mut socket).await?;
         let actual_pid = frame_pid(&first).unwrap_or(pid);
         Ok(CommandHandle::new(actual_pid, socket, self.clone(), false))
+    }
+
+    /// Look up current process status without attaching to the stream.
+    pub async fn process(&self, pid: impl ToString) -> Result<ProcessStatus> {
+        let pid = pid.to_string();
+        let payload = self
+            .data_plane
+            .get_json(&format!("/runtime/v1/process/{}", path_component(&pid)))
+            .await?;
+        Ok(process_status(payload))
+    }
+
+    /// Read currently available output events without blocking.
+    pub async fn read_process_output(
+        &self,
+        pid: impl ToString,
+        opts: ReadProcessOutputOptions,
+    ) -> Result<ProcessOutput> {
+        let pid = pid.to_string();
+        let mut path = format!("/runtime/v1/process/{}/output", path_component(&pid));
+        let query = process_output_query(&opts);
+        if !query.is_empty() {
+            path.push('?');
+            path.push_str(&query);
+        }
+        let payload = self.data_plane.get_json(&path).await?;
+        Ok(process_output(payload))
+    }
+
+    /// Stop a process, optionally signalling the whole process group.
+    pub async fn stop_process(
+        &self,
+        pid: impl ToString,
+        opts: StopProcessOptions,
+    ) -> Result<ProcessStatus> {
+        let pid = pid.to_string();
+        let mut path = format!("/runtime/v1/process/{}", path_component(&pid));
+        let query = stop_process_query(&opts);
+        if !query.is_empty() {
+            path.push('?');
+            path.push_str(&query);
+        }
+        let payload = self.data_plane.delete_json(&path).await?;
+        Ok(process_status(payload))
     }
 
     /// Send stdin bytes to a live process by pid.
@@ -464,6 +608,9 @@ fn process_start_payload(
 
     let mut payload = serde_json::Map::new();
     payload.insert("type".into(), Value::String("start".into()));
+    if let Some(id) = &opts.id {
+        payload.insert("id".into(), Value::String(id.clone()));
+    }
     payload.insert("cmd".into(), Value::String(opts.cmd.clone()));
     payload.insert(
         "args".into(),
@@ -484,6 +631,33 @@ fn process_start_payload(
     }
 
     Ok(Value::Object(payload))
+}
+
+fn process_output_query(opts: &ReadProcessOutputOptions) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(since) = opts.since {
+        serializer.append_pair("since", &since.to_string());
+    }
+    if let Some(limit_bytes) = opts.limit_bytes {
+        serializer.append_pair("limit_bytes", &limit_bytes.to_string());
+    }
+    serializer.finish()
+}
+
+fn stop_process_query(opts: &StopProcessOptions) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(signal) = &opts.signal {
+        serializer.append_pair("signal", signal);
+    }
+    serializer.append_pair("kill_group", if opts.kill_group { "true" } else { "false" });
+    if let Some(grace_ms) = opts.grace_ms {
+        serializer.append_pair("grace_ms", &grace_ms.to_string());
+    }
+    serializer.finish()
+}
+
+fn path_component(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -606,6 +780,114 @@ fn process_result(capture: OutputCapture, fallback_pid: &str, frame: &Value) -> 
     }
 }
 
+fn process_status(value: Value) -> ProcessStatus {
+    let item = value.get("process").unwrap_or(&value);
+    ProcessStatus {
+        pid: process_list_pid(item).unwrap_or_default(),
+        id: item
+            .get("id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        os_pid: item
+            .get("os_pid")
+            .or_else(|| item.get("osPid"))
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
+        command: item
+            .get("command")
+            .or_else(|| item.get("cmd"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        args: string_array(item.get("args").or_else(|| item.get("arguments"))),
+        cwd: item
+            .get("cwd")
+            .or_else(|| item.get("working_directory"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        user: item
+            .get("user")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        pty: item.get("pty").and_then(Value::as_bool),
+        status: item
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        started_at: item
+            .get("started_at")
+            .or_else(|| item.get("startedAt"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        finished_at: item
+            .get("finished_at")
+            .or_else(|| item.get("finishedAt"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        exit_code: item
+            .get("exit_code")
+            .or_else(|| item.get("exitCode"))
+            .and_then(Value::as_i64)
+            .and_then(|value| i32::try_from(value).ok()),
+    }
+}
+
+fn process_output(value: Value) -> ProcessOutput {
+    ProcessOutput {
+        pid: value
+            .get("pid")
+            .or_else(|| value.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        status: value
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        exit_code: value
+            .get("exit_code")
+            .or_else(|| value.get("exitCode"))
+            .and_then(Value::as_i64)
+            .and_then(|value| i32::try_from(value).ok()),
+        finished_at: value
+            .get("finished_at")
+            .or_else(|| value.get("finishedAt"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        next_cursor: value
+            .get("next_cursor")
+            .or_else(|| value.get("nextCursor"))
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        truncated_before_cursor: value
+            .get("truncated_before_cursor")
+            .or_else(|| value.get("truncatedBeforeCursor"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        events: value
+            .get("events")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().map(process_output_event).collect())
+            .unwrap_or_default(),
+    }
+}
+
+fn process_output_event(value: &Value) -> ProcessOutputEvent {
+    ProcessOutputEvent {
+        cursor: value
+            .get("cursor")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        r#type: value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        data: decode_runtime_data_bytes(value.get("data").and_then(Value::as_str).unwrap_or("")),
+    }
+}
+
 fn process_info(value: Value) -> ProcessInfo {
     let item = value.get("process").unwrap_or(&value);
     ProcessInfo {
@@ -619,16 +901,7 @@ fn process_info(value: Value) -> ProcessInfo {
             .or_else(|| item.get("command"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
-        args: item
-            .get("args")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .map(|item| item.as_str().unwrap_or_default().to_string())
-                    .collect()
-            })
-            .unwrap_or_default(),
+        args: string_array(item.get("args")),
         envs: item
             .get("envs")
             .or_else(|| item.get("environment"))
@@ -651,6 +924,18 @@ fn process_list_pid(item: &Value) -> Option<String> {
     })
 }
 
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| item.as_str().unwrap_or_default().to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use base64::engine::general_purpose::STANDARD as BASE64;
@@ -658,8 +943,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        append_capped, process_info, process_result, process_start_payload, OutputCapture,
-        OutputLimits, ProcessStartOptions,
+        append_capped, process_info, process_output, process_result, process_start_payload,
+        OutputCapture, OutputLimits, ProcessStartOptions,
     };
 
     #[test]
@@ -690,6 +975,7 @@ mod tests {
         let payload = process_start_payload(
             &sandbox_envs,
             &ProcessStartOptions {
+                id: Some("proc-typed".to_string()),
                 cmd: "python3".to_string(),
                 args: vec!["script.py".to_string()],
                 cwd: Some("/workspace".to_string()),
@@ -706,6 +992,7 @@ mod tests {
             payload,
             json!({
                 "type": "start",
+                "id": "proc-typed",
                 "cmd": "python3",
                 "args": ["script.py"],
                 "cwd": "/workspace",
@@ -732,6 +1019,30 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, crate::Error::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn process_output_decodes_base64_events() {
+        let output = process_output(json!({
+            "pid": "proc-1",
+            "status": "running",
+            "exit_code": null,
+            "finished_at": null,
+            "next_cursor": 43,
+            "truncated_before_cursor": false,
+            "events": [
+                {"cursor": 41, "type": "stdout", "data": BASE64.encode([0, 159, 146, 150])},
+                {"cursor": 42, "type": "stderr", "data": BASE64.encode("err")}
+            ]
+        }));
+
+        assert_eq!(output.pid, "proc-1");
+        assert_eq!(output.status, "running");
+        assert_eq!(output.next_cursor, 43);
+        assert_eq!(output.events[0].r#type, "stdout");
+        assert_eq!(output.events[0].data, vec![0, 159, 146, 150]);
+        assert_eq!(output.events[1].r#type, "stderr");
+        assert_eq!(output.events[1].data, b"err");
     }
 
     #[test]

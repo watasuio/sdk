@@ -1,5 +1,5 @@
 import { ConnectionConfig } from './connectionConfig.js'
-import { DataPlaneClient } from './transport.js'
+import { DataPlaneClient, withQuery } from './transport.js'
 import { ProcessFrame, ProcessSocket, base64DecodeBytes, base64DecodeText } from './processSocket.js'
 import { SandboxError, TimeoutError } from './errors.js'
 
@@ -31,6 +31,50 @@ export interface ProcessInfo {
   args: string[]
   envs: Record<string, string>
   cwd?: string
+}
+
+export interface ProcessStatus {
+  pid: number | string
+  id?: number | string
+  osPid?: number
+  command?: string
+  args: string[]
+  cwd?: string
+  user?: string
+  pty?: boolean
+  status: string
+  startedAt?: string
+  finishedAt?: string
+  exitCode?: number
+}
+
+export interface ProcessOutputEvent {
+  cursor: number
+  type: 'stdout' | 'stderr' | 'pty' | string
+  data: Uint8Array
+}
+
+export interface ProcessOutputSnapshot {
+  pid: number | string
+  status: string
+  exitCode?: number
+  finishedAt?: string
+  nextCursor: number
+  truncatedBeforeCursor: boolean
+  events: ProcessOutputEvent[]
+}
+
+export interface ReadProcessOutputOptions extends CommandRequestOpts {
+  since?: number
+  limitBytes?: number
+}
+
+export interface StopProcessOptions {
+  signal?: string
+  killGroup?: boolean
+  graceMs?: number
+  requestTimeoutMs?: number
+  abortSignal?: AbortSignal
 }
 
 export interface CommandStartOpts {
@@ -182,9 +226,10 @@ export class Commands {
 
   /** Send SIGKILL to a process by pid. */
   async kill(pid: number | string, opts: { requestTimeoutMs?: number; signal?: AbortSignal } = {}): Promise<boolean> {
-    await this.dataPlane.postJson(`/runtime/v1/process/${pid}/signal`, {
-      ...opts,
-      json: { signal: 'SIGKILL' },
+    await this.stopProcess(pid, {
+      signal: 'SIGKILL',
+      requestTimeoutMs: opts.requestTimeoutMs,
+      abortSignal: opts.signal,
     })
     return true
   }
@@ -220,16 +265,56 @@ export class Commands {
 
   /** Reconnect to a live process stream by pid. */
   async connect(pid: number | string, opts: CommandStartOpts = {}): Promise<CommandHandle> {
+    return this.connectSince(pid, 0, opts)
+  }
+
+  /** Reconnect to a live process stream by pid starting at a cursor. */
+  async connectSince(pid: number | string, cursor = 0, opts: CommandStartOpts = {}): Promise<CommandHandle> {
+    const encodedPid = encodeURIComponent(String(pid))
     const socket = await new ProcessSocket(
       this.dataPlane.baseUrl,
       this.dataPlane.token,
-      `/runtime/v1/process/${pid}/connect?since=0`,
+      withQuery(`/runtime/v1/process/${encodedPid}/connect`, { since: cursor }),
       opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
       this.config.headers
     ).connect()
     const first = await nextStarted(socket)
     const actualPid = framePid(first) ?? pid
     return new CommandHandle(actualPid, socket, () => this.kill(actualPid), socket, opts.onStdout, opts.onStderr, opts.onPty)
+  }
+
+  /** Look up process status without attaching a WebSocket. */
+  async process(pid: number | string, opts: CommandRequestOpts = {}): Promise<ProcessStatus> {
+    const payload = await this.dataPlane.getJson(`/runtime/v1/process/${encodeURIComponent(String(pid))}`, opts)
+    return processStatus(payload)
+  }
+
+  /** Read available process output since a cursor without blocking. */
+  async readProcessOutput(pid: number | string, opts: ReadProcessOutputOptions = {}): Promise<ProcessOutputSnapshot> {
+    const payload = await this.dataPlane.getJson(
+      withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}/output`, {
+        since: opts.since,
+        limit_bytes: opts.limitBytes,
+      }),
+      opts
+    )
+    return processOutputSnapshot(payload)
+  }
+
+  /** Stop a process, optionally signalling the full process group. */
+  async stopProcess(pid: number | string, opts: StopProcessOptions = {}): Promise<ProcessStatus> {
+    const payload = await this.dataPlane.deleteJson(
+      withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}`, {
+        signal: opts.signal,
+        kill_group: opts.killGroup ?? true,
+        grace_ms: opts.graceMs,
+      }),
+      {
+        requestTimeoutMs: opts.requestTimeoutMs,
+        signal: opts.abortSignal,
+      }
+    )
+    return processStatus(payload)
   }
 
   /** Start a command and return a live handle immediately. */
@@ -309,7 +394,66 @@ function processInfo(value: unknown): ProcessInfo {
   }
 }
 
+function processStatus(value: unknown): ProcessStatus {
+  const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const process = item.process && typeof item.process === 'object' ? item.process as Record<string, unknown> : item
+  const pid = scalar(process.pid ?? process.id) ?? ''
+  return {
+    pid,
+    id: scalar(process.id),
+    osPid: numberValue(process.os_pid ?? process.osPid),
+    command: stringValue(process.command ?? process.cmd),
+    args: arrayOfStrings(process.args ?? process.arguments),
+    cwd: stringValue(process.cwd ?? process.working_directory),
+    user: stringValue(process.user),
+    pty: typeof process.pty === 'boolean' ? process.pty : undefined,
+    status: stringValue(process.status) ?? '',
+    startedAt: stringValue(process.started_at ?? process.startedAt),
+    finishedAt: stringValue(process.finished_at ?? process.finishedAt),
+    exitCode: numberValue(process.exit_code ?? process.exitCode),
+  }
+}
+
+function processOutputSnapshot(value: unknown): ProcessOutputSnapshot {
+  const payload = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    pid: scalar(payload.pid ?? payload.id) ?? '',
+    status: stringValue(payload.status) ?? '',
+    exitCode: numberValue(payload.exit_code ?? payload.exitCode),
+    finishedAt: stringValue(payload.finished_at ?? payload.finishedAt),
+    nextCursor: numberValue(payload.next_cursor ?? payload.nextCursor) ?? 0,
+    truncatedBeforeCursor: payload.truncated_before_cursor === true || payload.truncatedBeforeCursor === true,
+    events: Array.isArray(payload.events) ? payload.events.map(processOutputEvent) : [],
+  }
+}
+
+function processOutputEvent(value: unknown): ProcessOutputEvent {
+  const event = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    cursor: numberValue(event.cursor) ?? 0,
+    type: stringValue(event.type) ?? '',
+    data: base64DecodeBytes(stringValue(event.data) ?? ''),
+  }
+}
+
 function recordOfStrings(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object') return {}
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)]))
+}
+
+function scalar(value: unknown): number | string | undefined {
+  return typeof value === 'number' || typeof value === 'string' ? value : undefined
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  return undefined
+}
+
+function arrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : []
 }

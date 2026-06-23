@@ -9,7 +9,7 @@ from watasu.connection_config import ApiParams, ConnectionConfig, Username
 from watasu.exceptions import InvalidArgumentException, SandboxException
 from watasu.sandbox.commands.command_handle import CommandResult, PtyOutput, Stderr, Stdout
 from watasu.sandbox.commands.command_handle import PtySize
-from watasu.sandbox.commands.main import ProcessInfo
+from watasu.sandbox.commands.main import ProcessInfo, ProcessOutputSnapshot, ProcessStatus
 from watasu.sandbox.filesystem.filesystem import (
     ApplyDiffReport,
     EntryInfo,
@@ -155,6 +155,48 @@ class AsyncCommands:
             self._commands.kill, pid, request_timeout=request_timeout
         )
 
+    async def process(
+        self, pid, request_timeout: Optional[float] = None
+    ) -> ProcessStatus:
+        """Return current process status without attaching a WebSocket."""
+        return await asyncio.to_thread(
+            self._commands.process, pid, request_timeout=request_timeout
+        )
+
+    async def read_process_output(
+        self,
+        pid,
+        since: int = 0,
+        limit_bytes: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> ProcessOutputSnapshot:
+        """Read currently available process output since a cursor without blocking."""
+        return await asyncio.to_thread(
+            self._commands.read_process_output,
+            pid,
+            since=since,
+            limit_bytes=limit_bytes,
+            request_timeout=request_timeout,
+        )
+
+    async def stop_process(
+        self,
+        pid,
+        signal: str = "TERM",
+        kill_group: bool = True,
+        grace_ms: int = 0,
+        request_timeout: Optional[float] = None,
+    ) -> ProcessStatus:
+        """Stop a process, optionally signalling the full process group."""
+        return await asyncio.to_thread(
+            self._commands.stop_process,
+            pid,
+            signal=signal,
+            kill_group=kill_group,
+            grace_ms=grace_ms,
+            request_timeout=request_timeout,
+        )
+
     async def send_stdin(
         self, pid, data: Union[str, bytes], request_timeout: Optional[float] = None
     ) -> None:
@@ -186,6 +228,25 @@ class AsyncCommands:
         )
         return AsyncCommandHandle(handle, on_stdout=on_stdout, on_stderr=on_stderr)
 
+    async def connect_since(
+        self,
+        pid: int,
+        cursor: int = 0,
+        timeout: Optional[float] = 60,
+        request_timeout: Optional[float] = None,
+        on_stdout: Optional[Callable[[Stdout], Any]] = None,
+        on_stderr: Optional[Callable[[Stderr], Any]] = None,
+    ) -> AsyncCommandHandle:
+        """Reconnect to a live process stream by pid starting at a cursor."""
+        handle = await asyncio.to_thread(
+            self._commands.connect_since,
+            pid,
+            cursor,
+            timeout=timeout,
+            request_timeout=request_timeout,
+        )
+        return AsyncCommandHandle(handle, on_stdout=on_stdout, on_stderr=on_stderr)
+
     async def run(
         self,
         cmd: str,
@@ -197,6 +258,7 @@ class AsyncCommands:
         on_stderr: Optional[Callable[[Stderr], None]] = None,
         stdin: Optional[bool] = None,
         timeout: Optional[float] = 60,
+        process_id: Optional[str] = None,
         request_timeout: Optional[float] = None,
     ):
         """Run a shell command asynchronously."""
@@ -212,6 +274,7 @@ class AsyncCommands:
             on_stderr=_thread_callback(loop, on_stderr),
             stdin=stdin,
             timeout=timeout,
+            process_id=process_id,
             request_timeout=request_timeout,
         )
         if background:

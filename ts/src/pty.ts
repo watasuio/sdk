@@ -1,7 +1,7 @@
 import { CommandHandle } from './commands.js'
 import { ConnectionConfig, type ConnectionOpts, type Username } from './connectionConfig.js'
 import { ProcessFrame, ProcessSocket } from './processSocket.js'
-import { DataPlaneClient } from './transport.js'
+import { DataPlaneClient, withQuery } from './transport.js'
 import { SandboxError } from './errors.js'
 
 export interface PtySize {
@@ -70,7 +70,7 @@ export class Pty {
     const socket = await new ProcessSocket(
       this.dataPlane.baseUrl,
       this.dataPlane.token,
-      `/runtime/v1/process/${pid}/connect?since=0`,
+      withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}/connect`, { since: 0 }),
       opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
       this.config.headers
     ).connect()
@@ -106,8 +106,10 @@ export class Pty {
 
   /** Kill a running PTY. */
   async kill(pid: number | string, opts: Pick<ConnectionOpts, 'requestTimeoutMs' | 'signal'> = {}): Promise<boolean> {
-    await this.dataPlane.postJson(`/runtime/v1/process/${pid}/signal`, {
-      json: { signal: 'SIGKILL' },
+    await this.dataPlane.deleteJson(withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}`, {
+      signal: 'SIGKILL',
+      kill_group: true,
+    }), {
       requestTimeoutMs: opts.requestTimeoutMs,
       signal: opts.signal,
     })

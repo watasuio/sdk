@@ -32,7 +32,12 @@ from .sandbox.commands.command_handle import (
     Stderr,
     Stdout,
 )
-from .sandbox.commands.main import ProcessInfo
+from .sandbox.commands.main import (
+    ProcessInfo,
+    ProcessOutputEvent,
+    ProcessOutputSnapshot,
+    ProcessStatus,
+)
 from .sandbox.filesystem.filesystem import (
     ApplyDiffFailedHunk,
     ApplyDiffFailure,
@@ -179,6 +184,9 @@ __all__ = [
     "NotFoundException",
     "OutputHandler",
     "ProcessInfo",
+    "ProcessOutputEvent",
+    "ProcessOutputSnapshot",
+    "ProcessStatus",
     "ProxyTypes",
     "PtyOutput",
     "Pty",

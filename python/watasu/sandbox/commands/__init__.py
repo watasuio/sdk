@@ -6,12 +6,15 @@ from .command_handle import (
     Stderr,
     Stdout,
 )
-from .main import ProcessInfo
+from .main import ProcessInfo, ProcessOutputEvent, ProcessOutputSnapshot, ProcessStatus
 
 __all__ = [
     "CommandExitException",
     "CommandResult",
     "ProcessInfo",
+    "ProcessOutputEvent",
+    "ProcessOutputSnapshot",
+    "ProcessStatus",
     "PtyOutput",
     "PtySize",
     "Stderr",

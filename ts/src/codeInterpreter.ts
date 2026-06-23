@@ -68,8 +68,13 @@ export type {
   CommandResult,
   CommandStartOpts,
   ProcessInfo,
+  ProcessOutputEvent,
+  ProcessOutputSnapshot,
+  ProcessStatus,
   PtyOutput,
+  ReadProcessOutputOptions,
   Stderr,
+  StopProcessOptions,
   Stdout,
 } from './commands.js'
 export { Process, ProcessManager, ProcessMessage, ProcessOutput } from './process.js'

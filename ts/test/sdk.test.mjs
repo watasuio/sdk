@@ -400,11 +400,79 @@ test('commands list prefers stable process id over guest os pid', async () => {
   assert.equal(processes[0].cwd, '/workspace')
 })
 
+test('commands expose process status output polling and stop routes', async () => {
+  const controller = new AbortController()
+  const calls = []
+  const commands = new Commands({
+    getJson(path, opts) {
+      calls.push(['get', path, opts])
+      if (path.includes('/output')) {
+        return Promise.resolve({
+          pid: 'proc/native',
+          status: 'running',
+          exit_code: null,
+          finished_at: null,
+          next_cursor: 42,
+          truncated_before_cursor: false,
+          events: [
+            { cursor: 40, type: 'stdout', data: base64Encode(new Uint8Array([0, 1, 2])) },
+          ],
+        })
+      }
+      return Promise.resolve({
+        pid: 'proc/native',
+        id: 'proc/native',
+        command: 'bash',
+        args: ['-lc', 'sleep 60'],
+        status: 'running',
+        exit_code: null,
+      })
+    },
+    deleteJson(path, opts) {
+      calls.push(['delete', path, opts])
+      return Promise.resolve({
+        pid: 'proc/native',
+        id: 'proc/native',
+        status: 'killed',
+        exit_code: -15,
+      })
+    },
+  }, new ConnectionConfig({ apiKey: 'key' }))
+
+  const status = await commands.process('proc/native', { requestTimeoutMs: 5 })
+  const output = await commands.readProcessOutput('proc/native', { since: 40, limitBytes: 1024, requestTimeoutMs: 6 })
+  const stopped = await commands.stopProcess('proc/native', {
+    signal: 'TERM',
+    killGroup: false,
+    graceMs: 1000,
+    requestTimeoutMs: 7,
+    abortSignal: controller.signal,
+  })
+
+  assert.equal(status.pid, 'proc/native')
+  assert.equal(status.status, 'running')
+  assert.deepEqual(output.events[0].data, new Uint8Array([0, 1, 2]))
+  assert.equal(output.nextCursor, 42)
+  assert.equal(stopped.status, 'killed')
+  assert.deepEqual(calls, [
+    ['get', '/runtime/v1/process/proc%2Fnative', { requestTimeoutMs: 5 }],
+    ['get', '/runtime/v1/process/proc%2Fnative/output?since=40&limit_bytes=1024', {
+      since: 40,
+      limitBytes: 1024,
+      requestTimeoutMs: 6,
+    }],
+    ['delete', '/runtime/v1/process/proc%2Fnative?signal=TERM&kill_group=false&grace_ms=1000', {
+      requestTimeoutMs: 7,
+      signal: controller.signal,
+    }],
+  ])
+})
+
 test('pty kill forwards per-call request options', async () => {
   const controller = new AbortController()
   const calls = []
   const pty = new Pty({
-    postJson(path, opts) {
+    deleteJson(path, opts) {
       calls.push([path, opts])
       return Promise.resolve({})
     },
@@ -412,8 +480,7 @@ test('pty kill forwards per-call request options', async () => {
 
   assert.equal(await pty.kill(123, { requestTimeoutMs: 5, signal: controller.signal }), true)
   assert.deepEqual(calls, [
-    ['/runtime/v1/process/123/signal', {
-      json: { signal: 'SIGKILL' },
+    ['/runtime/v1/process/123?signal=SIGKILL&kill_group=true', {
       requestTimeoutMs: 5,
       signal: controller.signal,
     }],

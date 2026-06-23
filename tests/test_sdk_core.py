@@ -395,6 +395,86 @@ def test_commands_list_prefers_stable_process_id_over_guest_os_pid():
     assert process.cwd == "/workspace"
 
 
+def test_commands_process_polling_routes_and_decodes_output():
+    calls = []
+
+    class FakeDataPlane:
+        base_url = "http://localhost:49983"
+        token = "data-token"
+
+        def get_json(self, path, params=None, request_timeout=None):
+            calls.append(("get", path, params, request_timeout))
+            if path.endswith("/output"):
+                return {
+                    "pid": "proc/native",
+                    "status": "running",
+                    "exit_code": None,
+                    "finished_at": None,
+                    "next_cursor": 42,
+                    "truncated_before_cursor": False,
+                    "events": [
+                        {
+                            "cursor": 40,
+                            "type": "stdout",
+                            "data": base64.b64encode(b"\x00\x01\x02").decode(),
+                        }
+                    ],
+                }
+            return {
+                "pid": "proc/native",
+                "id": "proc/native",
+                "command": "bash",
+                "args": ["-lc", "sleep 60"],
+                "status": "running",
+                "exit_code": 0,
+            }
+
+        def delete_json(self, path, params=None, request_timeout=None):
+            calls.append(("delete", path, params, request_timeout))
+            return {
+                "pid": "proc/native",
+                "id": "proc/native",
+                "status": "killed",
+                "exit_code": -15,
+            }
+
+    commands = SyncCommands(FakeDataPlane(), ConnectionConfig(api_key="key"))
+
+    status = commands.process("proc/native", request_timeout=5)
+    output = commands.read_process_output(
+        "proc/native", since=40, limit_bytes=1024, request_timeout=6
+    )
+    stopped = commands.stop_process(
+        "proc/native",
+        signal="TERM",
+        kill_group=False,
+        grace_ms=1000,
+        request_timeout=7,
+    )
+
+    assert status.pid == "proc/native"
+    assert status.status == "running"
+    assert status.exit_code == 0
+    assert output.events[0].data == b"\x00\x01\x02"
+    assert output.next_cursor == 42
+    assert stopped.status == "killed"
+    assert calls == [
+        ("get", "/runtime/v1/process/proc%2Fnative", None, 5),
+        (
+            "get",
+            "/runtime/v1/process/proc%2Fnative/output",
+            {"since": 40, "limit_bytes": 1024},
+            6,
+        ),
+        (
+            "delete",
+            "/runtime/v1/process/proc%2Fnative",
+            {"signal": "TERM", "kill_group": "false", "grace_ms": 1000},
+            7,
+        ),
+    ]
+
+
 def test_commands_close_stdin_connects_and_disconnects():
     calls = []
     commands = SyncCommands(object(), ConnectionConfig(api_key="key"))
@@ -692,6 +772,57 @@ def test_async_commands_close_stdin_forwards_to_sync_commands():
     asyncio.run(scenario())
 
     assert calls == [(123, 5)]
+
+
+def test_async_commands_process_polling_forwards_to_sync_commands():
+    calls = []
+
+    class FakeCommands:
+        def process(self, pid, request_timeout=None):
+            calls.append(("process", pid, request_timeout))
+            return "status"
+
+        def read_process_output(
+            self, pid, since=0, limit_bytes=None, request_timeout=None
+        ):
+            calls.append(("output", pid, since, limit_bytes, request_timeout))
+            return "output"
+
+        def stop_process(
+            self,
+            pid,
+            signal="TERM",
+            kill_group=True,
+            grace_ms=0,
+            request_timeout=None,
+        ):
+            calls.append(
+                ("stop", pid, signal, kill_group, grace_ms, request_timeout)
+            )
+            return "stopped"
+
+    async def scenario():
+        commands = AsyncCommands(FakeCommands())
+        return (
+            await commands.process("proc-1", request_timeout=5),
+            await commands.read_process_output(
+                "proc-1", since=40, limit_bytes=1024, request_timeout=6
+            ),
+            await commands.stop_process(
+                "proc-1",
+                signal="TERM",
+                kill_group=False,
+                grace_ms=1000,
+                request_timeout=7,
+            ),
+        )
+
+    assert asyncio.run(scenario()) == ("status", "output", "stopped")
+    assert calls == [
+        ("process", "proc-1", 5),
+        ("output", "proc-1", 40, 1024, 6),
+        ("stop", "proc-1", "TERM", False, 1000, 7),
+    ]
 
 
 def test_async_command_handle_observes_background_callback_failures():

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 from typing import Callable, Dict, List, Literal, Optional, Union, overload
+from urllib.parse import quote
 
 from watasu._transport.data_plane import DataPlaneClient
 from watasu._transport.process_ws import (
@@ -9,7 +11,12 @@ from watasu._transport.process_ws import (
     QueuedProcessEventStream,
 )
 from watasu.connection_config import ConnectionConfig, Username
-from watasu.sandbox.commands.main import ProcessInfo
+from watasu.sandbox.commands.main import (
+    ProcessInfo,
+    ProcessOutputEvent,
+    ProcessOutputSnapshot,
+    ProcessStatus,
+)
 from watasu.sandbox_sync.commands.command_handle import CommandHandle
 
 
@@ -41,12 +48,51 @@ class Commands:
 
     def kill(self, pid, request_timeout: Optional[float] = None) -> bool:
         """Send ``SIGKILL`` to a sandbox process by pid."""
-        self._data_plane.post_json(
-            f"/runtime/v1/process/{pid}/signal",
-            json={"signal": "SIGKILL"},
+        self.stop_process(pid, signal="SIGKILL", request_timeout=request_timeout)
+        return True
+
+    def process(self, pid, request_timeout: Optional[float] = None) -> ProcessStatus:
+        """Return current process status without attaching a WebSocket."""
+        payload = self._data_plane.get_json(
+            f"/runtime/v1/process/{_path_component(pid)}",
             request_timeout=request_timeout,
         )
-        return True
+        return _process_status(payload)
+
+    def read_process_output(
+        self,
+        pid,
+        since: int = 0,
+        limit_bytes: Optional[int] = None,
+        request_timeout: Optional[float] = None,
+    ) -> ProcessOutputSnapshot:
+        """Read currently available process output since a cursor without blocking."""
+        payload = self._data_plane.get_json(
+            f"/runtime/v1/process/{_path_component(pid)}/output",
+            params={"since": since, "limit_bytes": limit_bytes},
+            request_timeout=request_timeout,
+        )
+        return _process_output_snapshot(payload)
+
+    def stop_process(
+        self,
+        pid,
+        signal: str = "TERM",
+        kill_group: bool = True,
+        grace_ms: int = 0,
+        request_timeout: Optional[float] = None,
+    ) -> ProcessStatus:
+        """Stop a process, optionally signalling the full process group."""
+        payload = self._data_plane.delete_json(
+            f"/runtime/v1/process/{_path_component(pid)}",
+            params={
+                "signal": signal,
+                "kill_group": str(kill_group).lower(),
+                "grace_ms": grace_ms,
+            },
+            request_timeout=request_timeout,
+        )
+        return _process_status(payload)
 
     def send_stdin(
         self, pid, data: Union[str, bytes], request_timeout: Optional[float] = None
@@ -78,6 +124,7 @@ class Commands:
         on_stderr: Optional[Callable[[str], None]] = None,
         stdin: Optional[bool] = None,
         timeout: Optional[float] = 60,
+        process_id: Optional[str] = None,
         request_timeout: Optional[float] = None,
     ): ...
 
@@ -93,6 +140,7 @@ class Commands:
         on_stderr: None = None,
         stdin: Optional[bool] = None,
         timeout: Optional[float] = 60,
+        process_id: Optional[str] = None,
         request_timeout: Optional[float] = None,
     ) -> CommandHandle: ...
 
@@ -107,6 +155,7 @@ class Commands:
         on_stderr: Optional[Callable[[str], None]] = None,
         stdin: Optional[bool] = None,
         timeout: Optional[float] = 60,
+        process_id: Optional[str] = None,
         request_timeout: Optional[float] = None,
     ):
         """Run a shell command.
@@ -116,7 +165,7 @@ class Commands:
         WebSocket remains attached.
         """
         handle = self._start(
-            cmd, envs, user, cwd, stdin or False, timeout, request_timeout
+            cmd, envs, user, cwd, stdin or False, timeout, process_id, request_timeout
         )
         if background:
             return handle
@@ -129,10 +178,20 @@ class Commands:
         request_timeout: Optional[float] = None,
     ) -> CommandHandle:
         """Reconnect to a live process stream by pid."""
+        return self.connect_since(pid, 0, timeout=timeout, request_timeout=request_timeout)
+
+    def connect_since(
+        self,
+        pid,
+        cursor: int = 0,
+        timeout: Optional[float] = 60,
+        request_timeout: Optional[float] = None,
+    ) -> CommandHandle:
+        """Reconnect to a live process stream by pid starting at a cursor."""
         socket = ProcessSocket(
             self._data_plane.base_url,
             self._data_plane.token,
-            f"/runtime/v1/process/{pid}/connect?since=0",
+            f"/runtime/v1/process/{_path_component(pid)}/connect?since={cursor}",
             request_timeout=request_timeout,
             headers=self._connection_config.sandbox_headers,
         ).connect()
@@ -159,6 +218,7 @@ class Commands:
         cwd: Optional[str],
         stdin: bool,
         timeout: Optional[float],
+        process_id: Optional[str],
         request_timeout: Optional[float],
     ) -> CommandHandle:
         socket = ProcessSocket(
@@ -172,6 +232,7 @@ class Commands:
         socket.send_json(
             {
                 "type": "start",
+                "id": process_id,
                 "cmd": "/bin/bash",
                 "args": ["-l", "-c", cmd],
                 "cwd": cwd,
@@ -216,3 +277,56 @@ def _process_info(payload) -> ProcessInfo:
         envs=dict(item.get("envs") or item.get("environment") or {}),
         cwd=item.get("cwd"),
     )
+
+
+def _process_status(payload) -> ProcessStatus:
+    process = payload.get("process") if isinstance(payload, dict) else None
+    item = process or payload or {}
+    return ProcessStatus(
+        pid=_value(item, "pid", "id", default=""),
+        id=_value(item, "id"),
+        os_pid=_value(item, "os_pid", "osPid"),
+        command=_value(item, "command", "cmd"),
+        args=list(_value(item, "args", "arguments", default=[]) or []),
+        cwd=_value(item, "cwd", "working_directory"),
+        user=item.get("user"),
+        pty=item.get("pty"),
+        status=_value(item, "status", default=""),
+        started_at=_value(item, "started_at", "startedAt"),
+        finished_at=_value(item, "finished_at", "finishedAt"),
+        exit_code=_value(item, "exit_code", "exitCode"),
+    )
+
+
+def _process_output_snapshot(payload) -> ProcessOutputSnapshot:
+    return ProcessOutputSnapshot(
+        pid=_value(payload, "pid", "id", default=""),
+        status=_value(payload, "status", default=""),
+        exit_code=_value(payload, "exit_code", "exitCode"),
+        finished_at=_value(payload, "finished_at", "finishedAt"),
+        next_cursor=_value(payload, "next_cursor", "nextCursor", default=0),
+        truncated_before_cursor=bool(
+            payload.get("truncated_before_cursor")
+            or payload.get("truncatedBeforeCursor")
+        ),
+        events=[_process_output_event(event) for event in payload.get("events", [])],
+    )
+
+
+def _process_output_event(payload) -> ProcessOutputEvent:
+    return ProcessOutputEvent(
+        cursor=_value(payload, "cursor", default=0),
+        type=_value(payload, "type", default=""),
+        data=base64.b64decode(_value(payload, "data", default=b"")),
+    )
+
+
+def _path_component(value) -> str:
+    return quote(str(value), safe="")
+
+
+def _value(mapping, *keys, default=None):
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return default
