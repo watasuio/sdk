@@ -40,7 +40,8 @@ mod volume;
 
 pub use commands::{
     CommandExit, CommandHandle, CommandOptions, CommandResult, Commands, ProcessInfo,
-    ProcessOutput, ProcessOutputEvent, ProcessResult, ProcessRunOptions, ProcessStartOptions,
+    ProcessOutput, ProcessOutputCapturePolicy, ProcessOutputEvent, ProcessOutputReadMode,
+    ProcessOutputStreamTotals, ProcessResult, ProcessRunOptions, ProcessStartOptions,
     ProcessStatus, ReadProcessOutputOptions, StopProcessOptions,
 };
 pub use config::{ConnectionConfig, ConnectionOptions, KEEPALIVE_PING_INTERVAL_SECS};

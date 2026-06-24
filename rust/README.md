@@ -55,6 +55,7 @@ let result = sbx.commands.run_process_with_options(ProcessRunOptions {
     max_stdout_bytes: Some(64 * 1024),
     max_stderr_bytes: Some(64 * 1024),
     max_pty_bytes: Some(64 * 1024),
+    ..Default::default()
 }).await?;
 
 println!(

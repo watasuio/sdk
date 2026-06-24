@@ -572,6 +572,7 @@ async fn exercise_commands(sbx: &Sandbox) -> watasu::Result<()> {
             max_stdout_bytes: Some(4),
             max_stderr_bytes: Some(2),
             max_pty_bytes: Some(1),
+            ..ProcessRunOptions::default()
         })
         .await?;
     assert_eq!(capped.stdout, b"1234");

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -130,10 +131,107 @@ impl Default for ProcessStartOptions {
 /// Options for reading available process output without blocking.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReadProcessOutputOptions {
+    /// Output read mode. Defaults to forward cursor polling.
+    pub mode: ProcessOutputReadMode,
     /// First cursor to return. When omitted, the runtime starts at cursor `0`.
     pub since: Option<u64>,
     /// Maximum output bytes to return across all events.
     pub limit_bytes: Option<usize>,
+    /// Head byte budget for `ProcessOutputReadMode::HeadTail`.
+    pub head_bytes: Option<usize>,
+    /// Tail byte budget for `ProcessOutputReadMode::HeadTail`.
+    pub tail_bytes: Option<usize>,
+    /// Numerator for deriving head bytes from `limit_bytes` in head/tail mode.
+    pub head_ratio_num: Option<usize>,
+    /// Denominator for deriving head bytes from `limit_bytes` in head/tail mode.
+    pub head_ratio_den: Option<usize>,
+}
+
+/// Nonblocking process-output read mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProcessOutputReadMode {
+    /// Return events from `since` forward.
+    #[default]
+    Forward,
+    /// Return the latest retained output up to `limit_bytes`.
+    Tail,
+    /// Return retained head and tail output, omitting the middle.
+    HeadTail,
+}
+
+impl ProcessOutputReadMode {
+    fn as_query_value(self) -> &'static str {
+        match self {
+            Self::Forward => "forward",
+            Self::Tail => "tail",
+            Self::HeadTail => "head_tail",
+        }
+    }
+}
+
+/// Completed-process output capture policy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessOutputCapturePolicy {
+    /// Retain all output bytes.
+    Full,
+    /// Retain the first `max_bytes` bytes.
+    Prefix {
+        /// Maximum bytes to retain.
+        max_bytes: usize,
+    },
+    /// Retain the last `max_bytes` bytes.
+    Tail {
+        /// Maximum bytes to retain.
+        max_bytes: usize,
+    },
+    /// Retain `head_bytes` from the beginning and `tail_bytes` from the end.
+    HeadTail {
+        /// Bytes to retain from the beginning of output.
+        head_bytes: usize,
+        /// Bytes to retain from the end of output.
+        tail_bytes: usize,
+    },
+}
+
+impl Default for ProcessOutputCapturePolicy {
+    fn default() -> Self {
+        Self::Full
+    }
+}
+
+impl ProcessOutputCapturePolicy {
+    /// Retain the first `max_bytes` bytes.
+    pub fn prefix(max_bytes: usize) -> Self {
+        Self::Prefix { max_bytes }
+    }
+
+    /// Retain the last `max_bytes` bytes.
+    pub fn tail(max_bytes: usize) -> Self {
+        Self::Tail { max_bytes }
+    }
+
+    /// Retain `max_bytes` using the default 30% head and 70% tail split.
+    pub fn head_tail(max_bytes: usize) -> Self {
+        Self::head_tail_ratio(max_bytes, 3, 10)
+    }
+
+    /// Retain `max_bytes` using a caller-provided head ratio.
+    pub fn head_tail_ratio(max_bytes: usize, head_ratio_num: usize, head_ratio_den: usize) -> Self {
+        let denominator = head_ratio_den.max(1);
+        let head_bytes = max_bytes.saturating_mul(head_ratio_num) / denominator;
+        Self::HeadTail {
+            head_bytes,
+            tail_bytes: max_bytes.saturating_sub(head_bytes),
+        }
+    }
+
+    /// Retain explicit head and tail byte budgets.
+    pub fn head_tail_bytes(head_bytes: usize, tail_bytes: usize) -> Self {
+        Self::HeadTail {
+            head_bytes,
+            tail_bytes,
+        }
+    }
 }
 
 /// Options for stopping a sandbox process.
@@ -168,6 +266,17 @@ pub struct ProcessOutputEvent {
     pub data: Vec<u8>,
 }
 
+/// Per-stream byte totals observed by the runtime.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProcessOutputStreamTotals {
+    /// Total stdout bytes observed.
+    pub stdout: usize,
+    /// Total stderr bytes observed.
+    pub stderr: usize,
+    /// Total PTY bytes observed.
+    pub pty: usize,
+}
+
 /// Nonblocking snapshot of available process output.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProcessOutput {
@@ -183,6 +292,26 @@ pub struct ProcessOutput {
     pub next_cursor: u64,
     /// Whether older events were evicted before the requested cursor.
     pub truncated_before_cursor: bool,
+    /// Whether any output was evicted from runtime retention before this read.
+    pub truncated_by_retention: bool,
+    /// Whether this response omitted any observed output.
+    pub truncated: bool,
+    /// Total process output bytes observed by the runtime.
+    pub total_bytes_observed: usize,
+    /// Alias for `total_bytes_observed`.
+    pub total_bytes: usize,
+    /// Bytes retained in this response.
+    pub retained_bytes: usize,
+    /// Alias for `retained_bytes`.
+    pub returned_bytes: usize,
+    /// Observed bytes omitted from this response.
+    pub omitted_bytes: usize,
+    /// First retained output-event cursor, when known.
+    pub first_retained_cursor: Option<u64>,
+    /// Last retained output-event cursor, when known.
+    pub last_retained_cursor: Option<u64>,
+    /// Runtime-observed per-stream byte totals.
+    pub stream_totals: ProcessOutputStreamTotals,
     /// Output events available in this snapshot.
     pub events: Vec<ProcessOutputEvent>,
 }
@@ -192,6 +321,8 @@ pub struct ProcessOutput {
 pub struct ProcessRunOptions {
     /// Typed process start options.
     pub start: ProcessStartOptions,
+    /// Capture policy for combined chronological output.
+    pub capture_policy: ProcessOutputCapturePolicy,
     /// Maximum stdout bytes to store. When omitted, stdout is stored in full.
     pub max_stdout_bytes: Option<usize>,
     /// Maximum stderr bytes to store. When omitted, stderr is stored in full.
@@ -203,6 +334,18 @@ pub struct ProcessRunOptions {
 /// Completed typed process output with byte-preserving captured output.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProcessResult {
+    /// Captured combined stdout/stderr/PTY bytes in chronological order.
+    pub output: Vec<u8>,
+    /// Captured combined output events in chronological order.
+    pub output_events: Vec<ProcessOutputEvent>,
+    /// Total combined output bytes observed before process exit.
+    pub total_bytes: usize,
+    /// Combined output bytes retained by `capture_policy`.
+    pub retained_bytes: usize,
+    /// Combined output bytes omitted by `capture_policy`.
+    pub omitted_bytes: usize,
+    /// Whether combined output was truncated by `capture_policy`.
+    pub truncated: bool,
     /// Captured stdout bytes.
     pub stdout: Vec<u8>,
     /// Captured stderr bytes.
@@ -230,6 +373,11 @@ pub struct ProcessResult {
 }
 
 impl ProcessResult {
+    /// Decode combined chronological output as UTF-8, replacing invalid byte sequences.
+    pub fn output_text_lossy(&self) -> String {
+        String::from_utf8_lossy(&self.output).into_owned()
+    }
+
     /// Decode stdout as UTF-8, replacing invalid byte sequences.
     pub fn stdout_text_lossy(&self) -> String {
         String::from_utf8_lossy(&self.stdout).into_owned()
@@ -341,12 +489,14 @@ impl Commands {
         let max_stdout_bytes = opts.max_stdout_bytes;
         let max_stderr_bytes = opts.max_stderr_bytes;
         let max_pty_bytes = opts.max_pty_bytes;
+        let capture_policy = opts.capture_policy;
         let mut handle = self.start_process(opts.start).await?;
         handle
             .wait_process_with_limits(OutputLimits {
                 max_stdout_bytes,
                 max_stderr_bytes,
                 max_pty_bytes,
+                capture_policy,
             })
             .await
     }
@@ -684,11 +834,26 @@ fn process_start_payload(
 
 fn process_output_query(opts: &ReadProcessOutputOptions) -> String {
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if opts.mode != ProcessOutputReadMode::Forward {
+        serializer.append_pair("mode", opts.mode.as_query_value());
+    }
     if let Some(since) = opts.since {
         serializer.append_pair("since", &since.to_string());
     }
     if let Some(limit_bytes) = opts.limit_bytes {
         serializer.append_pair("limit_bytes", &limit_bytes.to_string());
+    }
+    if let Some(head_bytes) = opts.head_bytes {
+        serializer.append_pair("head_bytes", &head_bytes.to_string());
+    }
+    if let Some(tail_bytes) = opts.tail_bytes {
+        serializer.append_pair("tail_bytes", &tail_bytes.to_string());
+    }
+    if let Some(head_ratio_num) = opts.head_ratio_num {
+        serializer.append_pair("head_ratio_num", &head_ratio_num.to_string());
+    }
+    if let Some(head_ratio_den) = opts.head_ratio_den {
+        serializer.append_pair("head_ratio_den", &head_ratio_den.to_string());
     }
     serializer.finish()
 }
@@ -727,74 +892,265 @@ fn is_reconnectable_stream_error(error: &Error) -> bool {
     matches!(error, Error::WebSocket(_) | Error::Io(_))
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct OutputLimits {
     max_stdout_bytes: Option<usize>,
     max_stderr_bytes: Option<usize>,
     max_pty_bytes: Option<usize>,
+    capture_policy: ProcessOutputCapturePolicy,
 }
 
 #[derive(Clone, Debug)]
 struct OutputCapture {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    pty: Vec<u8>,
-    stdout_bytes: usize,
-    stderr_bytes: usize,
-    pty_bytes: usize,
-    stdout_truncated: bool,
-    stderr_truncated: bool,
-    pty_truncated: bool,
-    limits: OutputLimits,
+    combined: PolicyCapture,
+    stdout: PolicyCapture,
+    stderr: PolicyCapture,
+    pty: PolicyCapture,
 }
 
 impl OutputCapture {
     fn new(limits: OutputLimits) -> Self {
+        let stdout_policy = stream_capture_policy(limits.max_stdout_bytes, &limits.capture_policy);
+        let stderr_policy = stream_capture_policy(limits.max_stderr_bytes, &limits.capture_policy);
+        let pty_policy = stream_capture_policy(limits.max_pty_bytes, &limits.capture_policy);
         Self {
-            stdout: Vec::new(),
-            stderr: Vec::new(),
-            pty: Vec::new(),
-            stdout_bytes: 0,
-            stderr_bytes: 0,
-            pty_bytes: 0,
-            stdout_truncated: false,
-            stderr_truncated: false,
-            pty_truncated: false,
-            limits,
+            combined: PolicyCapture::new(limits.capture_policy),
+            stdout: PolicyCapture::new(stdout_policy),
+            stderr: PolicyCapture::new(stderr_policy),
+            pty: PolicyCapture::new(pty_policy),
         }
     }
 
     fn push_stdout(&mut self, frame: &Value) {
-        append_capped(
-            &mut self.stdout,
-            &mut self.stdout_bytes,
-            &mut self.stdout_truncated,
-            self.limits.max_stdout_bytes,
-            frame_data(frame),
-        );
+        let bytes = frame_data(frame);
+        let cursor = frame_cursor(frame);
+        self.combined.push(cursor, "stdout", &bytes);
+        self.stdout.push(cursor, "stdout", &bytes);
     }
 
     fn push_stderr(&mut self, frame: &Value) {
-        append_capped(
-            &mut self.stderr,
-            &mut self.stderr_bytes,
-            &mut self.stderr_truncated,
-            self.limits.max_stderr_bytes,
-            frame_data(frame),
-        );
+        let bytes = frame_data(frame);
+        let cursor = frame_cursor(frame);
+        self.combined.push(cursor, "stderr", &bytes);
+        self.stderr.push(cursor, "stderr", &bytes);
     }
 
     fn push_pty(&mut self, frame: &Value) {
-        append_capped(
-            &mut self.pty,
-            &mut self.pty_bytes,
-            &mut self.pty_truncated,
-            self.limits.max_pty_bytes,
-            frame_data(frame),
-        );
+        let bytes = frame_data(frame);
+        let cursor = frame_cursor(frame);
+        self.combined.push(cursor, "pty", &bytes);
+        self.pty.push(cursor, "pty", &bytes);
     }
 }
 
+fn stream_capture_policy(
+    limit: Option<usize>,
+    fallback: &ProcessOutputCapturePolicy,
+) -> ProcessOutputCapturePolicy {
+    limit
+        .map(ProcessOutputCapturePolicy::prefix)
+        .unwrap_or_else(|| fallback.clone())
+}
+
+#[derive(Clone, Debug)]
+struct PolicyCapture {
+    policy: ProcessOutputCapturePolicy,
+    total_bytes: usize,
+    segments: VecDeque<CapturedSegment>,
+    head_segments: Vec<CapturedSegment>,
+    tail_segments: VecDeque<CapturedSegment>,
+}
+
+#[derive(Clone, Debug)]
+struct CapturedSegment {
+    cursor: u64,
+    stream: String,
+    data: Vec<u8>,
+    start: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CapturedOutput {
+    bytes: Vec<u8>,
+    events: Vec<ProcessOutputEvent>,
+    total_bytes: usize,
+    retained_bytes: usize,
+    omitted_bytes: usize,
+    truncated: bool,
+}
+
+impl PolicyCapture {
+    fn new(policy: ProcessOutputCapturePolicy) -> Self {
+        Self {
+            policy,
+            total_bytes: 0,
+            segments: VecDeque::new(),
+            head_segments: Vec::new(),
+            tail_segments: VecDeque::new(),
+        }
+    }
+
+    fn push(&mut self, cursor: u64, stream: &str, bytes: &[u8]) {
+        let start = self.total_bytes;
+        self.total_bytes = self.total_bytes.saturating_add(bytes.len());
+
+        match self.policy {
+            ProcessOutputCapturePolicy::Full => {
+                push_segment(&mut self.segments, cursor, stream, bytes, start);
+            }
+            ProcessOutputCapturePolicy::Prefix { max_bytes } => {
+                push_prefix_segment(&mut self.segments, cursor, stream, bytes, start, max_bytes);
+            }
+            ProcessOutputCapturePolicy::Tail { max_bytes } => {
+                push_segment(&mut self.segments, cursor, stream, bytes, start);
+                trim_captured_front(&mut self.segments, max_bytes);
+            }
+            ProcessOutputCapturePolicy::HeadTail {
+                head_bytes,
+                tail_bytes,
+            } => {
+                push_prefix_segment(
+                    &mut self.head_segments,
+                    cursor,
+                    stream,
+                    bytes,
+                    start,
+                    head_bytes,
+                );
+                push_segment(&mut self.tail_segments, cursor, stream, bytes, start);
+                trim_captured_front(&mut self.tail_segments, tail_bytes);
+            }
+        }
+    }
+
+    fn finish(self) -> CapturedOutput {
+        let segments = match self.policy {
+            ProcessOutputCapturePolicy::HeadTail { .. } => {
+                let mut segments = self.head_segments;
+                segments.extend(self.tail_segments);
+                merge_captured_segments(segments)
+            }
+            _ => self.segments.into_iter().collect(),
+        };
+
+        let mut bytes = Vec::new();
+        let mut events = Vec::new();
+        for segment in segments {
+            bytes.extend_from_slice(&segment.data);
+            events.push(ProcessOutputEvent {
+                cursor: segment.cursor,
+                r#type: segment.stream,
+                data: segment.data,
+            });
+        }
+
+        let retained_bytes = bytes.len();
+        let omitted_bytes = self.total_bytes.saturating_sub(retained_bytes);
+        CapturedOutput {
+            bytes,
+            events,
+            total_bytes: self.total_bytes,
+            retained_bytes,
+            omitted_bytes,
+            truncated: omitted_bytes > 0,
+        }
+    }
+}
+
+fn push_segment<T>(segments: &mut T, cursor: u64, stream: &str, bytes: &[u8], start: usize)
+where
+    T: Extend<CapturedSegment>,
+{
+    if bytes.is_empty() {
+        return;
+    }
+    segments.extend([CapturedSegment {
+        cursor,
+        stream: stream.to_string(),
+        data: bytes.to_vec(),
+        start,
+    }]);
+}
+
+fn push_prefix_segment<T>(
+    segments: &mut T,
+    cursor: u64,
+    stream: &str,
+    bytes: &[u8],
+    start: usize,
+    max_bytes: usize,
+) where
+    T: Extend<CapturedSegment>,
+{
+    if bytes.is_empty() || start >= max_bytes {
+        return;
+    }
+    let take = max_bytes.saturating_sub(start).min(bytes.len());
+    if take == 0 {
+        return;
+    }
+    segments.extend([CapturedSegment {
+        cursor,
+        stream: stream.to_string(),
+        data: bytes[..take].to_vec(),
+        start,
+    }]);
+}
+
+fn trim_captured_front(segments: &mut VecDeque<CapturedSegment>, max_bytes: usize) {
+    let mut retained = segments
+        .iter()
+        .map(|segment| segment.data.len())
+        .sum::<usize>();
+
+    while retained > max_bytes {
+        let remove = retained.saturating_sub(max_bytes);
+        let Some(front) = segments.front_mut() else {
+            break;
+        };
+
+        if remove >= front.data.len() {
+            let removed = front.data.len();
+            segments.pop_front();
+            retained = retained.saturating_sub(removed);
+        } else {
+            front.data.drain(..remove);
+            front.start = front.start.saturating_add(remove);
+            retained = retained.saturating_sub(remove);
+        }
+    }
+}
+
+fn merge_captured_segments(mut segments: Vec<CapturedSegment>) -> Vec<CapturedSegment> {
+    segments.sort_by(|left, right| {
+        left.start
+            .cmp(&right.start)
+            .then_with(|| left.cursor.cmp(&right.cursor))
+    });
+
+    let mut merged: Vec<CapturedSegment> = Vec::new();
+    for mut segment in segments {
+        if let Some(previous) = merged.last() {
+            let previous_end = previous.start.saturating_add(previous.data.len());
+            if segment.start < previous_end {
+                let overlap = previous_end.saturating_sub(segment.start);
+                if overlap >= segment.data.len() {
+                    continue;
+                }
+                segment.data.drain(..overlap);
+                segment.start = segment.start.saturating_add(overlap);
+            }
+        }
+
+        if !segment.data.is_empty() {
+            merged.push(segment);
+        }
+    }
+
+    merged
+}
+
+#[cfg(test)]
 fn append_capped(
     target: &mut Vec<u8>,
     total_bytes: &mut usize,
@@ -823,17 +1179,35 @@ fn frame_data(frame: &Value) -> Vec<u8> {
     decode_runtime_data_bytes(frame.get("data").and_then(Value::as_str).unwrap_or(""))
 }
 
+fn frame_cursor(frame: &Value) -> u64 {
+    frame
+        .get("cursor")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+}
+
 fn process_result(capture: OutputCapture, fallback_pid: &str, frame: &Value) -> ProcessResult {
+    let combined = capture.combined.finish();
+    let stdout = capture.stdout.finish();
+    let stderr = capture.stderr.finish();
+    let pty = capture.pty.finish();
+
     ProcessResult {
-        stdout: capture.stdout,
-        stderr: capture.stderr,
-        pty: capture.pty,
-        stdout_bytes: capture.stdout_bytes,
-        stderr_bytes: capture.stderr_bytes,
-        pty_bytes: capture.pty_bytes,
-        stdout_truncated: capture.stdout_truncated,
-        stderr_truncated: capture.stderr_truncated,
-        pty_truncated: capture.pty_truncated,
+        output: combined.bytes,
+        output_events: combined.events,
+        total_bytes: combined.total_bytes,
+        retained_bytes: combined.retained_bytes,
+        omitted_bytes: combined.omitted_bytes,
+        truncated: combined.truncated,
+        stdout: stdout.bytes,
+        stderr: stderr.bytes,
+        pty: pty.bytes,
+        stdout_bytes: stdout.total_bytes,
+        stderr_bytes: stderr.total_bytes,
+        pty_bytes: pty.total_bytes,
+        stdout_truncated: stdout.truncated,
+        stderr_truncated: stderr.truncated,
+        pty_truncated: pty.truncated,
         exit_code: frame
             .get("exit_code")
             .or_else(|| frame.get("exitCode"))
@@ -932,11 +1306,75 @@ fn process_output(value: Value) -> ProcessOutput {
             .or_else(|| value.get("truncatedBeforeCursor"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        truncated_by_retention: value
+            .get("truncated_by_retention")
+            .or_else(|| value.get("truncatedByRetention"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        truncated: value
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        total_bytes_observed: usize_field(
+            &value,
+            &[
+                "total_bytes_observed",
+                "totalBytesObserved",
+                "total_bytes",
+                "totalBytes",
+            ],
+        ),
+        total_bytes: usize_field(
+            &value,
+            &[
+                "total_bytes",
+                "totalBytes",
+                "total_bytes_observed",
+                "totalBytesObserved",
+            ],
+        ),
+        retained_bytes: usize_field(
+            &value,
+            &[
+                "retained_bytes",
+                "retainedBytes",
+                "returned_bytes",
+                "returnedBytes",
+            ],
+        ),
+        returned_bytes: usize_field(
+            &value,
+            &[
+                "returned_bytes",
+                "returnedBytes",
+                "retained_bytes",
+                "retainedBytes",
+            ],
+        ),
+        omitted_bytes: usize_field(&value, &["omitted_bytes", "omittedBytes"]),
+        first_retained_cursor: u64_field(&value, &["first_retained_cursor", "firstRetainedCursor"]),
+        last_retained_cursor: u64_field(&value, &["last_retained_cursor", "lastRetainedCursor"]),
+        stream_totals: process_output_stream_totals(
+            value
+                .get("stream_totals")
+                .or_else(|| value.get("streamTotals")),
+        ),
         events: value
             .get("events")
             .and_then(Value::as_array)
             .map(|items| items.iter().map(process_output_event).collect())
             .unwrap_or_default(),
+    }
+}
+
+fn process_output_stream_totals(value: Option<&Value>) -> ProcessOutputStreamTotals {
+    let Some(value) = value else {
+        return ProcessOutputStreamTotals::default();
+    };
+    ProcessOutputStreamTotals {
+        stdout: usize_field(value, &["stdout"]),
+        stderr: usize_field(value, &["stderr"]),
+        pty: usize_field(value, &["pty"]),
     }
 }
 
@@ -1003,6 +1441,20 @@ fn string_array(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn usize_field(value: &Value, keys: &[&str]) -> usize {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_default()
+}
+
+fn u64_field(value: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(Value::as_u64)
+}
+
 #[cfg(test)]
 mod tests {
     use base64::engine::general_purpose::STANDARD as BASE64;
@@ -1010,8 +1462,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        advance_cursor, append_capped, process_info, process_output, process_result,
-        process_start_payload, OutputCapture, OutputLimits, ProcessStartOptions,
+        advance_cursor, append_capped, process_info, process_output, process_output_query,
+        process_result, process_start_payload, OutputCapture, OutputLimits,
+        ProcessOutputCapturePolicy, ProcessOutputReadMode, ProcessStartOptions,
+        ReadProcessOutputOptions,
     };
 
     #[test]
@@ -1097,6 +1551,14 @@ mod tests {
             "finished_at": null,
             "next_cursor": 43,
             "truncated_before_cursor": false,
+            "truncated_by_retention": true,
+            "truncated": true,
+            "total_bytes_observed": 12,
+            "retained_bytes": 7,
+            "omitted_bytes": 5,
+            "first_retained_cursor": 41,
+            "last_retained_cursor": 42,
+            "stream_totals": {"stdout": 4, "stderr": 3, "pty": 0},
             "events": [
                 {"cursor": 41, "type": "stdout", "data": BASE64.encode([0, 159, 146, 150])},
                 {"cursor": 42, "type": "stderr", "data": BASE64.encode("err")}
@@ -1106,10 +1568,50 @@ mod tests {
         assert_eq!(output.pid, "proc-1");
         assert_eq!(output.status, "running");
         assert_eq!(output.next_cursor, 43);
+        assert!(output.truncated_by_retention);
+        assert!(output.truncated);
+        assert_eq!(output.total_bytes_observed, 12);
+        assert_eq!(output.total_bytes, 12);
+        assert_eq!(output.retained_bytes, 7);
+        assert_eq!(output.returned_bytes, 7);
+        assert_eq!(output.omitted_bytes, 5);
+        assert_eq!(output.first_retained_cursor, Some(41));
+        assert_eq!(output.last_retained_cursor, Some(42));
+        assert_eq!(output.stream_totals.stdout, 4);
         assert_eq!(output.events[0].r#type, "stdout");
         assert_eq!(output.events[0].data, vec![0, 159, 146, 150]);
         assert_eq!(output.events[1].r#type, "stderr");
         assert_eq!(output.events[1].data, b"err");
+    }
+
+    #[test]
+    fn process_output_query_serializes_read_modes() {
+        let query = process_output_query(&ReadProcessOutputOptions {
+            mode: ProcessOutputReadMode::HeadTail,
+            since: Some(7),
+            limit_bytes: Some(96),
+            head_bytes: None,
+            tail_bytes: None,
+            head_ratio_num: Some(3),
+            head_ratio_den: Some(10),
+        });
+
+        assert_eq!(
+            query,
+            "mode=head_tail&since=7&limit_bytes=96&head_ratio_num=3&head_ratio_den=10"
+        );
+
+        let query = process_output_query(&ReadProcessOutputOptions {
+            mode: ProcessOutputReadMode::Tail,
+            since: None,
+            limit_bytes: Some(64),
+            head_bytes: None,
+            tail_bytes: None,
+            head_ratio_num: None,
+            head_ratio_den: None,
+        });
+
+        assert_eq!(query, "mode=tail&limit_bytes=64");
     }
 
     #[test]
@@ -1126,10 +1628,11 @@ mod tests {
     #[test]
     fn process_result_preserves_bytes() {
         let mut capture = OutputCapture::new(OutputLimits::default());
-        capture.stdout = vec![0, 159, 146, 150];
-        capture.stdout_bytes = 4;
-        capture.stderr = b"stderr".to_vec();
-        capture.stderr_bytes = 6;
+        capture.push_stdout(
+            &json!({"cursor": 1, "type": "stdout", "data": BASE64.encode([0, 159, 146, 150])}),
+        );
+        capture
+            .push_stderr(&json!({"cursor": 2, "type": "stderr", "data": BASE64.encode("stderr")}));
 
         let result = process_result(
             capture,
@@ -1137,6 +1640,17 @@ mod tests {
             &json!({"type": "exit", "pid": "proc-1", "exit_code": 7, "error": "boom"}),
         );
 
+        assert_eq!(
+            result.output,
+            [vec![0, 159, 146, 150], b"stderr".to_vec()].concat()
+        );
+        assert_eq!(result.output_events.len(), 2);
+        assert_eq!(result.output_events[0].cursor, 1);
+        assert_eq!(result.output_events[1].cursor, 2);
+        assert_eq!(result.total_bytes, 10);
+        assert_eq!(result.retained_bytes, 10);
+        assert_eq!(result.omitted_bytes, 0);
+        assert!(!result.truncated);
         assert_eq!(result.stdout, vec![0, 159, 146, 150]);
         assert_eq!(result.stderr, b"stderr");
         assert_eq!(result.stdout_bytes, 4);
@@ -1153,6 +1667,7 @@ mod tests {
             max_stdout_bytes: Some(4),
             max_stderr_bytes: Some(3),
             max_pty_bytes: Some(0),
+            capture_policy: ProcessOutputCapturePolicy::Full,
         });
 
         capture.push_stdout(&json!({"type": "stdout", "data": BASE64.encode("abcdef")}));
@@ -1176,6 +1691,88 @@ mod tests {
         assert!(result.stderr_truncated);
         assert!(result.pty_truncated);
         assert_eq!(result.pid.as_deref(), Some("proc-fallback"));
+    }
+
+    #[test]
+    fn head_tail_capture_retains_start_tail_and_omitted_bytes() {
+        let mut capture = OutputCapture::new(OutputLimits {
+            capture_policy: ProcessOutputCapturePolicy::head_tail(96),
+            ..OutputLimits::default()
+        });
+
+        let mut bytes = b"START\n".to_vec();
+        bytes.extend(vec![b'x'; 1024 * 1024 + 17]);
+        bytes.extend_from_slice(b"\nDONE_TAIL\n");
+        capture.push_stdout(&json!({"cursor": 1, "type": "stdout", "data": BASE64.encode(bytes)}));
+
+        let result = process_result(capture, "proc-1", &json!({"type": "exit", "exit_code": 0}));
+        let text = result.output_text_lossy();
+        assert!(text.contains("START"), "{text:?}");
+        assert!(text.contains("DONE_TAIL"), "{text:?}");
+        assert_eq!(result.retained_bytes, 96);
+        assert_eq!(result.output.len(), 96);
+        assert!(result.truncated);
+        assert!(result.omitted_bytes > 0);
+        assert_eq!(result.output_events.len(), 2);
+    }
+
+    #[test]
+    fn tail_capture_retains_latest_bytes() {
+        let mut capture = OutputCapture::new(OutputLimits {
+            capture_policy: ProcessOutputCapturePolicy::tail(16),
+            ..OutputLimits::default()
+        });
+
+        capture
+            .push_stdout(&json!({"cursor": 1, "type": "stdout", "data": BASE64.encode("START")}));
+        capture.push_stdout(
+            &json!({"cursor": 2, "type": "stdout", "data": BASE64.encode("0123456789")}),
+        );
+        capture.push_stdout(
+            &json!({"cursor": 3, "type": "stdout", "data": BASE64.encode("DONE_TAIL")}),
+        );
+
+        let result = process_result(capture, "proc-1", &json!({"type": "exit", "exit_code": 0}));
+        assert_eq!(result.output_text_lossy(), "3456789DONE_TAIL");
+        assert_eq!(result.retained_bytes, 16);
+        assert!(result.truncated);
+    }
+
+    #[test]
+    fn mixed_stream_capture_preserves_chronological_order() {
+        let mut capture = OutputCapture::new(OutputLimits::default());
+        capture.push_stdout(&json!({"cursor": 1, "type": "stdout", "data": BASE64.encode("out1")}));
+        capture.push_stderr(&json!({"cursor": 2, "type": "stderr", "data": BASE64.encode("err2")}));
+        capture.push_stdout(&json!({"cursor": 3, "type": "stdout", "data": BASE64.encode("out3")}));
+
+        let result = process_result(capture, "proc-1", &json!({"type": "exit", "exit_code": 0}));
+        assert_eq!(result.output, b"out1err2out3".to_vec());
+        assert_eq!(
+            result
+                .output_events
+                .iter()
+                .map(|event| event.r#type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["stdout", "stderr", "stdout"]
+        );
+    }
+
+    #[test]
+    fn head_tail_text_decoding_is_lossy_for_split_utf8() {
+        let mut capture = OutputCapture::new(OutputLimits {
+            capture_policy: ProcessOutputCapturePolicy::head_tail_bytes(3, 3),
+            ..OutputLimits::default()
+        });
+
+        capture.push_stdout(
+            &json!({"cursor": 1, "type": "stdout", "data": BASE64.encode("😀middle😀")}),
+        );
+
+        let result = process_result(capture, "proc-1", &json!({"type": "exit", "exit_code": 0}));
+        assert!(String::from_utf8(result.output.clone()).is_err());
+        let text = result.output_text_lossy();
+        assert!(!text.is_empty());
+        assert!(text.is_char_boundary(text.len()));
     }
 
     #[test]
