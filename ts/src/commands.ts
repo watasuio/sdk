@@ -108,22 +108,34 @@ export type Stdout = string
 export type Stderr = string
 export type PtyOutput = Uint8Array
 
+type ProcessReconnect = (cursor: number) => Promise<{
+  socket: ProcessSocket
+  events: AsyncIterable<ProcessFrame>
+}>
+
+const STREAM_RECONNECT_ATTEMPTS = 12
+const STREAM_RECONNECT_BASE_DELAY_MS = 250
+const STREAM_RECONNECT_MAX_DELAY_MS = 2_000
+
 /** Live handle for one sandbox process stream. */
 export class CommandHandle implements Partial<CommandResult> {
   private _stdout = ''
   private _stderr = ''
   private result?: CommandResult
   private readonly pending: Promise<void>
+  private nextCursor = 0
+  private disconnected = false
 
   constructor(
     readonly pid: number | string,
-    private readonly socket: ProcessSocket,
+    private socket: ProcessSocket,
     private readonly handleKill: () => Promise<boolean>,
-    private readonly events: AsyncIterable<ProcessFrame>,
+    private events: AsyncIterable<ProcessFrame>,
     private readonly onStdout?: (data: string) => void | Promise<void>,
     private readonly onStderr?: (data: string) => void | Promise<void>,
     private readonly onPty?: (data: Uint8Array) => void | Promise<void>,
-    private readonly onExit?: (exitCode: number) => void | Promise<void>
+    private readonly onExit?: (exitCode: number) => void | Promise<void>,
+    private readonly reconnect?: ProcessReconnect
   ) {
     this.pending = this.handleEvents()
   }
@@ -163,12 +175,15 @@ export class CommandHandle implements Partial<CommandResult> {
 
   /** Detach the local stream without killing the process. */
   async disconnect(): Promise<void> {
+    this.disconnected = true
     this.socket.close()
   }
 
   private async handleEvents(): Promise<void> {
-    try {
+    while (!this.disconnected && !this.result) {
+      let streamError: unknown
       for await (const frame of this.events) {
+        this.advanceCursor(frame)
         const type = frame.type
         if (type === 'started' || type === 'ready' || type === 'pong') continue
         if (type === 'stdout') {
@@ -193,14 +208,46 @@ export class CommandHandle implements Partial<CommandResult> {
             stderr: this._stderr,
           }
           await this.onExit?.(exitCode)
+          this.socket.close()
           return
         } else if (type === 'error') {
-          throw new SandboxError(String(frame.message ?? frame.code ?? 'process error'))
+          streamError = new SandboxError(String(frame.message ?? frame.code ?? 'process error'))
+          if (!isReconnectableStreamError(streamError)) throw streamError
+          break
         }
       }
-    } finally {
-      this.socket.close()
+
+      if (this.result || this.disconnected) return
+      if (!this.reconnect) {
+        this.socket.close()
+        if (streamError) throw streamError
+        return
+      }
+      await this.reconnectStream()
     }
+  }
+
+  private advanceCursor(frame: ProcessFrame): void {
+    const cursor = numberValue(frame.cursor)
+    if (cursor !== undefined) this.nextCursor = Math.max(this.nextCursor, cursor + 1)
+  }
+
+  private async reconnectStream(): Promise<void> {
+    let lastError: unknown
+    for (let attempt = 0; attempt < STREAM_RECONNECT_ATTEMPTS && !this.disconnected; attempt += 1) {
+      this.socket.close()
+      if (attempt > 0) await sleep(reconnectDelayMs(attempt))
+      try {
+        const next = await this.reconnect!(this.nextCursor)
+        this.socket = next.socket
+        this.events = next.events
+        return
+      } catch (error) {
+        lastError = error
+      }
+    }
+    if (lastError instanceof Error) throw lastError
+    throw new SandboxError('process websocket closed before exit and could not reconnect')
   }
 }
 
@@ -270,17 +317,9 @@ export class Commands {
 
   /** Reconnect to a live process stream by pid starting at a cursor. */
   async connectSince(pid: number | string, cursor = 0, opts: CommandStartOpts = {}): Promise<CommandHandle> {
-    const encodedPid = encodeURIComponent(String(pid))
-    const socket = await new ProcessSocket(
-      this.dataPlane.baseUrl,
-      this.dataPlane.token,
-      withQuery(`/runtime/v1/process/${encodedPid}/connect`, { since: cursor }),
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
-      this.config.headers
-    ).connect()
-    const first = await nextStarted(socket)
-    const actualPid = framePid(first) ?? pid
-    return new CommandHandle(actualPid, socket, () => this.kill(actualPid), socket, opts.onStdout, opts.onStderr, opts.onPty)
+    const stream = await this.openProcessStream(pid, cursor, opts)
+    const reconnect = async (nextCursor: number) => this.openProcessStream(stream.actualPid, nextCursor, opts)
+    return new CommandHandle(stream.actualPid, stream.socket, () => this.kill(stream.actualPid), stream.events, opts.onStdout, opts.onStderr, opts.onPty, undefined, reconnect)
   }
 
   /** Look up process status without attaching a WebSocket. */
@@ -343,7 +382,29 @@ export class Commands {
     const first = await nextStarted(socket)
     const pid = framePid(first)
     if (pid === undefined) throw new SandboxError('process started frame did not include pid')
-    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), opts.onStdout, opts.onStderr, opts.onPty, opts.onExit)
+    const reconnect = async (nextCursor: number) => this.openProcessStream(pid, nextCursor, opts)
+    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), opts.onStdout, opts.onStderr, opts.onPty, opts.onExit, reconnect)
+  }
+
+  private async openProcessStream(pid: number | string, cursor: number, opts: CommandStartOpts = {}): Promise<{
+    actualPid: number | string
+    socket: ProcessSocket
+    events: AsyncIterable<ProcessFrame>
+  }> {
+    const encodedPid = encodeURIComponent(String(pid))
+    const socket = await new ProcessSocket(
+      this.dataPlane.baseUrl,
+      this.dataPlane.token,
+      withQuery(`/runtime/v1/process/${encodedPid}/connect`, { since: cursor }),
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      this.config.headers
+    ).connect()
+    const first = await nextStarted(socket)
+    return {
+      actualPid: framePid(first) ?? pid,
+      socket,
+      events: socket,
+    }
   }
 }
 
@@ -360,6 +421,18 @@ function waitFor<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
     const timer = setTimeout(() => reject(new TimeoutError()), timeoutMs)
     promise.then(resolve, reject).finally(() => clearTimeout(timer))
   })
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function reconnectDelayMs(attempt: number): number {
+  return Math.min(STREAM_RECONNECT_MAX_DELAY_MS, STREAM_RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1))
+}
+
+function isReconnectableStreamError(error: unknown): boolean {
+  return error instanceof Error && /websocket|closed/i.test(error.message)
 }
 
 async function nextStarted(events: AsyncIterable<ProcessFrame>): Promise<ProcessFrame> {

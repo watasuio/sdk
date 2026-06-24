@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import time
 
 from typing import Callable, Iterator, Optional, Tuple, Union
 
@@ -12,6 +13,10 @@ from watasu.sandbox.commands.command_handle import (
     Stderr,
     Stdout,
 )
+
+STREAM_RECONNECT_ATTEMPTS = 12
+STREAM_RECONNECT_BASE_DELAY_SEC = 0.25
+STREAM_RECONNECT_MAX_DELAY_SEC = 2.0
 
 
 class CommandHandle:
@@ -30,16 +35,20 @@ class CommandHandle:
             Callable[[Union[str, bytes], Optional[float]], None]
         ] = None,
         handle_close_stdin: Optional[Callable[[Optional[float]], None]] = None,
+        handle_reconnect: Optional[Callable[[int], object]] = None,
     ):
         self._pid = pid
         self._handle_kill = handle_kill
         self._handle_send_stdin = handle_send_stdin
         self._handle_close_stdin = handle_close_stdin
+        self._handle_reconnect = handle_reconnect
         self._events = events
         self._stdout = ""
         self._stderr = ""
         self._result: Optional[CommandResult] = None
         self._iteration_exception: Optional[Exception] = None
+        self._next_cursor = 0
+        self._disconnected = False
 
     def __iter__(self):
         return self._handle_events()
@@ -47,8 +56,19 @@ class CommandHandle:
     def _handle_events(
         self,
     ) -> Iterator[Tuple[Optional[Stdout], Optional[Stderr], Optional[PtyOutput]]]:
-        try:
-            for frame in self._events:
+        while self._result is None and not self._disconnected:
+            stream_error = None
+            iterator = iter(self._events)
+            while True:
+                try:
+                    frame = next(iterator)
+                except StopIteration:
+                    break
+                except Exception as error:
+                    stream_error = error
+                    break
+
+                self._advance_cursor(frame)
                 frame_type = frame.get("type")
                 if frame_type == "stdout":
                     out = _frame_data(frame)
@@ -69,9 +89,7 @@ class CommandHandle:
                         exit_code=int(frame.get("exit_code") or 0),
                         error=frame.get("error"),
                     )
-                    close_events = getattr(self._events, "close", None)
-                    if close_events is not None:
-                        close_events()
+                    self._close_events()
                     return
                 elif frame_type in {"started", "ready", "pong"}:
                     continue
@@ -79,12 +97,19 @@ class CommandHandle:
                     raise SandboxException(
                         frame.get("message") or frame.get("code") or "process error"
                     )
-        except Exception as error:
-            raise error
+
+            if self._result is not None or self._disconnected:
+                return
+            if self._handle_reconnect is None:
+                if stream_error is not None:
+                    raise stream_error
+                return
+            self._reconnect_events()
 
     def disconnect(self) -> None:
         """Close the local WebSocket attachment without killing the process."""
-        self._events.close()
+        self._disconnected = True
+        self._close_events()
 
     def wait(
         self,
@@ -142,6 +167,38 @@ class CommandHandle:
                 "Closing stdin is not supported for this command handle."
             )
         self._handle_close_stdin(request_timeout)
+
+    def _advance_cursor(self, frame) -> None:
+        cursor = frame.get("cursor")
+        if isinstance(cursor, int):
+            self._next_cursor = max(self._next_cursor, cursor + 1)
+
+    def _close_events(self) -> None:
+        close_events = getattr(self._events, "close", None)
+        if close_events is not None:
+            close_events()
+
+    def _reconnect_events(self) -> None:
+        last_error = None
+        for attempt in range(STREAM_RECONNECT_ATTEMPTS):
+            if self._disconnected:
+                return
+            self._close_events()
+            if attempt > 0:
+                time.sleep(
+                    min(
+                        STREAM_RECONNECT_MAX_DELAY_SEC,
+                        STREAM_RECONNECT_BASE_DELAY_SEC * (2 ** (attempt - 1)),
+                    )
+                )
+            try:
+                self._events = self._handle_reconnect(self._next_cursor)  # type: ignore[misc]
+                return
+            except Exception as error:
+                last_error = error
+        if last_error is not None:
+            raise last_error
+        raise SandboxException("process websocket closed before exit and could not reconnect")
 
 
 def _frame_data(frame) -> str:

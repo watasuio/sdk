@@ -1,9 +1,16 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::time::sleep;
 
 use crate::error::{Error, Result};
 use crate::process_socket::{decode_runtime_data_bytes, ProcessSocket};
 use crate::transport::DataPlaneClient;
+
+const STREAM_RECONNECT_ATTEMPTS: usize = 12;
+const STREAM_RECONNECT_BASE_DELAY_MS: u64 = 250;
+const STREAM_RECONNECT_MAX_DELAY_MS: u64 = 2_000;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 /// Completed command output.
@@ -510,8 +517,28 @@ impl CommandHandle {
         check: bool,
     ) -> Result<ProcessResult> {
         let mut capture = OutputCapture::new(limits);
+        let mut next_cursor = 0;
+        let mut reconnect_attempts = 0;
 
-        while let Some(frame) = self.socket.next_frame().await? {
+        loop {
+            let frame = match self.socket.next_frame().await {
+                Ok(Some(frame)) => {
+                    reconnect_attempts = 0;
+                    frame
+                }
+                Ok(None) => {
+                    self.reconnect_stream(next_cursor, &mut reconnect_attempts)
+                        .await?;
+                    continue;
+                }
+                Err(error) if is_reconnectable_stream_error(&error) => {
+                    self.reconnect_stream(next_cursor, &mut reconnect_attempts)
+                        .await?;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            advance_cursor(&mut next_cursor, &frame);
             match frame.get("type").and_then(Value::as_str) {
                 Some("started" | "ready" | "pong") => continue,
                 Some("stdout") => capture.push_stdout(&frame),
@@ -542,7 +569,29 @@ impl CommandHandle {
                 _ => continue,
             }
         }
-        Err(Error::Sandbox("Command ended without an exit event".into()))
+    }
+
+    async fn reconnect_stream(&mut self, cursor: u64, attempts: &mut usize) -> Result<()> {
+        let mut last_error = None;
+        while *attempts < STREAM_RECONNECT_ATTEMPTS {
+            let _ = self.socket.close().await;
+            if *attempts > 0 {
+                sleep(reconnect_delay(*attempts)).await;
+            }
+            *attempts += 1;
+            match self.commands.connect_since(self.pid.clone(), cursor).await {
+                Ok(handle) => {
+                    let CommandHandle { pid, socket, .. } = handle;
+                    self.pid = pid;
+                    self.socket = socket;
+                    return Ok(());
+                }
+                Err(error) => last_error = Some(error),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            Error::Sandbox("process websocket closed before exit and could not reconnect".into())
+        }))
     }
 
     /// Kill the process.
@@ -658,6 +707,24 @@ fn stop_process_query(opts: &StopProcessOptions) -> String {
 
 fn path_component(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+fn advance_cursor(next_cursor: &mut u64, frame: &Value) {
+    if let Some(cursor) = frame.get("cursor").and_then(Value::as_u64) {
+        *next_cursor = (*next_cursor).max(cursor.saturating_add(1));
+    }
+}
+
+fn reconnect_delay(attempt: usize) -> Duration {
+    let exponent = attempt.saturating_sub(1).min(8) as u32;
+    Duration::from_millis(
+        STREAM_RECONNECT_MAX_DELAY_MS
+            .min(STREAM_RECONNECT_BASE_DELAY_MS.saturating_mul(2_u64.pow(exponent))),
+    )
+}
+
+fn is_reconnectable_stream_error(error: &Error) -> bool {
+    matches!(error, Error::WebSocket(_) | Error::Io(_))
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -943,8 +1010,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        append_capped, process_info, process_output, process_result, process_start_payload,
-        OutputCapture, OutputLimits, ProcessStartOptions,
+        advance_cursor, append_capped, process_info, process_output, process_result,
+        process_start_payload, OutputCapture, OutputLimits, ProcessStartOptions,
     };
 
     #[test]
@@ -1043,6 +1110,17 @@ mod tests {
         assert_eq!(output.events[0].data, vec![0, 159, 146, 150]);
         assert_eq!(output.events[1].r#type, "stderr");
         assert_eq!(output.events[1].data, b"err");
+    }
+
+    #[test]
+    fn advance_cursor_uses_next_undelivered_event() {
+        let mut next_cursor = 0;
+
+        advance_cursor(&mut next_cursor, &json!({"cursor": 3, "type": "stdout"}));
+        advance_cursor(&mut next_cursor, &json!({"cursor": 1, "type": "stdout"}));
+        advance_cursor(&mut next_cursor, &json!({"type": "started"}));
+
+        assert_eq!(next_cursor, 4);
     }
 
     #[test]

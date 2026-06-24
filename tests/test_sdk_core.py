@@ -499,6 +499,56 @@ def test_commands_close_stdin_connects_and_disconnects():
     ]
 
 
+def test_sync_command_handle_reconnects_from_next_cursor_before_exit():
+    class FakeEvents:
+        def __init__(self, frames):
+            self._frames = iter(frames)
+            self.closed = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self._frames)
+
+        def close(self):
+            self.closed += 1
+
+    first = FakeEvents(
+        [
+            {
+                "type": "stdout",
+                "cursor": 0,
+                "data": base64.b64encode(b"before\n").decode(),
+            }
+        ]
+    )
+    second = FakeEvents(
+        [
+            {
+                "type": "stdout",
+                "cursor": 1,
+                "data": base64.b64encode(b"after\n").decode(),
+            },
+            {"type": "exit", "cursor": 2, "exit_code": 0},
+        ]
+    )
+    cursors = []
+    handle = CommandHandle(
+        pid="proc-1",
+        handle_kill=lambda: True,
+        events=first,
+        handle_reconnect=lambda cursor: cursors.append(cursor) or second,
+    )
+
+    result = handle.wait()
+
+    assert result.stdout == "before\nafter\n"
+    assert cursors == [1]
+    assert first.closed == 1
+    assert second.closed == 1
+
+
 def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatch):
     import watasu.volume as volume_module
 

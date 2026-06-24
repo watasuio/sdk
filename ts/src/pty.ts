@@ -62,21 +62,15 @@ export class Pty {
     const first = await nextStarted(socket)
     const pid = framePid(first)
     if (pid === undefined) throw new SandboxError('PTY started frame did not include pid')
-    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), undefined, undefined, opts.onData ?? opts.onPty)
+    const reconnect = async (cursor: number) => this.openPtyStream(pid, cursor, opts)
+    return new CommandHandle(pid, socket, () => this.kill(pid), withFirst(first, socket), undefined, undefined, opts.onData ?? opts.onPty, undefined, reconnect)
   }
 
   /** Connect to a running PTY by pid. */
   async connect(pid: number | string, opts: PtyConnectOpts = {}): Promise<CommandHandle> {
-    const socket = await new ProcessSocket(
-      this.dataPlane.baseUrl,
-      this.dataPlane.token,
-      withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}/connect`, { since: 0 }),
-      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
-      this.config.headers
-    ).connect()
-    const first = await nextStarted(socket)
-    const actualPid = framePid(first) ?? pid
-    return new CommandHandle(actualPid, socket, () => this.kill(actualPid), withFirst(first, socket), undefined, undefined, opts.onData)
+    const stream = await this.openPtyStream(pid, 0, opts)
+    const reconnect = async (cursor: number) => this.openPtyStream(stream.actualPid, cursor, opts)
+    return new CommandHandle(stream.actualPid, stream.socket, () => this.kill(stream.actualPid), stream.events, undefined, undefined, opts.onData, undefined, reconnect)
   }
 
   /** Send input bytes or text to a PTY. */
@@ -114,6 +108,26 @@ export class Pty {
       signal: opts.signal,
     })
     return true
+  }
+
+  private async openPtyStream(pid: number | string, cursor: number, opts: PtyConnectOpts | PtyCreateOpts = {}): Promise<{
+    actualPid: number | string
+    socket: ProcessSocket
+    events: AsyncIterable<ProcessFrame>
+  }> {
+    const socket = await new ProcessSocket(
+      this.dataPlane.baseUrl,
+      this.dataPlane.token,
+      withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}/connect`, { since: cursor }),
+      opts.requestTimeoutMs ?? this.config.requestTimeoutMs,
+      this.config.headers
+    ).connect()
+    const first = await nextStarted(socket)
+    return {
+      actualPid: framePid(first) ?? pid,
+      socket,
+      events: withFirst(first, socket),
+    }
   }
 }
 

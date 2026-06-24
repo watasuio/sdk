@@ -188,16 +188,9 @@ class Commands:
         request_timeout: Optional[float] = None,
     ) -> CommandHandle:
         """Reconnect to a live process stream by pid starting at a cursor."""
-        socket = ProcessSocket(
-            self._data_plane.base_url,
-            self._data_plane.token,
-            f"/runtime/v1/process/{_path_component(pid)}/connect?since={cursor}",
-            request_timeout=request_timeout,
-            headers=self._connection_config.sandbox_headers,
-        ).connect()
-        frames = socket.frames(timeout=timeout)
-        first = _next_started(frames)
-        actual_pid = first.get("pid") or first.get("process", {}).get("pid") or pid
+        actual_pid, socket, frames = self._connect_stream(
+            pid, cursor, timeout, request_timeout
+        )
         return CommandHandle(
             pid=actual_pid,
             handle_kill=lambda: self.kill(actual_pid),
@@ -207,6 +200,9 @@ class Commands:
             ),
             handle_close_stdin=lambda request_timeout=None: socket.close_stdin(
                 wait_ack=True, request_timeout=request_timeout
+            ),
+            handle_reconnect=lambda next_cursor: self._reconnect_stream(
+                actual_pid, next_cursor, timeout, request_timeout
             ),
         )
 
@@ -256,7 +252,39 @@ class Commands:
             handle_close_stdin=lambda request_timeout=None: socket.close_stdin(
                 wait_ack=False
             ),
+            handle_reconnect=lambda next_cursor: self._reconnect_stream(
+                pid, next_cursor, timeout, request_timeout
+            ),
         )
+
+    def _connect_stream(
+        self,
+        pid,
+        cursor: int,
+        timeout: Optional[float],
+        request_timeout: Optional[float],
+    ):
+        socket = ProcessSocket(
+            self._data_plane.base_url,
+            self._data_plane.token,
+            f"/runtime/v1/process/{_path_component(pid)}/connect?since={cursor}",
+            request_timeout=request_timeout,
+            headers=self._connection_config.sandbox_headers,
+        ).connect()
+        frames = socket.frames(timeout=timeout)
+        first = _next_started(frames)
+        actual_pid = first.get("pid") or first.get("process", {}).get("pid") or pid
+        return actual_pid, socket, frames
+
+    def _reconnect_stream(
+        self,
+        pid,
+        cursor: int,
+        timeout: Optional[float],
+        request_timeout: Optional[float],
+    ):
+        _, socket, frames = self._connect_stream(pid, cursor, timeout, request_timeout)
+        return ProcessEventStream(socket, frames)
 
 
 def _next_started(frames):

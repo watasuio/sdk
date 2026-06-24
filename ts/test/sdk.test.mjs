@@ -320,6 +320,42 @@ test('command handle closes stream after terminal exit frame', async () => {
   assert.equal(closeCount, 1)
 })
 
+test('command handle reconnects from the next cursor when stream ends before exit', async () => {
+  async function* firstFrames() {
+    yield { type: 'stdout', cursor: 0, data: 'YmVmb3JlCg==' }
+  }
+  async function* secondFrames() {
+    yield { type: 'stdout', cursor: 1, data: 'YWZ0ZXIK' }
+    yield { type: 'exit', cursor: 2, exit_code: 0 }
+  }
+  const cursors = []
+  const sockets = [
+    { closes: 0, close() { this.closes += 1 } },
+    { closes: 0, close() { this.closes += 1 } },
+  ]
+  const handle = new CommandHandle(
+    123,
+    sockets[0],
+    async () => true,
+    firstFrames(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (cursor) => {
+      cursors.push(cursor)
+      return { socket: sockets[1], events: secondFrames() }
+    }
+  )
+
+  const result = await handle.wait()
+
+  assert.equal(result.stdout, 'before\nafter\n')
+  assert.deepEqual(cursors, [1])
+  assert.equal(sockets[0].closes, 1)
+  assert.equal(sockets[1].closes, 1)
+})
+
 test('command handle treats pty frames as terminal output', async () => {
   async function* frames() {
     yield { type: 'pty', data: 'dGVybQo=' }
