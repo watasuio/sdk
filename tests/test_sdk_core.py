@@ -29,6 +29,7 @@ from watasu import (
     Sandbox,
     SandboxBase,
     SandboxException,
+    SandboxOverloadedException,
     SandboxOpts,
     McpServer,
     Template,
@@ -40,6 +41,7 @@ from watasu import (
     wait_for_timeout,
 )
 from watasu._transport.data_plane import DataPlaneClient
+from watasu._transport.errors import map_http_error
 from watasu._transport.process_ws import ProcessSocket
 from watasu.sandbox.commands.command_handle import PtySize
 from watasu.sandbox.filesystem.filesystem import FileType
@@ -265,6 +267,24 @@ def test_code_interpreter_package_re_exports_core_sdk_helpers():
     assert isinstance(
         ci_exceptions.format_execution_timeout_error(), watasu.TimeoutException
     )
+
+
+def test_http_error_mapper_exposes_sandbox_overload():
+    message = (
+        "sandbox is alive but guestd is not responding; workload pressure may be "
+        "saturating CPU or memory; retry after the sandbox load drops"
+    )
+    error = map_http_error(
+        503,
+        {
+            "error": "sandbox_overloaded",
+            "reason": {"message": message},
+        },
+        "fallback",
+    )
+
+    assert isinstance(error, SandboxOverloadedException)
+    assert str(error) == message
 
 
 def test_template_logger_exports_are_real_helpers(capsys):

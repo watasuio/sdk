@@ -121,18 +121,30 @@ export class ApiError extends SandboxError {
   }
 }
 
+export class SandboxOverloadedError extends ApiError {
+  constructor(message = 'Sandbox is overloaded') {
+    super(message, 503, 'sandbox_overloaded')
+    this.name = 'SandboxOverloadedError'
+  }
+}
+
 export function errorFromResponse(status: number, payload: unknown): Error {
   const body = asRecord(payload)
+  const reason = asRecord(body.reason)
   const code = stringValue(body.error)
   const message =
     stringValue(body.message) ||
     listMessage(body.errors) ||
+    stringValue(reason.message) ||
+    listMessage(reason.errors) ||
+    stringValue(body.reason) ||
     code ||
     `Request failed with status ${status}`
 
   if (code === 'not_enough_space') return new NotEnoughSpaceError(message)
   if (code === 'file_not_found') return new FileNotFoundError(message)
   if (code === 'sandbox_not_found') return new SandboxNotFoundError(message)
+  if (code === 'sandbox_overloaded') return new SandboxOverloadedError(message)
   if (code === 'git_auth') return new GitAuthError(message)
   if (code === 'git_upstream') return new GitUpstreamError(message)
   if (code === 'template_error') return new TemplateError(message)

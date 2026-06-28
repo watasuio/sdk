@@ -30,6 +30,7 @@ import {
   Sandbox,
   SandboxError,
   SandboxNotFoundError,
+  SandboxOverloadedError,
   SandboxPaginator,
   SnapshotPaginator,
   WatchHandle,
@@ -284,6 +285,20 @@ test('process socket stdin waits for websocket send completion and runtime ack',
 
 test('error mapper preserves explicit file not found code', () => {
   assert.ok(errorFromResponse(404, { error: 'file_not_found' }) instanceof FileNotFoundError)
+})
+
+test('error mapper exposes sandbox overload code', () => {
+  const message =
+    'sandbox is alive but guestd is not responding; workload pressure may be saturating CPU or memory; retry after the sandbox load drops'
+  const error = errorFromResponse(503, {
+    error: 'sandbox_overloaded',
+    reason: { message },
+  })
+
+  assert.ok(error instanceof SandboxOverloadedError)
+  assert.equal(error.status, 503)
+  assert.equal(error.code, 'sandbox_overloaded')
+  assert.equal(error.message, message)
 })
 
 test('command handle raises on non-zero exit and preserves output', async () => {

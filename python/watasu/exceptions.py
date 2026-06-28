@@ -2,6 +2,10 @@ class SandboxException(Exception):
     """Base class for sandbox errors."""
 
 
+class SandboxOverloadedException(SandboxException):
+    """Raised when the sandbox is alive but its runtime agent is overloaded."""
+
+
 class TimeoutException(SandboxException):
     """Raised when a sandbox or request times out."""
 

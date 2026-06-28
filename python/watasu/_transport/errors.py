@@ -12,20 +12,41 @@ from watasu.exceptions import (
     RateLimitException,
     SandboxException,
     SandboxNotFoundException,
+    SandboxOverloadedException,
     TimeoutException,
 )
 
 
 def error_message(payload: Any, fallback: str) -> str:
     if isinstance(payload, Mapping):
+        value = payload.get("message")
+        if value:
+            return str(value)
         errors = payload.get("errors")
         if isinstance(errors, list) and errors:
             return "; ".join(str(item) for item in errors)
-        for key in ("message", "reason", "error"):
-            value = payload.get(key)
+        reason = payload.get("reason")
+        if isinstance(reason, Mapping):
+            value = reason.get("message")
             if value:
                 return str(value)
+            reason_errors = reason.get("errors")
+            if isinstance(reason_errors, list) and reason_errors:
+                return "; ".join(str(item) for item in reason_errors)
+        elif reason:
+            return str(reason)
+        value = payload.get("error")
+        if value:
+            return str(value)
     return fallback
+
+
+def error_code(payload: Any) -> Optional[str]:
+    if isinstance(payload, Mapping):
+        value = payload.get("error")
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def map_http_error(
@@ -35,8 +56,11 @@ def map_http_error(
     *,
     resource: Optional[str] = None,
 ) -> Exception:
+    code = error_code(payload)
     message = error_message(payload, fallback)
 
+    if code == "sandbox_overloaded":
+        return SandboxOverloadedException(message)
     if status_code in {401, 403}:
         return AuthenticationException(message)
     if status_code == 404:

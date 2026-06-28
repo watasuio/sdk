@@ -16,6 +16,7 @@ export {
   RateLimitError,
   SandboxError,
   SandboxNotFoundError,
+  SandboxOverloadedError,
   TemplateError,
   TimeoutError,
   VolumeError,

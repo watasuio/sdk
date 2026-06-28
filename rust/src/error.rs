@@ -33,6 +33,9 @@ pub enum Error {
     /// A requested file path did not exist.
     #[error("file not found: {0}")]
     FileNotFound(String),
+    /// The sandbox is alive but its runtime agent is overloaded.
+    #[error("sandbox overloaded: {0}")]
+    SandboxOverloaded(String),
     /// A bounded stream exceeded the configured byte limit.
     #[error(
         "{stream} exceeded configured byte limit of {max_bytes} bytes (saw {actual_bytes} bytes)"
@@ -83,22 +86,20 @@ impl Error {
             .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
+        let reason = payload.get("reason");
         let message = payload
             .get("message")
             .and_then(|v| v.as_str())
             .map(ToOwned::to_owned)
+            .or_else(|| list_message(payload.get("errors")))
             .or_else(|| {
-                payload
-                    .get("errors")
-                    .and_then(|v| v.as_array())
-                    .map(|items| {
-                        items
-                            .iter()
-                            .map(|item| item.as_str().unwrap_or_default())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
+                reason
+                    .and_then(|v| v.get("message"))
+                    .and_then(|v| v.as_str())
+                    .map(ToOwned::to_owned)
             })
+            .or_else(|| reason.and_then(|v| list_message(v.get("errors"))))
+            .or_else(|| reason.and_then(|v| v.as_str()).map(ToOwned::to_owned))
             .unwrap_or_else(|| code.to_string());
 
         match status.as_u16() {
@@ -110,7 +111,39 @@ impl Error {
             429 => Self::RateLimit(message),
             _ if code == "not_enough_space" => Self::NotEnoughSpace(message),
             _ if code == "file_not_found" => Self::FileNotFound(message),
+            _ if code == "sandbox_overloaded" => Self::SandboxOverloaded(message),
             _ => Self::Sandbox(message),
         }
+    }
+}
+
+fn list_message(value: Option<&serde_json::Value>) -> Option<String> {
+    value.and_then(|v| v.as_array()).map(|items| {
+        items
+            .iter()
+            .map(|item| item.as_str().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+    use reqwest::StatusCode;
+    use serde_json::json;
+
+    #[test]
+    fn from_status_maps_sandbox_overload() {
+        let message = "sandbox is alive but guestd is not responding; workload pressure may be saturating CPU or memory; retry after the sandbox load drops";
+        let error = Error::from_status(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &json!({
+                "error": "sandbox_overloaded",
+                "reason": {"message": message}
+            }),
+        );
+
+        assert!(matches!(error, Error::SandboxOverloaded(actual) if actual == message));
     }
 }
