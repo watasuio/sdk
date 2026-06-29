@@ -22,7 +22,8 @@ pub struct CreateOptions {
     /// Environment variables injected into commands started through this SDK.
     pub envs: serde_json::Map<String, Value>,
     /// Whether the sandbox may access the public internet.
-    pub allow_internet_access: bool,
+    /// When unset, the template runtime default is used.
+    pub allow_internet_access: Option<bool>,
     /// Explicit template version id. Sent as `template_version_id` on the wire.
     pub template_version_id: Option<u64>,
     /// Team slug to create the sandbox under.
@@ -53,7 +54,7 @@ impl Default for CreateOptions {
             timeout_seconds: 300,
             metadata: Default::default(),
             envs: Default::default(),
-            allow_internet_access: true,
+            allow_internet_access: None,
             template_version_id: None,
             team: None,
             cpu: None,
@@ -841,9 +842,10 @@ fn create_payload(opts: &CreateOptions) -> Result<Value> {
     sandbox.insert("timeout".into(), Value::from(opts.timeout_seconds));
     sandbox.insert("metadata".into(), Value::Object(opts.metadata.clone()));
     sandbox.insert("envs".into(), Value::Object(opts.envs.clone()));
-    sandbox.insert(
-        "allow_internet_access".into(),
-        Value::Bool(opts.allow_internet_access),
+    put_if_some_bool(
+        &mut sandbox,
+        "allow_internet_access",
+        opts.allow_internet_access,
     );
     put_if_some(&mut sandbox, "cpu_count", opts.cpu);
     put_if_some(&mut sandbox, "memory_mb", opts.memory_mb);
@@ -1268,10 +1270,20 @@ mod tests {
                 "template": "python",
                 "timeout": 1200,
                 "metadata": {},
-                "envs": {},
-                "allow_internet_access": true
+                "envs": {}
             })
         );
+    }
+
+    #[test]
+    fn sandbox_create_sends_explicit_internet_override() {
+        let payload = create_payload(&CreateOptions {
+            allow_internet_access: Some(false),
+            ..CreateOptions::default()
+        })
+        .expect("create payload");
+
+        assert_eq!(payload["allow_internet_access"], json!(false));
     }
 
     #[test]

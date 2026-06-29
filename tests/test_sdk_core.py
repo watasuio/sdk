@@ -1975,7 +1975,6 @@ def test_sandbox_create_with_mcp_sends_config_to_api_without_sdk_bootstrap(monke
         "metadata": {},
         "envs": {},
         "secure": True,
-        "allow_internet_access": True,
         "mcp": {"server": "it's-fine", "config": {"enabled": True}},
     }
     assert commands == []
@@ -2860,7 +2859,6 @@ def test_async_sandbox_wraps_supported_control_plane_routes(monkeypatch):
                     "metadata": {},
                     "envs": {},
                     "secure": True,
-                    "allow_internet_access": True,
                 },
                 "resource": "sandbox",
                 "request_timeout": 150,

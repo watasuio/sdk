@@ -409,8 +409,8 @@ export class Sandbox {
       metadata: opts.metadata ?? {},
       envs: opts.envs ?? {},
       secure: opts.secure ?? true,
-      allow_internet_access: opts.allowInternetAccess ?? true,
     }
+    putIfPresent(sandboxPayload, 'allow_internet_access', opts.allowInternetAccess)
     putIfPresent(sandboxPayload, 'template', template)
     putIfPresent(sandboxPayload, 'mcp', opts.mcp)
     putIfPresent(sandboxPayload, 'lifecycle', lifecyclePayload(opts.lifecycle))

@@ -915,7 +915,6 @@ test('sandbox create uses root snake_case API payload', async () => {
       metadata: { purpose: 'compat' },
       envs: { HELLO: 'world' },
       secure: true,
-      allow_internet_access: true,
       lifecycle: { on_timeout: 'pause', auto_resume: true },
       volume_mounts: [
         { path: '/workspace/cache', name: 'cache' },
@@ -1018,7 +1017,6 @@ test('sandbox protected create and connect helpers expose session details', asyn
           metadata: {},
           envs: { HELLO: 'world' },
           secure: true,
-          allow_internet_access: true,
           template: 'base',
           team: 'watasu',
         },
@@ -1422,7 +1420,6 @@ test('sandbox create with mcp sends config to API without SDK-side bootstrap', a
       metadata: {},
       envs: {},
       secure: true,
-      allow_internet_access: true,
       mcp: { server: "it's-fine", config: { enabled: true } },
     })
     assert.deepEqual(commands, [])

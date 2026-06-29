@@ -97,7 +97,7 @@ class Sandbox(SandboxBase):
         timeout: Optional[int] = None,
         metadata: Optional[Dict[str, str]] = None,
         secure: bool = True,
-        allow_internet_access: bool = True,
+        allow_internet_access: Optional[bool] = None,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
         lifecycle=None,
@@ -171,7 +171,7 @@ class Sandbox(SandboxBase):
         metadata: Optional[Dict[str, str]] = None,
         envs: Optional[Dict[str, str]] = None,
         secure: bool = True,
-        allow_internet_access: bool = True,
+        allow_internet_access: Optional[bool] = None,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
         volume_mounts: Optional[Dict[str, Any]] = None,
@@ -194,8 +194,9 @@ class Sandbox(SandboxBase):
             "metadata": metadata or {},
             "envs": envs or {},
             "secure": secure,
-            "allow_internet_access": allow_internet_access,
         }
+        if allow_internet_access is not None:
+            sandbox_params["allow_internet_access"] = allow_internet_access
         if template is not None:
             sandbox_params["template"] = template
         elif mcp is None:
@@ -240,7 +241,7 @@ class Sandbox(SandboxBase):
         metadata: Optional[Dict[str, str]] = None,
         envs: Optional[Dict[str, str]] = None,
         secure: bool = True,
-        allow_internet_access: bool = True,
+        allow_internet_access: Optional[bool] = None,
         mcp: Optional[Dict[str, Any]] = None,
         network=None,
         volume_mounts: Optional[Dict[str, Any]] = None,
