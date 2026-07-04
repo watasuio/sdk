@@ -1,7 +1,7 @@
 import { ConnectionConfig } from './connectionConfig.js'
 import { DataPlaneClient, withQuery } from './transport.js'
 import { ProcessFrame, ProcessSocket, base64DecodeBytes, base64DecodeText } from './processSocket.js'
-import { SandboxError, TimeoutError } from './errors.js'
+import { NotFoundError, SandboxError, TimeoutError } from './errors.js'
 
 export interface CommandResult {
   /** Process exit code. Zero means success. */
@@ -9,12 +9,20 @@ export interface CommandResult {
   error?: string
   stdout: string
   stderr: string
+  /**
+   * True when the runtime dropped stream output that could not be replayed
+   * (retention evicted the events before the SDK could backfill them).
+   */
+  truncated?: boolean
 }
 
 /** Error thrown by `CommandHandle.wait()` when a process exits non-zero. */
 export class CommandExitError extends SandboxError implements CommandResult {
   constructor(private readonly result: CommandResult) {
-    super(result.error ?? `Command exited with code ${result.exitCode}`)
+    super(
+      (result.error ?? `Command exited with code ${result.exitCode}`) +
+        (result.truncated ? '; some process output was dropped before delivery' : '')
+    )
     this.name = 'CommandExitError'
   }
 
@@ -22,6 +30,7 @@ export class CommandExitError extends SandboxError implements CommandResult {
   get error() { return this.result.error }
   get stdout() { return this.result.stdout }
   get stderr() { return this.result.stderr }
+  get truncated() { return this.result.truncated }
 }
 
 export interface ProcessInfo {
@@ -46,6 +55,11 @@ export interface ProcessStatus {
   startedAt?: string
   finishedAt?: string
   exitCode?: number
+  /**
+   * Set when a kill has been requested but the process has not finished yet
+   * (the runtime reports a non-terminal `killing` status in that window).
+   */
+  killRequestedAt?: string
 }
 
 export interface ProcessOutputEvent {
@@ -117,6 +131,24 @@ const STREAM_RECONNECT_ATTEMPTS = 12
 const STREAM_RECONNECT_BASE_DELAY_MS = 250
 const STREAM_RECONNECT_MAX_DELAY_MS = 2_000
 
+/**
+ * Sentinel exit code reported when the runtime finishes a command without an
+ * explicit exit code (for example when it was killed or failed). Success is
+ * only ever an explicit exit code of 0.
+ */
+const MISSING_EXIT_CODE = -1
+
+/** Server-side command ceiling used when the caller supplied no timeout. */
+const DEFAULT_WAIT_TIMEOUT_MS = 3_600_000
+/** Extra client-side grace on top of the command timeout before giving up. */
+const WAIT_TIMEOUT_GRACE_MS = 60_000
+
+/** Client-side wait deadline for a command: its timeout plus grace. */
+export function commandWaitDeadlineMs(timeoutMs?: number): number {
+  const base = timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : DEFAULT_WAIT_TIMEOUT_MS
+  return base + WAIT_TIMEOUT_GRACE_MS
+}
+
 /** Live handle for one sandbox process stream. */
 export class CommandHandle implements Partial<CommandResult> {
   private _stdout = ''
@@ -125,6 +157,8 @@ export class CommandHandle implements Partial<CommandResult> {
   private readonly pending: Promise<void>
   private nextCursor = 0
   private disconnected = false
+  private pendingLagged = false
+  private outputDropped = false
 
   constructor(
     readonly pid: number | string,
@@ -147,7 +181,11 @@ export class CommandHandle implements Partial<CommandResult> {
 
   /** Wait until the process exits and return captured output. */
   async wait(timeoutMs?: number): Promise<CommandResult> {
-    await waitFor(this.pending, timeoutMs)
+    await waitFor(
+      this.pending,
+      commandWaitDeadlineMs(timeoutMs),
+      `timed out waiting for command ${this.pid} to exit; the command may still be running, check its status with commands.process(pid)`
+    )
     if (!this.result) throw new SandboxError('Command ended without an exit event')
     if (this.result.exitCode !== 0) throw new CommandExitError(this.result)
     return this.result
@@ -183,8 +221,29 @@ export class CommandHandle implements Partial<CommandResult> {
     while (!this.disconnected && !this.result) {
       let streamError: unknown
       for await (const frame of this.events) {
-        this.advanceCursor(frame)
         const type = frame.type
+        if (type === 'lagged') {
+          // The runtime dropped frames from this stream. Replay them from the
+          // next undelivered cursor when the stream supports reconnecting;
+          // otherwise flag the dropped output. Do not advance the cursor from
+          // a lagged frame, or the replay would skip the dropped events.
+          if (!this.reconnect) {
+            this.outputDropped = true
+            continue
+          }
+          this.pendingLagged = true
+          break
+        }
+        if (this.pendingLagged) {
+          const cursor = numberValue(frame.cursor)
+          if (cursor !== undefined) {
+            // Backfill was impossible when the first replayed event sits past
+            // the requested cursor: the runtime evicted the events between.
+            if (cursor > this.nextCursor) this.outputDropped = true
+            this.pendingLagged = false
+          }
+        }
+        this.advanceCursor(frame)
         if (type === 'started' || type === 'ready' || type === 'pong') continue
         if (type === 'stdout') {
           const out = base64DecodeText(frame.data)
@@ -200,12 +259,24 @@ export class CommandHandle implements Partial<CommandResult> {
           this._stdout += out
           await this.onPty?.(bytes)
         } else if (type === 'exit') {
-          const exitCode = Number(frame.exit_code ?? frame.exitCode ?? 0)
+          const rawExitCode = numericExitCode(frame.exit_code ?? frame.exitCode)
+          let error = typeof frame.error === 'string' ? frame.error : undefined
+          let exitCode: number
+          if (rawExitCode === undefined) {
+            // Killed/failed commands may finish without an exit code. Keep
+            // exitCode a plain number and take the failure path.
+            const status = typeof frame.status === 'string' && frame.status ? frame.status : 'failed'
+            exitCode = MISSING_EXIT_CODE
+            error ??= `command ${status} without an exit code${this._stderr ? `; stderr:\n${this._stderr}` : ''}`
+          } else {
+            exitCode = rawExitCode
+          }
           this.result = {
             exitCode,
-            error: typeof frame.error === 'string' ? frame.error : undefined,
+            error,
             stdout: this._stdout,
             stderr: this._stderr,
+            truncated: this.outputDropped,
           }
           await this.onExit?.(exitCode)
           this.socket.close()
@@ -324,19 +395,23 @@ export class Commands {
 
   /** Look up process status without attaching a WebSocket. */
   async process(pid: number | string, opts: CommandRequestOpts = {}): Promise<ProcessStatus> {
-    const payload = await this.dataPlane.getJson(`/runtime/v1/process/${encodeURIComponent(String(pid))}`, opts)
+    const payload = await this.dataPlane
+      .getJson(`/runtime/v1/process/${encodeURIComponent(String(pid))}`, opts)
+      .catch((error) => { throw processPurgedNotFound(error, pid) })
     return processStatus(payload)
   }
 
   /** Read available process output since a cursor without blocking. */
   async readProcessOutput(pid: number | string, opts: ReadProcessOutputOptions = {}): Promise<ProcessOutputSnapshot> {
-    const payload = await this.dataPlane.getJson(
-      withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}/output`, {
-        since: opts.since,
-        limit_bytes: opts.limitBytes,
-      }),
-      opts
-    )
+    const payload = await this.dataPlane
+      .getJson(
+        withQuery(`/runtime/v1/process/${encodeURIComponent(String(pid))}/output`, {
+          since: opts.since,
+          limit_bytes: opts.limitBytes,
+        }),
+        opts
+      )
+      .catch((error) => { throw processPurgedNotFound(error, pid) })
     return processOutputSnapshot(payload)
   }
 
@@ -415,12 +490,20 @@ function processStartConfig(cmd: string, opts: CommandStartOpts): { cmd: string;
   return { cmd: '/bin/bash', args: ['-l', '-c', cmd] }
 }
 
-function waitFor<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
-  if (timeoutMs === undefined || timeoutMs <= 0) return promise
+function waitFor<T>(promise: Promise<T>, timeoutMs: number, message?: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new TimeoutError()), timeoutMs)
+    const timer = setTimeout(() => reject(new TimeoutError(message)), timeoutMs)
     promise.then(resolve, reject).finally(() => clearTimeout(timer))
   })
+}
+
+function numericExitCode(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value !== '') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
 }
 
 function sleep(ms: number): Promise<void> {
@@ -484,7 +567,17 @@ function processStatus(value: unknown): ProcessStatus {
     startedAt: stringValue(process.started_at ?? process.startedAt),
     finishedAt: stringValue(process.finished_at ?? process.finishedAt),
     exitCode: numberValue(process.exit_code ?? process.exitCode),
+    killRequestedAt: stringValue(process.kill_requested_at ?? process.killRequestedAt),
   }
+}
+
+function processPurgedNotFound(error: unknown, pid: number | string): unknown {
+  if (error instanceof NotFoundError) {
+    return new NotFoundError(
+      `process ${pid} not found: process records are purged when the sandbox is destroyed; terminal results were delivered via wait()/callbacks`
+    )
+  }
+  return error
 }
 
 function processOutputSnapshot(value: unknown): ProcessOutputSnapshot {

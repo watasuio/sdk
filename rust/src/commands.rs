@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout_at, Instant};
 
 use crate::error::{Error, Result};
 use crate::process_socket::{decode_runtime_data_bytes, ProcessSocket};
@@ -12,6 +12,25 @@ use crate::transport::DataPlaneClient;
 const STREAM_RECONNECT_ATTEMPTS: usize = 12;
 const STREAM_RECONNECT_BASE_DELAY_MS: u64 = 250;
 const STREAM_RECONNECT_MAX_DELAY_MS: u64 = 2_000;
+
+/// Sentinel exit code reported when the runtime finishes a command without an
+/// explicit exit code (for example when it was killed or failed). Success is
+/// only ever an explicit exit code of 0.
+const MISSING_EXIT_CODE: i32 = -1;
+
+/// Server-side command ceiling used when the caller supplied no timeout.
+const DEFAULT_WAIT_TIMEOUT_MS: u64 = 3_600_000;
+/// Extra client-side grace on top of the command timeout before giving up.
+const WAIT_TIMEOUT_GRACE_MS: u64 = 60_000;
+
+/// Client-side wait deadline for a command: its timeout plus grace.
+fn wait_deadline(timeout_ms: Option<u64>) -> Duration {
+    Duration::from_millis(
+        timeout_ms
+            .unwrap_or(DEFAULT_WAIT_TIMEOUT_MS)
+            .saturating_add(WAIT_TIMEOUT_GRACE_MS),
+    )
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 /// Completed command output.
@@ -69,7 +88,10 @@ pub struct ProcessStatus {
     pub user: Option<String>,
     /// Whether the process was started with a PTY.
     pub pty: Option<bool>,
-    /// Runtime status such as `running`, `succeeded`, `failed`, `killed`, or `timed_out`.
+    /// Runtime status such as `running`, `killing`, `succeeded`, `failed`,
+    /// `killed`, or `timed_out`. A kill request is not instantly terminal:
+    /// the runtime reports `killing` until the process actually finishes,
+    /// and killed or failed processes may finish without an exit code.
     pub status: String,
     /// Runtime start timestamp.
     pub started_at: Option<String>,
@@ -77,6 +99,9 @@ pub struct ProcessStatus {
     pub finished_at: Option<String>,
     /// Process exit code, if finished.
     pub exit_code: Option<i32>,
+    /// Set when a kill has been requested but the process has not finished
+    /// yet (the runtime reports the non-terminal `killing` status).
+    pub kill_requested_at: Option<String>,
 }
 
 /// Options for starting a sandbox command.
@@ -506,6 +531,7 @@ impl Commands {
         self.start_process_with_payload(
             process_start_payload(&self.sandbox_envs, &opts)?,
             opts.check,
+            opts.timeout_ms,
         )
         .await
     }
@@ -527,7 +553,7 @@ impl Commands {
         .await?;
         let first = next_started(&mut socket).await?;
         let actual_pid = frame_pid(&first).unwrap_or(pid);
-        Ok(CommandHandle::new(actual_pid, socket, self.clone(), false))
+        Ok(CommandHandle::new(actual_pid, socket, self.clone(), false, None))
     }
 
     /// Look up current process status without attaching to the stream.
@@ -536,7 +562,8 @@ impl Commands {
         let payload = self
             .data_plane
             .get_json(&format!("/runtime/v1/process/{}", path_component(&pid)))
-            .await?;
+            .await
+            .map_err(|error| process_purged_not_found(error, &pid))?;
         Ok(process_status(payload))
     }
 
@@ -553,7 +580,11 @@ impl Commands {
             path.push('?');
             path.push_str(&query);
         }
-        let payload = self.data_plane.get_json(&path).await?;
+        let payload = self
+            .data_plane
+            .get_json(&path)
+            .await
+            .map_err(|error| process_purged_not_found(error, &pid))?;
         Ok(process_output(payload))
     }
 
@@ -603,13 +634,15 @@ impl Commands {
                 ..ProcessStartOptions::default()
             },
         )?;
-        self.start_process_with_payload(payload, true).await
+        self.start_process_with_payload(payload, true, opts.timeout_ms)
+            .await
     }
 
     async fn start_process_with_payload(
         &self,
         payload: Value,
         check: bool,
+        timeout_ms: Option<u64>,
     ) -> Result<CommandHandle> {
         let mut socket = ProcessSocket::connect(
             &self.data_plane.base_url,
@@ -621,7 +654,7 @@ impl Commands {
         let first = next_started(&mut socket).await?;
         let pid = frame_pid(&first)
             .ok_or_else(|| Error::Sandbox("process started frame did not include pid".into()))?;
-        Ok(CommandHandle::new(pid, socket, self.clone(), check))
+        Ok(CommandHandle::new(pid, socket, self.clone(), check, timeout_ms))
     }
 }
 
@@ -632,15 +665,23 @@ pub struct CommandHandle {
     socket: ProcessSocket,
     commands: Commands,
     check: bool,
+    timeout_ms: Option<u64>,
 }
 
 impl CommandHandle {
-    pub(crate) fn new(pid: String, socket: ProcessSocket, commands: Commands, check: bool) -> Self {
+    pub(crate) fn new(
+        pid: String,
+        socket: ProcessSocket,
+        commands: Commands,
+        check: bool,
+        timeout_ms: Option<u64>,
+    ) -> Self {
         Self {
             pid,
             socket,
             commands,
             check,
+            timeout_ms,
         }
     }
 
@@ -669,25 +710,55 @@ impl CommandHandle {
         let mut capture = OutputCapture::new(limits);
         let mut next_cursor = 0;
         let mut reconnect_attempts = 0;
+        let mut pending_lagged = false;
+        let mut output_dropped = false;
+        let deadline = Instant::now() + wait_deadline(self.timeout_ms);
 
         loop {
-            let frame = match self.socket.next_frame().await {
-                Ok(Some(frame)) => {
+            let frame = match timeout_at(deadline, self.socket.next_frame()).await {
+                Err(_) => {
+                    let _ = self.socket.close().await;
+                    return Err(Error::Timeout(format!(
+                        "timed out waiting for command {} to exit; the command may still be running, check its status with Commands::process",
+                        self.pid
+                    )));
+                }
+                Ok(Ok(Some(frame))) => {
                     reconnect_attempts = 0;
                     frame
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     self.reconnect_stream(next_cursor, &mut reconnect_attempts)
                         .await?;
                     continue;
                 }
-                Err(error) if is_reconnectable_stream_error(&error) => {
+                Ok(Err(error)) if is_reconnectable_stream_error(&error) => {
                     self.reconnect_stream(next_cursor, &mut reconnect_attempts)
                         .await?;
                     continue;
                 }
-                Err(error) => return Err(error),
+                Ok(Err(error)) => return Err(error),
             };
+            if frame.get("type").and_then(Value::as_str) == Some("lagged") {
+                // The runtime dropped frames from this stream. Replay them
+                // from the next undelivered cursor via a reconnect. Do not
+                // advance the cursor from a lagged frame, or the replay would
+                // skip the dropped events.
+                pending_lagged = true;
+                self.reconnect_stream(next_cursor, &mut reconnect_attempts)
+                    .await?;
+                continue;
+            }
+            if pending_lagged {
+                if let Some(cursor) = frame.get("cursor").and_then(Value::as_u64) {
+                    if cursor > next_cursor {
+                        // Backfill was impossible: the runtime evicted events
+                        // before the requested cursor.
+                        output_dropped = true;
+                    }
+                    pending_lagged = false;
+                }
+            }
             advance_cursor(&mut next_cursor, &frame);
             match frame.get("type").and_then(Value::as_str) {
                 Some("started" | "ready" | "pong") => continue,
@@ -695,11 +766,22 @@ impl CommandHandle {
                 Some("stderr") => capture.push_stderr(&frame),
                 Some("pty") => capture.push_pty(&frame),
                 Some("exit") => {
-                    let result = process_result(capture, &self.pid, &frame);
+                    let mut result = process_result(capture, &self.pid, &frame);
+                    if output_dropped {
+                        result.truncated = true;
+                    }
                     if check && result.exit_code != 0 {
                         let _ = self.socket.close().await;
+                        let mut command_result = result.command_result();
+                        if output_dropped {
+                            let note = "some process output was dropped before delivery";
+                            command_result.error = Some(match command_result.error.take() {
+                                Some(error) => format!("{error}; {note}"),
+                                None => note.to_string(),
+                            });
+                        }
                         return Err(Error::CommandExit {
-                            result: result.command_result(),
+                            result: command_result,
                         });
                     }
                     let _ = self.socket.close().await;
@@ -872,6 +954,17 @@ fn stop_process_query(opts: &StopProcessOptions) -> String {
 
 fn path_component(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+/// Map a data-plane 404 for a process route to a clearer message: process
+/// records are purged when the sandbox is destroyed.
+fn process_purged_not_found(error: Error, pid: &str) -> Error {
+    match error {
+        Error::NotFound(_) => Error::NotFound(format!(
+            "process {pid} not found: process records are purged when the sandbox is destroyed; terminal results were delivered via wait()/callbacks"
+        )),
+        other => other,
+    }
 }
 
 fn advance_cursor(next_cursor: &mut u64, frame: &Value) {
@@ -1192,6 +1285,36 @@ fn process_result(capture: OutputCapture, fallback_pid: &str, frame: &Value) -> 
     let stderr = capture.stderr.finish();
     let pty = capture.pty.finish();
 
+    let raw_exit_code = frame
+        .get("exit_code")
+        .or_else(|| frame.get("exitCode"))
+        .and_then(Value::as_i64);
+    let mut error = frame
+        .get("error")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let exit_code = match raw_exit_code {
+        Some(code) => code as i32,
+        None => {
+            // Killed/failed commands may finish without an exit code. Keep
+            // exit_code a plain integer and take the failure path.
+            let status = frame
+                .get("status")
+                .and_then(Value::as_str)
+                .filter(|status| !status.is_empty())
+                .unwrap_or("failed");
+            if error.is_none() {
+                let stderr_text = String::from_utf8_lossy(&stderr.bytes);
+                error = Some(if stderr_text.is_empty() {
+                    format!("command {status} without an exit code")
+                } else {
+                    format!("command {status} without an exit code; stderr:\n{stderr_text}")
+                });
+            }
+            MISSING_EXIT_CODE
+        }
+    };
+
     ProcessResult {
         output: combined.bytes,
         output_events: combined.events,
@@ -1208,15 +1331,8 @@ fn process_result(capture: OutputCapture, fallback_pid: &str, frame: &Value) -> 
         stdout_truncated: stdout.truncated,
         stderr_truncated: stderr.truncated,
         pty_truncated: pty.truncated,
-        exit_code: frame
-            .get("exit_code")
-            .or_else(|| frame.get("exitCode"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0) as i32,
-        error: frame
-            .get("error")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned),
+        exit_code,
+        error,
         pid: frame_pid(frame).or_else(|| Some(fallback_pid.to_string())),
     }
 }
@@ -1270,6 +1386,11 @@ fn process_status(value: Value) -> ProcessStatus {
             .or_else(|| item.get("exitCode"))
             .and_then(Value::as_i64)
             .and_then(|value| i32::try_from(value).ok()),
+        kill_requested_at: item
+            .get("kill_requested_at")
+            .or_else(|| item.get("killRequestedAt"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
     }
 }
 
@@ -1461,11 +1582,13 @@ mod tests {
     use base64::Engine as _;
     use serde_json::json;
 
+    use std::time::Duration;
+
     use super::{
         advance_cursor, append_capped, process_info, process_output, process_output_query,
-        process_result, process_start_payload, OutputCapture, OutputLimits,
-        ProcessOutputCapturePolicy, ProcessOutputReadMode, ProcessStartOptions,
-        ReadProcessOutputOptions,
+        process_purged_not_found, process_result, process_start_payload, process_status,
+        wait_deadline, OutputCapture, OutputLimits, ProcessOutputCapturePolicy,
+        ProcessOutputReadMode, ProcessStartOptions, ReadProcessOutputOptions, MISSING_EXIT_CODE,
     };
 
     #[test]
@@ -1662,6 +1785,105 @@ mod tests {
     }
 
     #[test]
+    fn process_result_missing_exit_code_takes_failure_path_with_status() {
+        let mut capture = OutputCapture::new(OutputLimits::default());
+        capture.push_stderr(&json!({"cursor": 1, "type": "stderr", "data": BASE64.encode("boom")}));
+
+        let result = process_result(
+            capture,
+            "proc-1",
+            &json!({"type": "exit", "exit_code": null, "status": "killed"}),
+        );
+
+        assert_eq!(result.exit_code, MISSING_EXIT_CODE);
+        let error = result.error.clone().expect("synthesized error");
+        assert!(error.contains("killed"), "{error:?}");
+        assert!(error.contains("boom"), "{error:?}");
+
+        let command_error = crate::Error::CommandExit {
+            result: result.command_result(),
+        };
+        let message = command_error.to_string();
+        assert!(message.contains("code -1"), "{message:?}");
+        assert!(message.contains("killed"), "{message:?}");
+    }
+
+    #[test]
+    fn process_result_absent_exit_code_defaults_to_failed_status() {
+        let capture = OutputCapture::new(OutputLimits::default());
+
+        let result = process_result(capture, "proc-1", &json!({"type": "exit"}));
+
+        assert_eq!(result.exit_code, MISSING_EXIT_CODE);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("command failed without an exit code")
+        );
+    }
+
+    #[test]
+    fn process_result_keeps_runtime_error_and_explicit_zero_exit() {
+        let capture = OutputCapture::new(OutputLimits::default());
+        let result = process_result(
+            capture,
+            "proc-1",
+            &json!({"type": "exit", "exit_code": null, "status": "killed", "error": "runtime says no"}),
+        );
+        assert_eq!(result.exit_code, MISSING_EXIT_CODE);
+        assert_eq!(result.error.as_deref(), Some("runtime says no"));
+
+        let capture = OutputCapture::new(OutputLimits::default());
+        let result = process_result(capture, "proc-1", &json!({"type": "exit", "exit_code": 0}));
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.error, None);
+    }
+
+    #[test]
+    fn wait_deadline_adds_grace_and_falls_back_to_server_ceiling() {
+        assert_eq!(wait_deadline(Some(5_000)), Duration::from_millis(65_000));
+        assert_eq!(wait_deadline(None), Duration::from_millis(3_660_000));
+    }
+
+    #[test]
+    fn process_status_parses_killing_status_and_kill_requested_at() {
+        let status = process_status(json!({
+            "pid": "proc-1",
+            "id": "proc-1",
+            "status": "killing",
+            "exit_code": null,
+            "kill_requested_at": "2026-07-04T12:00:00Z"
+        }));
+
+        assert_eq!(status.status, "killing");
+        assert_eq!(status.exit_code, None);
+        assert_eq!(
+            status.kill_requested_at.as_deref(),
+            Some("2026-07-04T12:00:00Z")
+        );
+    }
+
+    #[test]
+    fn process_purged_not_found_rewrites_only_not_found_errors() {
+        let rewritten = process_purged_not_found(
+            crate::Error::NotFound("no rows".to_string()),
+            "proc-1",
+        );
+        match rewritten {
+            crate::Error::NotFound(message) => {
+                assert!(message.contains("purged when the sandbox is destroyed"), "{message:?}");
+                assert!(message.contains("proc-1"), "{message:?}");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+
+        let passthrough = process_purged_not_found(
+            crate::Error::Sandbox("boom".to_string()),
+            "proc-1",
+        );
+        assert!(matches!(passthrough, crate::Error::Sandbox(message) if message == "boom"));
+    }
+
+    #[test]
     fn capped_capture_stores_prefix_and_counts_total_bytes() {
         let mut capture = OutputCapture::new(OutputLimits {
             max_stdout_bytes: Some(4),
@@ -1792,5 +2014,146 @@ mod tests {
         assert_eq!(bytes, b"abc");
         assert_eq!(total, 3);
         assert!(!truncated);
+    }
+}
+
+#[cfg(test)]
+mod lagged_tests {
+    use std::time::Duration;
+
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use base64::Engine as _;
+    use futures_util::SinkExt;
+    use serde_json::json;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::tungstenite::Message;
+
+    use super::{CommandHandle, Commands, ProcessResult};
+    use crate::config::{ConnectionConfig, ConnectionOptions};
+    use crate::error::{Error, Result};
+    use crate::process_socket::ProcessSocket;
+    use crate::transport::DataPlaneClient;
+
+    async fn accept_and_send(
+        listener: &TcpListener,
+        frames: Vec<serde_json::Value>,
+    ) -> tokio_tungstenite::WebSocketStream<tokio::net::TcpStream> {
+        let (stream, _) = listener.accept().await.expect("accept connection");
+        let mut ws = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("websocket handshake");
+        for frame in frames {
+            ws.send(Message::Text(frame.to_string().into()))
+                .await
+                .expect("send frame");
+        }
+        ws
+    }
+
+    /// Serve one stream that lags after `before`, then one replay stream.
+    async fn lagged_scenario(
+        replay: Vec<serde_json::Value>,
+        check: bool,
+    ) -> Result<ProcessResult> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let base_url = format!("http://{}", listener.local_addr().expect("local addr"));
+
+        let server = tokio::spawn(async move {
+            let _initial = accept_and_send(
+                &listener,
+                vec![
+                    json!({"type": "stdout", "cursor": 0, "data": BASE64.encode("before")}),
+                    json!({"type": "lagged", "dropped": 3}),
+                ],
+            )
+            .await;
+            let _replayed = accept_and_send(&listener, replay).await;
+            // Keep both server sockets open until the client is done reading.
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let config = ConnectionConfig::new(ConnectionOptions {
+            api_key: Some("key".to_string()),
+            ..ConnectionOptions::default()
+        });
+        let data_plane = DataPlaneClient::new(base_url.clone(), "token".to_string(), &config)
+            .expect("data plane client");
+        let commands = Commands::new(data_plane, serde_json::Map::new());
+        let socket = ProcessSocket::connect(
+            &base_url,
+            "token",
+            "/runtime/v1/process/proc-1/connect?since=0",
+        )
+        .await
+        .expect("initial socket");
+        let mut handle =
+            CommandHandle::new("proc-1".to_string(), socket, commands, check, Some(60_000));
+
+        let result = tokio::time::timeout(Duration::from_secs(10), handle.wait_process())
+            .await
+            .expect("lagged scenario timed out");
+        server.abort();
+        result
+    }
+
+    #[tokio::test]
+    async fn lagged_stream_backfills_dropped_output_via_reconnect() {
+        let result = lagged_scenario(
+            vec![
+                json!({"type": "started", "pid": "proc-1"}),
+                json!({"type": "stdout", "cursor": 1, "data": BASE64.encode("after")}),
+                json!({"type": "exit", "cursor": 2, "exit_code": 0}),
+            ],
+            false,
+        )
+        .await
+        .expect("recovered result");
+
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, b"beforeafter");
+        assert!(!result.truncated, "backfilled output must not be truncated");
+    }
+
+    #[tokio::test]
+    async fn lagged_stream_flags_dropped_output_when_backfill_is_impossible() {
+        let result = lagged_scenario(
+            vec![
+                json!({"type": "started", "pid": "proc-1"}),
+                json!({"type": "stdout", "cursor": 5, "data": BASE64.encode("later")}),
+                json!({"type": "exit", "cursor": 6, "exit_code": 0}),
+            ],
+            false,
+        )
+        .await
+        .expect("result with dropped output");
+
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout, b"beforelater");
+        assert!(result.truncated, "evicted backfill must set truncated");
+    }
+
+    #[tokio::test]
+    async fn lagged_drop_note_is_included_in_command_exit_error() {
+        let error = lagged_scenario(
+            vec![
+                json!({"type": "started", "pid": "proc-1"}),
+                json!({"type": "exit", "cursor": 9, "exit_code": 7}),
+            ],
+            true,
+        )
+        .await
+        .expect_err("non-zero exit with dropped output");
+
+        match error {
+            Error::CommandExit { result } => {
+                assert_eq!(result.exit_code, 7);
+                let error = result.error.expect("drop note");
+                assert!(
+                    error.contains("some process output was dropped before delivery"),
+                    "{error:?}"
+                );
+            }
+            other => panic!("expected CommandExit, got {other:?}"),
+        }
     }
 }

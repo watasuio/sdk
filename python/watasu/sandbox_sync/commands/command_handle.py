@@ -18,6 +18,11 @@ STREAM_RECONNECT_ATTEMPTS = 12
 STREAM_RECONNECT_BASE_DELAY_SEC = 0.25
 STREAM_RECONNECT_MAX_DELAY_SEC = 2.0
 
+# Sentinel exit code reported when the runtime finishes a command without an
+# explicit exit code (for example when it was killed or failed). Success is
+# only ever an explicit exit code of 0.
+MISSING_EXIT_CODE = -1
+
 
 class CommandHandle:
     """Handle for a running sandbox process stream."""
@@ -49,6 +54,8 @@ class CommandHandle:
         self._iteration_exception: Optional[Exception] = None
         self._next_cursor = 0
         self._disconnected = False
+        self._pending_lagged = False
+        self._output_dropped = False
 
     def __iter__(self):
         return self._handle_events()
@@ -68,8 +75,27 @@ class CommandHandle:
                     stream_error = error
                     break
 
-                self._advance_cursor(frame)
                 frame_type = frame.get("type")
+                if frame_type == "lagged":
+                    # The runtime dropped frames from this stream. Replay them
+                    # from the next undelivered cursor when the stream supports
+                    # reconnecting; otherwise flag the dropped output. Do not
+                    # advance the cursor from a lagged frame, or the replay
+                    # would skip the dropped events.
+                    if self._handle_reconnect is None:
+                        self._output_dropped = True
+                        continue
+                    self._pending_lagged = True
+                    break
+                if self._pending_lagged:
+                    cursor = frame.get("cursor")
+                    if isinstance(cursor, int):
+                        if cursor > self._next_cursor:
+                            # Backfill was impossible: the runtime evicted
+                            # events before the requested cursor.
+                            self._output_dropped = True
+                        self._pending_lagged = False
+                self._advance_cursor(frame)
                 if frame_type == "stdout":
                     out = _frame_data(frame)
                     self._stdout += out
@@ -83,11 +109,23 @@ class CommandHandle:
                     self._stdout += raw.decode("utf-8", "replace")
                     yield None, None, raw
                 elif frame_type == "exit":
+                    raw_exit_code = frame.get("exit_code", frame.get("exitCode"))
+                    error = frame.get("error")
+                    if raw_exit_code is None:
+                        # Killed/failed commands may finish without an exit code.
+                        # Keep exit_code a plain int and take the failure path.
+                        status = frame.get("status") or "failed"
+                        exit_code = MISSING_EXIT_CODE
+                        if error is None:
+                            error = f"command {status} without an exit code"
+                    else:
+                        exit_code = int(raw_exit_code)
                     self._result = CommandResult(
                         stderr=self._stderr,
                         stdout=self._stdout,
-                        exit_code=int(frame.get("exit_code") or 0),
-                        error=frame.get("error"),
+                        exit_code=exit_code,
+                        error=error,
+                        truncated=self._output_dropped,
                     )
                     self._close_events()
                     return
@@ -143,6 +181,7 @@ class CommandHandle:
                 stderr=self._stderr,
                 exit_code=self._result.exit_code,
                 error=self._result.error,
+                truncated=self._result.truncated,
             )
         return self._result
 

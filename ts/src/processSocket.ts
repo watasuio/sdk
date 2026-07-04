@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer'
 import WebSocket, { type RawData } from 'ws'
 
 import { KEEPALIVE_PING_INTERVAL_SEC } from './connectionConfig.js'
-import { SandboxError, TimeoutError } from './errors.js'
+import { NotFoundError, SandboxError, TimeoutError } from './errors.js'
 
 export type ProcessFrame = Record<string, unknown>
 
@@ -47,6 +47,16 @@ export class ProcessSocket implements AsyncIterable<ProcessFrame> {
       ws.once('open', () => {
         clearTimeout(timeout)
         resolve()
+      })
+      ws.once('unexpected-response', (_request, response) => {
+        clearTimeout(timeout)
+        if (response.statusCode === 404) {
+          reject(new NotFoundError(
+            'process not found: process records are purged when the sandbox is destroyed; terminal results were delivered via wait()/callbacks'
+          ))
+        } else {
+          reject(new SandboxError(`process websocket failed to connect (status ${response.statusCode})`))
+        }
       })
       ws.once('error', () => {
         clearTimeout(timeout)

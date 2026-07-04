@@ -26,6 +26,9 @@ class ProcessStatus:
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     exit_code: Optional[int] = None
+    # Set when a kill has been requested but the process has not finished yet
+    # (the runtime reports a non-terminal ``killing`` status in that window).
+    kill_requested_at: Optional[str] = None
 
 
 @dataclass

@@ -83,6 +83,7 @@ impl Pty {
             socket,
             Commands::new(self.data_plane.clone(), Default::default()),
             false,
+            opts.timeout_ms,
         ))
     }
 
@@ -102,6 +103,7 @@ impl Pty {
             socket,
             Commands::new(self.data_plane.clone(), Default::default()),
             false,
+            None,
         ))
     }
 

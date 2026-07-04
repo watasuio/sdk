@@ -338,7 +338,7 @@ async fn exercise_files(sbx: &Sandbox, prefix: &str) -> watasu::Result<()> {
     assert_eq!(renamed.name, "renamed.txt");
     let events = tokio::time::timeout(Duration::from_secs(10), watcher.next_events())
         .await
-        .map_err(|_| Error::Timeout)??;
+        .map_err(|_| Error::Timeout("timed out waiting for filesystem watch events".to_string()))??;
     assert!(events
         .unwrap_or_default()
         .iter()

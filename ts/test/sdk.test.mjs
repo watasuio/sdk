@@ -53,6 +53,7 @@ import {
   waitForURL,
 } from '../dist/index.js'
 import DefaultSandbox from '../dist/index.js'
+import { commandWaitDeadlineMs } from '../dist/commands.js'
 import { errorFromResponse } from '../dist/errors.js'
 import {
   ConnectionConfig as CodeInterpreterConnectionConfig,
@@ -319,6 +320,74 @@ test('command handle raises on non-zero exit and preserves output', async () => 
   })
 })
 
+test('command handle treats missing exit code as failure with status and stderr', async () => {
+  async function* frames() {
+    yield { type: 'stderr', data: 'Ym9vbQo=' }
+    yield { type: 'exit', exit_code: null, status: 'killed' }
+  }
+  const socket = { close() {} }
+  const handle = new CommandHandle(123, socket, async () => true, frames())
+
+  await assert.rejects(handle.wait(), (error) => {
+    assert.ok(error instanceof CommandExitError)
+    assert.equal(error.exitCode, -1)
+    assert.match(error.message, /killed/)
+    assert.match(error.message, /boom/)
+    assert.equal(error.stderr, 'boom\n')
+    return true
+  })
+})
+
+test('command handle treats absent exit code as failed and keeps runtime error', async () => {
+  async function* absentFrames() {
+    yield { type: 'exit' }
+  }
+  const socket = { close() {} }
+  const absentHandle = new CommandHandle(123, socket, async () => true, absentFrames())
+  await assert.rejects(absentHandle.wait(), (error) => {
+    assert.ok(error instanceof CommandExitError)
+    assert.equal(error.exitCode, -1)
+    assert.match(error.message, /command failed without an exit code/)
+    return true
+  })
+
+  async function* runtimeErrorFrames() {
+    yield { type: 'exit', exit_code: null, status: 'killed', error: 'runtime says no' }
+  }
+  const runtimeErrorHandle = new CommandHandle(123, socket, async () => true, runtimeErrorFrames())
+  await assert.rejects(runtimeErrorHandle.wait(), (error) => {
+    assert.ok(error instanceof CommandExitError)
+    assert.equal(error.exitCode, -1)
+    assert.equal(error.message, 'runtime says no')
+    return true
+  })
+})
+
+test('command wait enforces a client-side deadline with grace', async (t) => {
+  assert.equal(commandWaitDeadlineMs(5_000), 65_000)
+  assert.equal(commandWaitDeadlineMs(), 3_660_000)
+  assert.equal(commandWaitDeadlineMs(0), 3_660_000)
+
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const socket = { close() {} }
+  const handle = new CommandHandle(
+    123,
+    socket,
+    async () => true,
+    (async function* () { await new Promise(() => {}) })()
+  )
+
+  const expectation = assert.rejects(handle.wait(5_000), (error) => {
+    assert.equal(error.name, 'TimeoutError')
+    assert.match(error.message, /may still be running/)
+    assert.match(error.message, /check its status/)
+    return true
+  })
+  await Promise.resolve()
+  t.mock.timers.tick(65_001)
+  await expectation
+})
+
 test('command handle closes stream after terminal exit frame', async () => {
   async function* frames() {
     yield { type: 'stdout', data: 'b2sK' }
@@ -369,6 +438,85 @@ test('command handle reconnects from the next cursor when stream ends before exi
   assert.deepEqual(cursors, [1])
   assert.equal(sockets[0].closes, 1)
   assert.equal(sockets[1].closes, 1)
+})
+
+function laggedHandle(secondFrames, cursors = []) {
+  async function* firstFrames() {
+    yield { type: 'stdout', cursor: 0, data: 'YmVmb3JlCg==' }
+    yield { type: 'lagged', dropped: 3 }
+  }
+  const socket = { close() {} }
+  return new CommandHandle(
+    123,
+    socket,
+    async () => true,
+    firstFrames(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    async (cursor) => {
+      cursors.push(cursor)
+      return { socket: { close() {} }, events: secondFrames() }
+    }
+  )
+}
+
+test('command handle backfills lagged output via reconnect', async () => {
+  async function* secondFrames() {
+    yield { type: 'stdout', cursor: 1, data: 'YWZ0ZXIK' }
+    yield { type: 'exit', cursor: 2, exit_code: 0 }
+  }
+  const cursors = []
+  const handle = laggedHandle(secondFrames, cursors)
+
+  const result = await handle.wait()
+
+  assert.equal(result.stdout, 'before\nafter\n')
+  assert.deepEqual(cursors, [1])
+  assert.equal(result.truncated, false)
+})
+
+test('command handle flags dropped output when lagged backfill is impossible', async () => {
+  async function* secondFrames() {
+    yield { type: 'stdout', cursor: 5, data: 'bGF0ZXIK' }
+    yield { type: 'exit', cursor: 6, exit_code: 0 }
+  }
+  const handle = laggedHandle(secondFrames)
+
+  const result = await handle.wait()
+
+  assert.equal(result.stdout, 'before\nlater\n')
+  assert.equal(result.truncated, true)
+})
+
+test('command handle notes dropped output in the exit error', async () => {
+  async function* secondFrames() {
+    yield { type: 'exit', cursor: 9, exit_code: 3 }
+  }
+  const handle = laggedHandle(secondFrames)
+
+  await assert.rejects(handle.wait(), (error) => {
+    assert.ok(error instanceof CommandExitError)
+    assert.equal(error.exitCode, 3)
+    assert.equal(error.truncated, true)
+    assert.match(error.message, /some process output was dropped before delivery/)
+    return true
+  })
+})
+
+test('command handle without reconnect flags lagged output as dropped', async () => {
+  async function* frames() {
+    yield { type: 'stdout', cursor: 0, data: 'YQo=' }
+    yield { type: 'lagged', dropped: 2 }
+    yield { type: 'exit', cursor: 7, exit_code: 0 }
+  }
+  const socket = { close() {} }
+  const handle = new CommandHandle(123, socket, async () => true, frames())
+
+  const result = await handle.wait()
+
+  assert.equal(result.truncated, true)
 })
 
 test('command handle treats pty frames as terminal output', async () => {
@@ -481,11 +629,14 @@ test('commands expose process status output polling and stop routes', async () =
     },
     deleteJson(path, opts) {
       calls.push(['delete', path, opts])
+      // Kill responses can be non-terminal: the runtime may still be
+      // signalling the process, so no exit code exists yet.
       return Promise.resolve({
         pid: 'proc/native',
         id: 'proc/native',
-        status: 'killed',
-        exit_code: -15,
+        status: 'killing',
+        exit_code: null,
+        kill_requested_at: '2026-07-04T12:00:00Z',
       })
     },
   }, new ConnectionConfig({ apiKey: 'key' }))
@@ -504,7 +655,9 @@ test('commands expose process status output polling and stop routes', async () =
   assert.equal(status.status, 'running')
   assert.deepEqual(output.events[0].data, new Uint8Array([0, 1, 2]))
   assert.equal(output.nextCursor, 42)
-  assert.equal(stopped.status, 'killed')
+  assert.equal(stopped.status, 'killing')
+  assert.equal(stopped.exitCode, undefined)
+  assert.equal(stopped.killRequestedAt, '2026-07-04T12:00:00Z')
   assert.deepEqual(calls, [
     ['get', '/runtime/v1/process/proc%2Fnative', { requestTimeoutMs: 5 }],
     ['get', '/runtime/v1/process/proc%2Fnative/output?since=40&limit_bytes=1024', {
@@ -517,6 +670,51 @@ test('commands expose process status output polling and stop routes', async () =
       signal: controller.signal,
     }],
   ])
+})
+
+test('commands map process 404s to purged-records guidance', async () => {
+  const commands = new Commands({
+    getJson() {
+      return Promise.reject(errorFromResponse(404, { error: 'not_found', message: 'no rows' }))
+    },
+  }, new ConnectionConfig({ apiKey: 'key' }))
+
+  for (const call of [
+    () => commands.process('proc-1'),
+    () => commands.readProcessOutput('proc-1'),
+  ]) {
+    await assert.rejects(call(), (error) => {
+      assert.equal(error.name, 'NotFoundError')
+      assert.match(error.message, /purged when the sandbox is destroyed/)
+      assert.match(error.message, /wait\(\)\/callbacks/)
+      return true
+    })
+  }
+})
+
+test('process socket maps handshake 404 to purged-records guidance', async () => {
+  const { createServer } = await import('node:http')
+  const server = createServer((_request, response) => {
+    response.statusCode = 404
+    response.end('not found')
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address()
+
+  const socket = new ProcessSocket(
+    `http://127.0.0.1:${port}`,
+    'token',
+    '/runtime/v1/process/proc-1/connect?since=0'
+  )
+  try {
+    await assert.rejects(socket.connect(), (error) => {
+      assert.equal(error.name, 'NotFoundError')
+      assert.match(error.message, /purged when the sandbox is destroyed/)
+      return true
+    })
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
 })
 
 test('pty kill forwards per-call request options', async () => {

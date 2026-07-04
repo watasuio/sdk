@@ -11,6 +11,7 @@ from watasu._transport.process_ws import (
     QueuedProcessEventStream,
 )
 from watasu.connection_config import ConnectionConfig, Username
+from watasu.exceptions import NotFoundException
 from watasu.sandbox.commands.main import (
     ProcessInfo,
     ProcessOutputEvent,
@@ -53,10 +54,13 @@ class Commands:
 
     def process(self, pid, request_timeout: Optional[float] = None) -> ProcessStatus:
         """Return current process status without attaching a WebSocket."""
-        payload = self._data_plane.get_json(
-            f"/runtime/v1/process/{_path_component(pid)}",
-            request_timeout=request_timeout,
-        )
+        try:
+            payload = self._data_plane.get_json(
+                f"/runtime/v1/process/{_path_component(pid)}",
+                request_timeout=request_timeout,
+            )
+        except NotFoundException as error:
+            raise NotFoundException(_process_purged_message(pid)) from error
         return _process_status(payload)
 
     def read_process_output(
@@ -67,11 +71,14 @@ class Commands:
         request_timeout: Optional[float] = None,
     ) -> ProcessOutputSnapshot:
         """Read currently available process output since a cursor without blocking."""
-        payload = self._data_plane.get_json(
-            f"/runtime/v1/process/{_path_component(pid)}/output",
-            params={"since": since, "limit_bytes": limit_bytes},
-            request_timeout=request_timeout,
-        )
+        try:
+            payload = self._data_plane.get_json(
+                f"/runtime/v1/process/{_path_component(pid)}/output",
+                params={"since": since, "limit_bytes": limit_bytes},
+                request_timeout=request_timeout,
+            )
+        except NotFoundException as error:
+            raise NotFoundException(_process_purged_message(pid)) from error
         return _process_output_snapshot(payload)
 
     def stop_process(
@@ -264,13 +271,20 @@ class Commands:
         timeout: Optional[float],
         request_timeout: Optional[float],
     ):
-        socket = ProcessSocket(
-            self._data_plane.base_url,
-            self._data_plane.token,
-            f"/runtime/v1/process/{_path_component(pid)}/connect?since={cursor}",
-            request_timeout=request_timeout,
-            headers=self._connection_config.sandbox_headers,
-        ).connect()
+        try:
+            socket = ProcessSocket(
+                self._data_plane.base_url,
+                self._data_plane.token,
+                f"/runtime/v1/process/{_path_component(pid)}/connect?since={cursor}",
+                request_timeout=request_timeout,
+                headers=self._connection_config.sandbox_headers,
+            ).connect()
+        except Exception as error:
+            # websocket-client raises WebSocketBadStatusException with a
+            # status_code attribute when the runtime rejects the upgrade.
+            if getattr(error, "status_code", None) == 404:
+                raise NotFoundException(_process_purged_message(pid)) from error
+            raise
         frames = socket.frames(timeout=timeout)
         first = _next_started(frames)
         actual_pid = first.get("pid") or first.get("process", {}).get("pid") or pid
@@ -323,6 +337,7 @@ def _process_status(payload) -> ProcessStatus:
         started_at=_value(item, "started_at", "startedAt"),
         finished_at=_value(item, "finished_at", "finishedAt"),
         exit_code=_value(item, "exit_code", "exitCode"),
+        kill_requested_at=_value(item, "kill_requested_at", "killRequestedAt"),
     )
 
 
@@ -351,6 +366,13 @@ def _process_output_event(payload) -> ProcessOutputEvent:
 
 def _path_component(value) -> str:
     return quote(str(value), safe="")
+
+
+def _process_purged_message(pid) -> str:
+    return (
+        f"process {pid} not found: process records are purged when the sandbox "
+        "is destroyed; terminal results were delivered via wait()/callbacks"
+    )
 
 
 def _value(mapping, *keys, default=None):

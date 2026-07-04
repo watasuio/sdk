@@ -451,11 +451,14 @@ def test_commands_process_polling_routes_and_decodes_output():
 
         def delete_json(self, path, params=None, request_timeout=None):
             calls.append(("delete", path, params, request_timeout))
+            # Kill responses can be non-terminal: the runtime may still be
+            # signalling the process, so no exit code exists yet.
             return {
                 "pid": "proc/native",
                 "id": "proc/native",
-                "status": "killed",
-                "exit_code": -15,
+                "status": "killing",
+                "exit_code": None,
+                "kill_requested_at": "2026-07-04T12:00:00Z",
             }
 
     commands = SyncCommands(FakeDataPlane(), ConnectionConfig(api_key="key"))
@@ -477,7 +480,9 @@ def test_commands_process_polling_routes_and_decodes_output():
     assert status.exit_code == 0
     assert output.events[0].data == b"\x00\x01\x02"
     assert output.next_cursor == 42
-    assert stopped.status == "killed"
+    assert stopped.status == "killing"
+    assert stopped.exit_code is None
+    assert stopped.kill_requested_at == "2026-07-04T12:00:00Z"
     assert calls == [
         ("get", "/runtime/v1/process/proc%2Fnative", None, 5),
         (
@@ -567,6 +572,167 @@ def test_sync_command_handle_reconnects_from_next_cursor_before_exit():
     assert cursors == [1]
     assert first.closed == 1
     assert second.closed == 1
+
+
+def test_command_handle_lagged_stream_backfills_via_reconnect():
+    first = iter(
+        [
+            {
+                "type": "stdout",
+                "cursor": 0,
+                "data": base64.b64encode(b"before\n").decode(),
+            },
+            {"type": "lagged", "dropped": 3},
+        ]
+    )
+    second = iter(
+        [
+            {
+                "type": "stdout",
+                "cursor": 1,
+                "data": base64.b64encode(b"after\n").decode(),
+            },
+            {"type": "exit", "cursor": 2, "exit_code": 0},
+        ]
+    )
+    cursors = []
+    handle = CommandHandle(
+        pid="proc-1",
+        handle_kill=lambda: True,
+        events=first,
+        handle_reconnect=lambda cursor: cursors.append(cursor) or second,
+    )
+
+    result = handle.wait()
+
+    assert result.stdout == "before\nafter\n"
+    assert cursors == [1]
+    assert result.truncated is False
+
+
+def test_command_handle_lagged_stream_flags_dropped_output_on_cursor_gap():
+    first = iter(
+        [
+            {
+                "type": "stdout",
+                "cursor": 0,
+                "data": base64.b64encode(b"before\n").decode(),
+            },
+            {"type": "lagged", "dropped": 3},
+        ]
+    )
+    second = iter(
+        [
+            {
+                "type": "stdout",
+                "cursor": 5,
+                "data": base64.b64encode(b"later\n").decode(),
+            },
+            {"type": "exit", "cursor": 6, "exit_code": 0},
+        ]
+    )
+    handle = CommandHandle(
+        pid="proc-1",
+        handle_kill=lambda: True,
+        events=first,
+        handle_reconnect=lambda cursor: second,
+    )
+
+    result = handle.wait()
+
+    assert result.stdout == "before\nlater\n"
+    assert result.truncated is True
+
+
+def test_command_handle_lagged_without_reconnect_flags_dropped_output():
+    frames = iter(
+        [
+            {"type": "stdout", "cursor": 0, "data": base64.b64encode(b"a\n").decode()},
+            {"type": "lagged", "dropped": 2},
+            {"type": "exit", "cursor": 7, "exit_code": 0},
+        ]
+    )
+    handle = CommandHandle(pid="proc-1", handle_kill=lambda: True, events=frames)
+
+    result = handle.wait()
+
+    assert result.truncated is True
+
+
+def test_command_handle_dropped_output_note_included_in_exit_exception():
+    first = iter(
+        [
+            {
+                "type": "stdout",
+                "cursor": 0,
+                "data": base64.b64encode(b"before\n").decode(),
+            },
+            {"type": "lagged", "dropped": 3},
+        ]
+    )
+    second = iter([{"type": "exit", "cursor": 9, "exit_code": 3}])
+    handle = CommandHandle(
+        pid="proc-1",
+        handle_kill=lambda: True,
+        events=first,
+        handle_reconnect=lambda cursor: second,
+    )
+
+    with pytest.raises(CommandExitException) as exc:
+        handle.wait()
+
+    assert exc.value.exit_code == 3
+    assert exc.value.truncated is True
+    assert "some process output was dropped before delivery" in str(exc.value)
+
+
+def test_commands_map_process_404_to_purged_records_message():
+    class FakeDataPlane:
+        base_url = "http://localhost:49983"
+        token = "data-token"
+
+        def get_json(self, path, params=None, request_timeout=None):
+            raise watasu.NotFoundException("no rows")
+
+    commands = SyncCommands(FakeDataPlane(), ConnectionConfig(api_key="key"))
+
+    with pytest.raises(
+        watasu.NotFoundException, match="purged when the sandbox is destroyed"
+    ) as exc:
+        commands.process("proc-1")
+    assert "wait()/callbacks" in str(exc.value)
+
+    with pytest.raises(
+        watasu.NotFoundException, match="purged when the sandbox is destroyed"
+    ):
+        commands.read_process_output("proc-1")
+
+
+def test_commands_connect_maps_websocket_404_to_purged_records_message(monkeypatch):
+    class FakeBadStatus(Exception):
+        status_code = 404
+
+    class FakeSocket:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def connect(self):
+            raise FakeBadStatus("Handshake status 404 Not Found")
+
+    monkeypatch.setattr(
+        "watasu.sandbox_sync.commands.command.ProcessSocket", FakeSocket
+    )
+
+    class FakeDataPlane:
+        base_url = "http://localhost:49983"
+        token = "data-token"
+
+    commands = SyncCommands(FakeDataPlane(), ConnectionConfig(api_key="key"))
+
+    with pytest.raises(
+        watasu.NotFoundException, match="purged when the sandbox is destroyed"
+    ):
+        commands.connect("proc-1")
 
 
 def test_volume_helper_uses_control_api_paths_and_snake_case_payloads(monkeypatch):
@@ -735,6 +901,59 @@ def test_command_handle_raises_on_non_zero_exit():
     assert exc.value.exit_code == 7
     assert exc.value.stdout == "before\n"
     assert exc.value.stderr == "bad\n"
+
+
+def test_command_handle_null_exit_code_takes_failure_path_with_status():
+    frames = iter(
+        [
+            {"type": "stderr", "data": "boom\n"},
+            {"type": "exit", "exit_code": None, "status": "killed", "error": None},
+        ]
+    )
+    handle = CommandHandle(pid=123, handle_kill=lambda: True, events=frames)
+
+    with pytest.raises(CommandExitException) as exc:
+        handle.wait()
+
+    assert exc.value.exit_code == -1
+    assert exc.value.error == "command killed without an exit code"
+    message = str(exc.value)
+    assert "killed" in message
+    assert "boom" in message
+
+
+def test_command_handle_absent_exit_code_defaults_to_failed_status():
+    frames = iter([{"type": "exit"}])
+    handle = CommandHandle(pid=123, handle_kill=lambda: True, events=frames)
+
+    with pytest.raises(CommandExitException) as exc:
+        handle.wait()
+
+    assert exc.value.exit_code == -1
+    assert exc.value.error == "command failed without an exit code"
+
+
+def test_command_handle_null_exit_code_keeps_runtime_error_message():
+    frames = iter(
+        [{"type": "exit", "exit_code": None, "status": "killed", "error": "runtime says no"}]
+    )
+    handle = CommandHandle(pid=123, handle_kill=lambda: True, events=frames)
+
+    with pytest.raises(CommandExitException) as exc:
+        handle.wait()
+
+    assert exc.value.exit_code == -1
+    assert exc.value.error == "runtime says no"
+
+
+def test_command_handle_explicit_zero_exit_code_is_still_success():
+    frames = iter([{"type": "exit", "exit_code": 0, "error": None}])
+    handle = CommandHandle(pid=123, handle_kill=lambda: True, events=frames)
+
+    result = handle.wait()
+
+    assert result.exit_code == 0
+    assert result.error is None
 
 
 def test_command_handle_streams_stdout_callback_before_exit():

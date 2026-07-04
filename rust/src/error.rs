@@ -18,9 +18,9 @@ pub enum Error {
     /// The requested operation conflicts with current resource state.
     #[error("conflict: {0}")]
     Conflict(String),
-    /// The request timed out.
-    #[error("request timed out")]
-    Timeout,
+    /// The request or wait timed out.
+    #[error("{0}")]
+    Timeout(String),
     /// The API rejected the request arguments.
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
@@ -49,7 +49,15 @@ pub enum Error {
         actual_bytes: usize,
     },
     /// A command exited with a non-zero code and preserved output.
-    #[error("command exited with code {}", result.exit_code)]
+    #[error(
+        "command exited with code {}{}",
+        result.exit_code,
+        result
+            .error
+            .as_deref()
+            .map(|error| format!(": {error}"))
+            .unwrap_or_default()
+    )]
     CommandExit {
         /// Captured command result.
         result: crate::CommandResult,
@@ -106,7 +114,7 @@ impl Error {
             401 | 403 => Self::Authentication(message),
             404 => Self::NotFound(message),
             409 => Self::Conflict(message),
-            408 | 504 => Self::Timeout,
+            408 | 504 => Self::Timeout("request timed out".to_string()),
             400 | 422 => Self::InvalidArgument(message),
             429 => Self::RateLimit(message),
             _ if code == "not_enough_space" => Self::NotEnoughSpace(message),

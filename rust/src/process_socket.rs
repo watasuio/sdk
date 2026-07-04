@@ -29,7 +29,18 @@ impl ProcessSocket {
             HeaderName::from_static("authorization"),
             HeaderValue::from_str(&format!("Bearer {token}"))?,
         );
-        let (socket, _response) = connect_async(request).await?;
+        let (socket, _response) = connect_async(request).await.map_err(|error| {
+            if let tokio_tungstenite::tungstenite::Error::Http(response) = &error {
+                if response.status().as_u16() == 404 {
+                    return Error::NotFound(
+                        "process not found: process records are purged when the sandbox is \
+                         destroyed; terminal results were delivered via wait()/callbacks"
+                            .to_string(),
+                    );
+                }
+            }
+            Error::from(error)
+        })?;
         Ok(Self {
             socket,
             pending_frames: VecDeque::new(),
