@@ -1,6 +1,9 @@
-use std::time::Duration;
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
-use reqwest::{Client, Method, Response};
+use reqwest::{Client, ClientBuilder, Method, Response};
 use serde_json::Value;
 
 use crate::config::ConnectionConfig;
@@ -14,9 +17,22 @@ pub(crate) struct ControlClient {
 
 impl ControlClient {
     pub(crate) fn new(config: ConnectionConfig) -> Result<Self> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.request_timeout_secs))
-            .build()?;
+        Self::build(config, true)
+    }
+
+    pub(crate) fn new_without_request_timeout(config: ConnectionConfig) -> Result<Self> {
+        Self::build(config, false)
+    }
+
+    fn build(config: ConnectionConfig, request_timeout: bool) -> Result<Self> {
+        let mut builder = Client::builder();
+
+        if request_timeout {
+            builder = builder.timeout(Duration::from_secs(config.request_timeout_secs));
+        }
+
+        builder = apply_api_origin(builder, &config)?;
+        let client = builder.build()?;
         Ok(Self { config, client })
     }
 
@@ -78,6 +94,48 @@ impl ControlClient {
             request = request.json(&body);
         }
         json_response(request.send().await?).await
+    }
+}
+
+fn apply_api_origin(builder: ClientBuilder, config: &ConnectionConfig) -> Result<ClientBuilder> {
+    let Some(origin_ip) = config.api_origin_ip.as_deref() else {
+        return Ok(builder);
+    };
+
+    let origin_ip = origin_ip.parse::<IpAddr>().map_err(|_| {
+        Error::InvalidArgument("WATASU_API_ORIGIN_IP must be an IPv4 or IPv6 address".to_string())
+    })?;
+    let api_url = url::Url::parse(&config.api_url)?;
+    let hostname = api_url.host_str().ok_or_else(|| {
+        Error::InvalidArgument("control-plane API URL must include a hostname".to_string())
+    })?;
+    let port = api_url.port_or_known_default().ok_or_else(|| {
+        Error::InvalidArgument(
+            "control-plane API URL must use a known or explicit port".to_string(),
+        )
+    })?;
+
+    Ok(builder.resolve(hostname, SocketAddr::new(origin_ip, port)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ControlClient;
+    use crate::{ConnectionConfig, ConnectionOptions, Error};
+
+    #[test]
+    fn control_client_rejects_an_invalid_origin_ip() {
+        let config = ConnectionConfig::new(ConnectionOptions {
+            api_url: Some("https://api.watasu.test/v1".to_string()),
+            api_origin_ip: Some("not-an-ip".to_string()),
+            ..ConnectionOptions::default()
+        });
+
+        assert!(matches!(
+            ControlClient::new_without_request_timeout(config),
+            Err(Error::InvalidArgument(message))
+                if message.contains("WATASU_API_ORIGIN_IP")
+        ));
     }
 }
 

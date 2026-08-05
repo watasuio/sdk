@@ -14,6 +14,11 @@ pub struct ConnectionOptions {
     pub domain: Option<String>,
     /// Absolute control-plane API URL. Defaults to `https://api.<domain>/v1`.
     pub api_url: Option<String>,
+    /// Optional origin IP for the control-plane API hostname.
+    ///
+    /// The HTTP client still uses the hostname from `api_url` for the Host
+    /// header and TLS SNI, but opens the connection directly to this address.
+    pub api_origin_ip: Option<String>,
     /// Absolute sandbox data-plane URL override, primarily for local runtimes.
     pub sandbox_url: Option<String>,
     /// Data-plane base domain used only for derived public port hosts.
@@ -31,6 +36,8 @@ pub struct ConnectionConfig {
     pub domain: String,
     /// Absolute control-plane API URL.
     pub api_url: String,
+    /// Optional direct origin IP for the control-plane API hostname.
+    pub api_origin_ip: Option<String>,
     /// Sandbox data-plane URL override, primarily for local runtimes.
     pub sandbox_url: Option<String>,
     /// Data-plane domain used for public sandbox port hostnames.
@@ -55,6 +62,9 @@ impl ConnectionConfig {
             api_key: opts.api_key.or_else(|| env::var("WATASU_API_KEY").ok()),
             domain,
             api_url,
+            api_origin_ip: opts
+                .api_origin_ip
+                .or_else(|| env::var("WATASU_API_ORIGIN_IP").ok()),
             sandbox_url: opts
                 .sandbox_url
                 .or_else(|| env::var("WATASU_SANDBOX_URL").ok()),

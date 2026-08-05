@@ -13,6 +13,10 @@ use crate::transport::{ControlClient, DataPlaneClient};
 pub struct CreateOptions {
     /// Connection options used for control-plane and data-plane requests.
     pub connection: ConnectionOptions,
+    /// Keep the synchronous create request open until the platform returns a
+    /// sandbox or a terminal error, without applying the ordinary HTTP request
+    /// deadline.
+    pub wait_for_ready_without_request_timeout: bool,
     /// Template slug. Defaults to `base`.
     pub template: String,
     /// Sandbox lifetime in seconds.
@@ -50,6 +54,7 @@ impl Default for CreateOptions {
     fn default() -> Self {
         Self {
             connection: ConnectionOptions::default(),
+            wait_for_ready_without_request_timeout: false,
             template: "base".to_string(),
             timeout_seconds: 300,
             metadata: Default::default(),
@@ -338,7 +343,11 @@ impl Sandbox {
     /// Create a sandbox and return it only after the API supplies a data-plane session.
     pub async fn create(opts: CreateOptions) -> Result<Self> {
         let config = ConnectionConfig::new(opts.connection.clone());
-        let control = ControlClient::new(config.clone())?;
+        let control = if opts.wait_for_ready_without_request_timeout {
+            ControlClient::new_without_request_timeout(config.clone())?
+        } else {
+            ControlClient::new(config.clone())?
+        };
         let envs = opts.envs.clone();
         let response = control.post("/sandboxes", create_payload(&opts)?).await?;
         Self::from_response(config, control, response, envs)
@@ -1191,16 +1200,16 @@ fn host_only(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use crate::config::{ConnectionConfig, ConnectionOptions};
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
     use super::{
-        create_payload, data_plane_from_session, metrics_list, network_payload,
+        CreateOptions, ListOptions, NetworkUpdateOptions, SandboxListQuery, SnapshotListOptions,
+        VolumeMount, create_payload, data_plane_from_session, metrics_list, network_payload,
         put_if_non_empty_volume_mounts, sandbox_info, sandbox_list_path, sandbox_network_path,
-        snapshot_info, snapshot_list_path, CreateOptions, ListOptions, NetworkUpdateOptions,
-        SandboxListQuery, SnapshotListOptions, VolumeMount,
+        snapshot_info, snapshot_list_path,
     };
 
     #[test]

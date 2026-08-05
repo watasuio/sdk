@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.48"
+watasu = "0.1.73"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -29,6 +29,14 @@ async fn main() -> watasu::Result<()> {
 
 `Sandbox::create` and `Sandbox::connect` return only after the Watasu API
 supplies a usable data-plane session. The crate does not poll sandbox readiness.
+
+Long-running server-side create calls can set
+`CreateOptions::wait_for_ready_without_request_timeout` so the ordinary HTTP
+deadline does not interrupt a progressing synchronous create. Trusted
+server-to-server deployments can set `ConnectionOptions::api_origin_ip` or
+`WATASU_API_ORIGIN_IP` to connect directly to the control-plane origin while
+preserving the API hostname for TLS SNI and the HTTP Host header. Other control
+and data-plane calls retain `ConnectionOptions::request_timeout_secs`.
 
 Use `commands.run(...)` for shell snippets. Use `run_process` when you need the
 typed `/runtime/v1/process` start fields and byte-preserving output:
