@@ -6,7 +6,7 @@ Rust SDK for Watasu.
 
 ```toml
 [dependencies]
-watasu = "0.1.73"
+watasu = "0.1.74"
 ```
 
 Set `WATASU_API_KEY` before using the SDK.
@@ -241,6 +241,66 @@ let page = Sandbox::list(ListOptions {
 for sandbox in page.sandboxes {
     println!("{} {:?}", sandbox.sandbox_id, sandbox.state);
 }
+# Ok(())
+# }
+```
+
+## Native Filesystem Operations
+
+```rust
+use watasu::{
+    CreateOptions, GlobKind, GlobOptions, GrepOptions, ReadRangeOptions, Sandbox,
+};
+
+# async fn run() -> watasu::Result<()> {
+let sbx = Sandbox::create(CreateOptions::default()).await?;
+
+let range = sbx
+    .files
+    .read_range(
+        "/workspace/project/src/lib.rs",
+        ReadRangeOptions {
+            offset_bytes: 0,
+            limit_bytes: 4096,
+        },
+    )
+    .await?;
+println!("read {} of {} bytes", range.data.len(), range.total_bytes);
+
+let files = sbx
+    .files
+    .glob(
+        "**/*.rs",
+        GlobOptions {
+            path: "/workspace/project".into(),
+            kind: GlobKind::Files,
+            exclude: vec!["**/generated/**".into()],
+            ..Default::default()
+        },
+    )
+    .await?;
+
+let matches = sbx
+    .files
+    .grep(
+        "TODO|FIXME",
+        GrepOptions {
+            path: "/workspace/project/src/lib.rs".into(),
+            glob: Some("*.rs".into()),
+            ..Default::default()
+        },
+    )
+    .await?;
+println!("{} files, {} matches", files.matches.len(), matches.matches.len());
+
+let deleted = sbx
+    .files
+    .delete_many(vec![
+        "/workspace/project/tmp/a".into(),
+        "/workspace/project/tmp/b".into(),
+    ])
+    .await?;
+println!("deleted {}, missing {}", deleted.deleted.len(), deleted.missing.len());
 # Ok(())
 # }
 ```

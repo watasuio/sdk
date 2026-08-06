@@ -48,7 +48,9 @@ pub use config::{ConnectionConfig, ConnectionOptions, KEEPALIVE_PING_INTERVAL_SE
 pub use error::{Error, Result};
 pub use filesystem::{
     ApplyDiffFailedHunk, ApplyDiffFailure, ApplyDiffFileSummary, ApplyDiffOptions, ApplyDiffReport,
-    ApplyDiffSummary, EntryInfo, FileReadOptions, FileType, Filesystem, WriteEntry, WriteInfo,
+    ApplyDiffSummary, DeleteFailure, DeleteManyResult, EntryInfo, FileReadOptions, FileType,
+    Filesystem, GlobKind, GlobOptions, GlobResult, GrepMatch, GrepOptions, GrepResult,
+    ReadRangeOptions, ReadRangeResult, WriteEntry, WriteInfo,
 };
 pub use filesystem::{FilesystemEvent, WatchHandle, WatchOptions};
 pub use git::{
