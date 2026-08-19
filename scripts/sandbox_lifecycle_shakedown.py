@@ -354,7 +354,7 @@ class LifecycleShakedown:
         )
         try:
             limits = self._limits()
-            total_requested = self.args.sandboxes + self.args.destroy_race_sandboxes + 1
+            total_requested = self.args.sandboxes + self.args.destroy_race_sandboxes + 2
             available = limits["max_running_instances"] - limits["running_instances"]
             if total_requested > available:
                 raise ShakedownFailure(
@@ -366,12 +366,12 @@ class LifecycleShakedown:
                 self.args.create_interval_seconds,
                 1.0 / max(1, limits["create_rate_per_second"]) + 0.10,
             )
-            soak = self._create_sandbox(
+            storm_soak = self._create_sandbox(
                 ordinal=0,
-                role="soak",
+                role="storm-soak",
                 timeout_seconds=self.args.soak_timeout_seconds,
             )
-            self._prime_sandbox(soak)
+            self._prime_sandbox(storm_soak)
 
             workers: List[SandboxRecord] = []
             for ordinal in range(1, self.args.sandboxes + 1):
@@ -384,15 +384,22 @@ class LifecycleShakedown:
                 self._prime_sandbox(record)
                 workers.append(record)
 
-            self._require_fleet_coverage(workers + [soak])
+            self._require_fleet_coverage(workers + [storm_soak])
             self._run_random_cycles(workers)
             self._run_overlap_scenarios(workers)
-            self._run_request_storm(workers + [soak])
+            self._run_request_storm(workers + [storm_soak])
             self._run_destroy_races(
                 start_ordinal=self.args.sandboxes + 1,
                 create_interval=create_interval,
             )
-            self._run_timeout_soak(soak)
+            self._sleep_create_interval(create_interval)
+            timeout_soak = self._create_sandbox(
+                ordinal=self.args.sandboxes + self.args.destroy_race_sandboxes + 1,
+                role="timeout-soak",
+                timeout_seconds=self.args.soak_timeout_seconds,
+            )
+            self._prime_sandbox(timeout_soak)
+            self._run_timeout_soak(timeout_soak)
         except BaseException as error:
             self._record_failure(error)
         finally:
@@ -631,7 +638,9 @@ class LifecycleShakedown:
                             f"to {response_id}"
                         )
                     state = sandbox.get("state")
-                    expected_states = {"ready", "stopped"} if record.role == "soak" else {"ready"}
+                    expected_states = (
+                        {"ready", "stopped"} if record.role == "storm-soak" else {"ready"}
+                    )
                     if state not in expected_states:
                         raise ShakedownFailure(
                             f"request storm found sandbox {record.sandbox_id} in "

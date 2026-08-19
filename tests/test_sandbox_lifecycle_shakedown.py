@@ -203,7 +203,7 @@ def test_request_storm_completes_every_request_across_every_worker():
     records = [
         SimpleNamespace(
             sandbox_id=str(index),
-            role="soak" if index == 0 else "avalanche",
+            role="storm-soak" if index == 0 else "avalanche",
             marker_path=f"/tmp/marker-{index}",
             marker_value=f"marker-{index}",
             heartbeat_path=f"/tmp/heartbeat-{index}",
