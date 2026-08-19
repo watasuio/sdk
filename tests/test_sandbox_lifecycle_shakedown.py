@@ -135,6 +135,49 @@ def test_destroy_race_issues_only_successful_duplicate_deletes():
     ] * 4
 
 
+def test_replica_freshness_runs_every_shell_after_explicit_connect():
+    runner = shakedown.LifecycleShakedown.__new__(shakedown.LifecycleShakedown)
+    runner.args = SimpleNamespace(
+        storm_concurrency=4,
+        data_plane_timeout_seconds=30,
+    )
+    notes = []
+    runner.recorder = SimpleNamespace(
+        note=lambda kind, **values: notes.append((kind, values))
+    )
+    calls = []
+    runner._heartbeat_count = lambda _record: 7
+    runner._pause = lambda record, endpoint: calls.append(("pause", record, endpoint))
+    runner._connect = lambda record, endpoint: calls.append(("connect", record, endpoint))
+    runner._assert_runtime_survived = (
+        lambda record, heartbeat: calls.append(("survived", record, heartbeat))
+    )
+
+    class Commands:
+        def run(self, command, **_kwargs):
+            expected = command.removeprefix("printf '").removesuffix("'")
+            calls.append(("run", expected))
+            return SimpleNamespace(stdout=expected)
+
+    runner._sdk_sandbox = lambda _record: SimpleNamespace(commands=Commands())
+    record = SimpleNamespace(sandbox_id="41", node="node-a")
+
+    runner._run_replica_freshness(record)
+
+    assert calls[0] == ("pause", record, "pause")
+    assert calls[1] == ("connect", record, "connect")
+    assert sorted(call for call in calls if call[0] == "run") == [
+        ("run", f"replica-freshness-{index}") for index in range(4)
+    ]
+    assert calls[-1] == ("survived", record, 7)
+    assert notes == [
+        (
+            "replica_freshness_complete",
+            {"sandbox_id": "41", "requests": 4, "node": "node-a"},
+        )
+    ]
+
+
 def test_timeout_soak_observes_an_already_stopped_sandbox_after_its_deadline():
     runner = shakedown.LifecycleShakedown.__new__(shakedown.LifecycleShakedown)
     runner.args = SimpleNamespace(

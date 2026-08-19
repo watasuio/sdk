@@ -354,7 +354,7 @@ class LifecycleShakedown:
         )
         try:
             limits = self._limits()
-            total_requested = self.args.sandboxes + self.args.destroy_race_sandboxes + 2
+            total_requested = self.args.sandboxes + self.args.destroy_race_sandboxes + 3
             available = limits["max_running_instances"] - limits["running_instances"]
             if total_requested > available:
                 raise ShakedownFailure(
@@ -393,8 +393,17 @@ class LifecycleShakedown:
                 create_interval=create_interval,
             )
             self._sleep_create_interval(create_interval)
-            timeout_soak = self._create_sandbox(
+            replica_freshness = self._create_sandbox(
                 ordinal=self.args.sandboxes + self.args.destroy_race_sandboxes + 1,
+                role="replica-freshness",
+                timeout_seconds=self.args.sandbox_timeout_seconds,
+                auto_resume=False,
+            )
+            self._prime_sandbox(replica_freshness)
+            self._run_replica_freshness(replica_freshness)
+            self._sleep_create_interval(create_interval)
+            timeout_soak = self._create_sandbox(
+                ordinal=self.args.sandboxes + self.args.destroy_race_sandboxes + 2,
                 role="timeout-soak",
                 timeout_seconds=self.args.soak_timeout_seconds,
             )
@@ -450,7 +459,7 @@ class LifecycleShakedown:
             time.sleep(seconds)
 
     def _create_sandbox(
-        self, *, ordinal: int, role: str, timeout_seconds: int
+        self, *, ordinal: int, role: str, timeout_seconds: int, auto_resume: bool = True
     ) -> SandboxRecord:
         idempotency_key = f"sandbox-shakedown:{self.run_id}:{role}:{ordinal}"
         body = {
@@ -464,7 +473,7 @@ class LifecycleShakedown:
             },
             "envs": {},
             "secure": True,
-            "lifecycle": {"on_timeout": "pause", "auto_resume": True},
+            "lifecycle": {"on_timeout": "pause", "auto_resume": auto_resume},
         }
         _status, payload = self.http.control(
             "sandbox_create",
@@ -1077,6 +1086,37 @@ class LifecycleShakedown:
         self._wait_for_state(record, {"ready"}, self.args.state_timeout_seconds)
         self._connect(record, "resume")
         self._assert_runtime_survived(record, heartbeat_before)
+
+    def _run_replica_freshness(self, record: SandboxRecord) -> None:
+        heartbeat_before = self._heartbeat_count(record)
+        self._pause(record, "pause")
+        self._connect(record, "connect")
+
+        calls = self.args.storm_concurrency
+        barrier = threading.Barrier(calls)
+
+        def run_shell(index: int) -> None:
+            expected = f"replica-freshness-{index}"
+            barrier.wait()
+            result = self._sdk_sandbox(record).commands.run(
+                f"printf '{expected}'",
+                timeout=30,
+                request_timeout=self.args.data_plane_timeout_seconds,
+            )
+            if result.stdout != expected:
+                raise ShakedownFailure(
+                    f"replica freshness shell {index} returned {result.stdout!r}, "
+                    f"expected {expected!r}"
+                )
+
+        self._parallel_calls(run_shell, range(calls), "replica freshness shell storm")
+        self._assert_runtime_survived(record, heartbeat_before)
+        self.recorder.note(
+            "replica_freshness_complete",
+            sandbox_id=record.sandbox_id,
+            requests=calls,
+            node=record.node,
+        )
 
     def _parallel_calls(
         self, function: Any, items: Iterable[Any], context: str
