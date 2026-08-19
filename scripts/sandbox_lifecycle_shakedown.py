@@ -630,10 +630,12 @@ class LifecycleShakedown:
                             f"request storm changed identity from {record.sandbox_id} "
                             f"to {response_id}"
                         )
-                    if sandbox.get("state") != "ready":
+                    state = sandbox.get("state")
+                    expected_states = {"ready", "stopped"} if record.role == "soak" else {"ready"}
+                    if state not in expected_states:
                         raise ShakedownFailure(
                             f"request storm found sandbox {record.sandbox_id} in "
-                            f"{sandbox.get('state')!r}, not ready"
+                            f"{state!r}, expected one of {sorted(expected_states)!r}"
                         )
                 elif operation_index == 1:
                     actual = self._read_file(

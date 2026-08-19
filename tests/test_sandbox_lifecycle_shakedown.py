@@ -203,6 +203,7 @@ def test_request_storm_completes_every_request_across_every_worker():
     records = [
         SimpleNamespace(
             sandbox_id=str(index),
+            role="soak" if index == 0 else "avalanche",
             marker_path=f"/tmp/marker-{index}",
             marker_value=f"marker-{index}",
             heartbeat_path=f"/tmp/heartbeat-{index}",
@@ -221,7 +222,8 @@ def test_request_storm_completes_every_request_across_every_worker():
             sandbox_id=sandbox_id,
             echo=False,
         )
-        return 200, {"sandbox": {"id": sandbox_id, "state": "ready"}}
+        state = "stopped" if sandbox_id == "0" else "ready"
+        return 200, {"sandbox": {"id": sandbox_id, "state": state}}
 
     def read_file(record, path, *, operation, echo):
         assert echo is False
