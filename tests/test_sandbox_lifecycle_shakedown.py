@@ -187,3 +187,97 @@ def test_parse_api_datetime_requires_an_absolute_timestamp():
 
     with pytest.raises(shakedown.ShakedownFailure, match="timezone"):
         shakedown._parse_api_datetime("2026-08-06T02:10:00", "deadline")
+
+
+def test_request_storm_completes_every_request_across_every_worker():
+    runner = shakedown.LifecycleShakedown.__new__(shakedown.LifecycleShakedown)
+    runner.args = SimpleNamespace(
+        request_storm_count=120,
+        request_storm_workers=4,
+        request_timeout_seconds=1,
+        data_plane_timeout_seconds=1,
+    )
+    runner.started_at = shakedown.time.monotonic()
+    runner.recorder = shakedown.Recorder(runner.started_at)
+    runner._request_storm_result = None
+    records = [
+        SimpleNamespace(
+            sandbox_id=str(index),
+            marker_path=f"/tmp/marker-{index}",
+            marker_value=f"marker-{index}",
+            heartbeat_path=f"/tmp/heartbeat-{index}",
+        )
+        for index in range(3)
+    ]
+
+    def control(operation, method, path, *, sandbox_id, **kwargs):
+        assert kwargs["allowed"] == {200}
+        assert kwargs["echo"] is False
+        runner.recorder.event(
+            operation=operation,
+            method=method,
+            status=200,
+            elapsed_ms=1,
+            sandbox_id=sandbox_id,
+            echo=False,
+        )
+        return 200, {"sandbox": {"id": sandbox_id, "state": "ready"}}
+
+    def read_file(record, path, *, operation, echo):
+        assert echo is False
+        runner.recorder.event(
+            operation=operation,
+            method="GET",
+            status=200,
+            elapsed_ms=1,
+            sandbox_id=record.sandbox_id,
+            echo=False,
+        )
+        if path == record.marker_path:
+            return record.marker_value
+        assert path == record.heartbeat_path
+        return "1\n2\n"
+
+    runner.http = SimpleNamespace(control=control)
+    runner._read_file = read_file
+
+    runner._run_request_storm(records)
+
+    assert runner._request_storm_result == {
+        "requested": 120,
+        "completed": 120,
+        "successful": 120,
+        "failed": 0,
+        "workers": 4,
+        "threads_used": 4,
+        "sandboxes": 3,
+        "elapsed_seconds": runner._request_storm_result["elapsed_seconds"],
+        "http_status_counts": {"200": 120},
+        "latencies": {
+            "request_storm_heartbeat": {
+                "count": 39,
+                "min_ms": 1,
+                "p50_ms": 1,
+                "p95_ms": 1,
+                "p99_ms": 1,
+                "max_ms": 1,
+            },
+            "request_storm_marker": {
+                "count": 39,
+                "min_ms": 1,
+                "p50_ms": 1,
+                "p95_ms": 1,
+                "p99_ms": 1,
+                "max_ms": 1,
+            },
+            "request_storm_show": {
+                "count": 42,
+                "min_ms": 1,
+                "p50_ms": 1,
+                "p95_ms": 1,
+                "p99_ms": 1,
+                "max_ms": 1,
+            },
+        },
+        "failures": [],
+    }

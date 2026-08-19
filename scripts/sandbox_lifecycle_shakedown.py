@@ -122,6 +122,7 @@ class Recorder:
         sandbox_id: Optional[str] = None,
         state: Optional[str] = None,
         node: Optional[str] = None,
+        echo: bool = True,
     ) -> None:
         item = Event(
             at=dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -135,6 +136,8 @@ class Recorder:
         )
         with self._lock:
             self._events.append(item)
+        if not echo:
+            return
         identity = f" sandbox={sandbox_id}" if sandbox_id else ""
         state_text = f" state={state}" if state else ""
         node_text = f" node={node}" if node else ""
@@ -199,6 +202,7 @@ class HttpTransport:
         headers: Optional[Dict[str, str]] = None,
         allowed: Set[int],
         timeout_seconds: Optional[float] = None,
+        echo: bool = True,
     ) -> Tuple[int, Dict[str, Any]]:
         request_headers = {
             "Accept": "application/json",
@@ -239,6 +243,7 @@ class HttpTransport:
             sandbox_id=response_sandbox_id,
             state=state,
             node=node,
+            echo=echo,
         )
 
         if response.status_code >= 500:
@@ -265,6 +270,7 @@ class HttpTransport:
         params: Optional[Dict[str, str]] = None,
         allowed: Set[int] = {200},
         timeout_seconds: Optional[float] = None,
+        echo: bool = True,
     ) -> Tuple[int, bytes]:
         url = f"{session.data_plane_url.rstrip('/')}/{path.lstrip('/')}"
         if params:
@@ -294,6 +300,7 @@ class HttpTransport:
             status=response.status_code,
             elapsed_ms=elapsed_ms,
             sandbox_id=sandbox_id,
+            echo=echo,
         )
         if response.status_code >= 500:
             raise ShakedownFailure(
@@ -334,6 +341,7 @@ class LifecycleShakedown:
         self._failures: List[str] = []
         self._failure_lock = threading.Lock()
         self._cleanup_failures: List[str] = []
+        self._request_storm_result: Optional[Dict[str, Any]] = None
 
     def run(self) -> Dict[str, Any]:
         self.recorder.note(
@@ -379,6 +387,7 @@ class LifecycleShakedown:
             self._require_fleet_coverage(workers + [soak])
             self._run_random_cycles(workers)
             self._run_overlap_scenarios(workers)
+            self._run_request_storm(workers + [soak])
             self._run_destroy_races(
                 start_ordinal=self.args.sandboxes + 1,
                 create_interval=create_interval,
@@ -563,6 +572,7 @@ class LifecycleShakedown:
         session: Optional[SessionInfo] = None,
         operation: str = "file_read",
         timeout_seconds: Optional[float] = None,
+        echo: bool = True,
     ) -> str:
         _, content = self.http.data_plane(
             operation,
@@ -573,8 +583,179 @@ class LifecycleShakedown:
             params={"path": path},
             allowed={200},
             timeout_seconds=timeout_seconds or self.args.data_plane_timeout_seconds,
+            echo=echo,
         )
         return content.decode("utf-8")
+
+    def _run_request_storm(self, records: List[SandboxRecord]) -> None:
+        request_count = self.args.request_storm_count
+        if request_count == 0:
+            return
+
+        worker_count = self.args.request_storm_workers
+        self.recorder.note(
+            "request_storm_start",
+            requests=request_count,
+            workers=worker_count,
+            sandboxes=len(records),
+        )
+        started = time.monotonic()
+        completion_lock = threading.Lock()
+        completed = 0
+        successful = 0
+        next_progress = 1000
+        failures: List[Dict[str, Any]] = []
+        start_barrier = threading.Barrier(worker_count)
+        threads_used: Set[str] = set()
+
+        def perform(sequence: int) -> None:
+            nonlocal completed, successful, next_progress
+            record = records[sequence % len(records)]
+            operation_index = (sequence // len(records)) % 3
+            try:
+                if operation_index == 0:
+                    _, payload = self.http.control(
+                        "request_storm_show",
+                        "GET",
+                        f"/sandboxes/{record.sandbox_id}",
+                        sandbox_id=record.sandbox_id,
+                        allowed={200},
+                        timeout_seconds=self.args.request_timeout_seconds,
+                        echo=False,
+                    )
+                    sandbox = _require_dict(payload.get("sandbox"), "request storm show")
+                    response_id = str(_required(sandbox, "id", "request storm show"))
+                    if response_id != record.sandbox_id:
+                        raise ShakedownFailure(
+                            f"request storm changed identity from {record.sandbox_id} "
+                            f"to {response_id}"
+                        )
+                    if sandbox.get("state") != "ready":
+                        raise ShakedownFailure(
+                            f"request storm found sandbox {record.sandbox_id} in "
+                            f"{sandbox.get('state')!r}, not ready"
+                        )
+                elif operation_index == 1:
+                    actual = self._read_file(
+                        record,
+                        record.marker_path,
+                        operation="request_storm_marker",
+                        echo=False,
+                    )
+                    if actual != record.marker_value:
+                        raise ShakedownFailure(
+                            f"request storm marker changed for sandbox {record.sandbox_id}"
+                        )
+                else:
+                    content = self._read_file(
+                        record,
+                        record.heartbeat_path,
+                        operation="request_storm_heartbeat",
+                        echo=False,
+                    )
+                    lines = [line for line in content.splitlines() if line.strip()]
+                    if not lines or not lines[-1].isdigit():
+                        raise ShakedownFailure(
+                            f"request storm heartbeat was invalid for sandbox "
+                            f"{record.sandbox_id}"
+                        )
+            except BaseException as error:
+                with completion_lock:
+                    if len(failures) < 100:
+                        failures.append(
+                            {
+                                "sequence": sequence,
+                                "sandbox_id": record.sandbox_id,
+                                "error": f"{type(error).__name__}: {error}",
+                            }
+                        )
+            else:
+                with completion_lock:
+                    successful += 1
+            finally:
+                progress = None
+                with completion_lock:
+                    completed += 1
+                    if completed >= next_progress:
+                        progress = min(completed, request_count)
+                        next_progress += 1000
+                if progress is not None:
+                    self.recorder.note(
+                        "request_storm_progress",
+                        completed=progress,
+                        total=request_count,
+                    )
+
+        def worker(worker_index: int) -> None:
+            with completion_lock:
+                threads_used.add(threading.current_thread().name)
+            start_barrier.wait(timeout=30)
+            for sequence in range(worker_index, request_count, worker_count):
+                perform(sequence)
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="sandbox-request-storm"
+        ) as executor:
+            futures = [executor.submit(worker, index) for index in range(worker_count)]
+            for future in futures:
+                future.result()
+
+        storm_events, _ = self.recorder.snapshot()
+        storm_events = [
+            event
+            for event in storm_events
+            if event.operation.startswith("request_storm_")
+        ]
+        statuses = collections.Counter(str(event.status) for event in storm_events)
+        latencies: Dict[str, List[int]] = collections.defaultdict(list)
+        for event in storm_events:
+            latencies[event.operation].append(event.elapsed_ms)
+        latency_summary = {
+            operation: {
+                "count": len(values),
+                "min_ms": min(values),
+                "p50_ms": round(statistics.median(values)),
+                "p95_ms": _percentile(values, 0.95),
+                "p99_ms": _percentile(values, 0.99),
+                "max_ms": max(values),
+            }
+            for operation, values in sorted(latencies.items())
+            if values
+        }
+        self._request_storm_result = {
+            "requested": request_count,
+            "completed": completed,
+            "successful": successful,
+            "failed": completed - successful,
+            "workers": worker_count,
+            "threads_used": len(threads_used),
+            "sandboxes": len(records),
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "http_status_counts": dict(sorted(statuses.items())),
+            "latencies": latency_summary,
+            "failures": failures,
+        }
+        self.recorder.note(
+            "request_storm_complete",
+            requests=request_count,
+            completed=completed,
+            successful=successful,
+            failed=completed - successful,
+            workers=worker_count,
+            threads_used=len(threads_used),
+            elapsed_seconds=self._request_storm_result["elapsed_seconds"],
+        )
+        if (
+            completed != request_count
+            or successful != request_count
+            or len(threads_used) != worker_count
+            or failures
+        ):
+            raise ShakedownFailure(
+                f"request storm completed {completed}/{request_count} requests with "
+                f"{completed - successful} failures across {len(threads_used)}/"
+                f"{worker_count} threads"
+            )
 
     def _assert_marker(self, record: SandboxRecord) -> None:
         actual = self._read_file(record, record.marker_path)
@@ -1165,6 +1346,7 @@ class LifecycleShakedown:
             "request_count": len(events),
             "http_status_counts": dict(sorted(statuses.items())),
             "latencies": latency_summary,
+            "request_storm": self._request_storm_result,
             "sandbox_results": [
                 {
                     "sandbox_id": record.sandbox_id,
@@ -1279,6 +1461,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--cycles", type=int, default=8)
     parser.add_argument("--destroy-race-sandboxes", type=int, default=2)
     parser.add_argument("--storm-concurrency", type=int, default=6)
+    parser.add_argument("--request-storm-count", type=int, default=0)
+    parser.add_argument("--request-storm-workers", type=int, default=32)
     parser.add_argument("--storm-jitter-seconds", type=float, default=0.25)
     parser.add_argument("--maximum-jitter-seconds", type=float, default=2.0)
     parser.add_argument("--auto-resume-fraction", type=float, default=0.30)
@@ -1310,6 +1494,7 @@ def _validate_args(args: argparse.Namespace) -> None:
         "sandboxes": args.sandboxes,
         "cycles": args.cycles,
         "storm_concurrency": args.storm_concurrency,
+        "request_storm_workers": args.request_storm_workers,
         "sandbox_timeout_seconds": args.sandbox_timeout_seconds,
         "soak_timeout_seconds": args.soak_timeout_seconds,
         "minimum_nodes": args.minimum_nodes,
@@ -1319,6 +1504,12 @@ def _validate_args(args: argparse.Namespace) -> None:
             raise ShakedownFailure(f"--{name.replace('_', '-')} must be positive")
     if args.destroy_race_sandboxes < 0:
         raise ShakedownFailure("--destroy-race-sandboxes cannot be negative")
+    if args.request_storm_count < 0:
+        raise ShakedownFailure("--request-storm-count cannot be negative")
+    if args.request_storm_count and args.request_storm_workers > args.request_storm_count:
+        raise ShakedownFailure(
+            "--request-storm-workers cannot exceed --request-storm-count"
+        )
     for name in ["auto_resume_fraction", "ready_refresh_fraction"]:
         value = getattr(args, name)
         if not 0 <= value <= 1:
@@ -1352,6 +1543,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "request_count",
                     "http_status_counts",
                     "latencies",
+                    "request_storm",
                 ]
             },
             indent=2,
