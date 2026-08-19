@@ -106,6 +106,35 @@ def test_cleanup_deletes_once_then_waits_for_terminal_state(monkeypatch):
     assert runner._cleanup_failures == []
 
 
+def test_destroy_race_issues_only_successful_duplicate_deletes():
+    runner = shakedown.LifecycleShakedown.__new__(shakedown.LifecycleShakedown)
+    runner.args = SimpleNamespace(
+        destroy_race_sandboxes=1,
+        sandbox_timeout_seconds=30,
+        storm_concurrency=4,
+        request_timeout_seconds=30,
+        state_timeout_seconds=30,
+    )
+    runner.recorder = SimpleNamespace(note=lambda *_args, **_kwargs: None)
+    runner._sleep_create_interval = lambda _seconds: None
+    runner._create_sandbox = lambda **_kwargs: SimpleNamespace(sandbox_id="41")
+    runner._prime_sandbox = lambda _record: None
+    runner._wait_until_deleted = lambda *_args: None
+    calls = []
+
+    def control(operation, method, path, **kwargs):
+        calls.append((operation, method, path, kwargs["allowed"]))
+        return 202, {"sandbox": {"id": "41", "state": "destroying"}}
+
+    runner.http = SimpleNamespace(control=control)
+
+    runner._run_destroy_races(start_ordinal=1, create_interval=0)
+
+    assert calls == [
+        ("destroy_race_delete", "DELETE", "/sandboxes/41", {202})
+    ] * 4
+
+
 def test_timeout_soak_observes_an_already_stopped_sandbox_after_its_deadline():
     runner = shakedown.LifecycleShakedown.__new__(shakedown.LifecycleShakedown)
     runner.args = SimpleNamespace(

@@ -3,11 +3,12 @@
 
 The shakedown owns every sandbox it creates through a unique metadata marker and
 deletes those sandboxes in ``finally`` and waits for each delete operation to
-reach a terminal state. It deliberately mixes pause/stop with
-connect/resume, duplicate requests, request races, data-plane auto-resume, and a
-real timeout soak. A run is successful only when sandbox identity, files, and a
-live guest process survive every non-destructive transition, no request leaks a
-5xx response, and all test sandboxes are gone at the end.
+reach a terminal state. It deliberately races duplicate stop, pause, connect,
+resume, and delete requests while keeping every request valid for the lifecycle
+state in which it is issued. It also exercises data-plane auto-resume and a real
+timeout soak. A run is successful only when sandbox identity, files, and a live
+guest process survive every non-destructive transition, every request returns
+its successful contract status, and all test sandboxes are gone at the end.
 
 Authentication is read from ``WATASU_API_KEY`` or, by default, from
 ``watasu token``. Tokens and data-plane URLs are never written to the report.
@@ -449,23 +450,15 @@ class LifecycleShakedown:
             "secure": True,
             "lifecycle": {"on_timeout": "pause", "auto_resume": True},
         }
-        attempts = 0
-        while True:
-            attempts += 1
-            status, payload = self.http.control(
-                "sandbox_create",
-                "POST",
-                "/sandboxes",
-                body=body,
-                headers={"Idempotency-Key": idempotency_key},
-                allowed={200, 201, 429},
-                timeout_seconds=self.args.request_timeout_seconds,
-            )
-            if status != 429:
-                break
-            if attempts >= 6:
-                raise ShakedownFailure("sandbox create remained rate-limited after 6 attempts")
-            time.sleep(max(1.1, self.args.create_interval_seconds))
+        _status, payload = self.http.control(
+            "sandbox_create",
+            "POST",
+            "/sandboxes",
+            body=body,
+            headers={"Idempotency-Key": idempotency_key},
+            allowed={200, 201},
+            timeout_seconds=self.args.request_timeout_seconds,
+        )
 
         sandbox = _require_dict(payload.get("sandbox"), "create sandbox")
         sandbox_id = str(_required(sandbox, "id", "create sandbox"))
@@ -805,8 +798,6 @@ class LifecycleShakedown:
         self._stop_storm(records[0])
         if len(records) > 1:
             self._stop_connect_overlap(records[1])
-        if len(records) > 2:
-            self._mixed_lifecycle_storm(records[2])
         self.recorder.note("overlap_scenarios_complete")
 
     def _stop_storm(self, record: SandboxRecord) -> None:
@@ -823,7 +814,7 @@ class LifecycleShakedown:
                 f"/sandboxes/{record.sandbox_id}/{endpoint}",
                 sandbox_id=record.sandbox_id,
                 body={},
-                allowed={202, 409, 422},
+                allowed={202},
                 timeout_seconds=self.args.request_timeout_seconds,
             )
             self._assert_response_identity(record, payload, f"storm {endpoint}")
@@ -895,53 +886,6 @@ class LifecycleShakedown:
         self._connect(record, "resume")
         self._assert_runtime_survived(record, heartbeat_before)
 
-    def _mixed_lifecycle_storm(self, record: SandboxRecord) -> None:
-        heartbeat_before = self._heartbeat_count(record)
-        self._pause(record, "pause")
-        rng = random.Random(self.seed ^ 0xD1B54A32D192ED03)
-        calls: List[Tuple[str, float]] = []
-        for index in range(self.args.storm_concurrency * 2):
-            action = ["connect", "resume", "pause", "stop"][index % 4]
-            calls.append((action, rng.uniform(0, self.args.storm_jitter_seconds)))
-
-        def mixed_call(item: Tuple[str, float]) -> Optional[Dict[str, Any]]:
-            action, delay = item
-            time.sleep(delay)
-            if action in {"connect", "resume"}:
-                _, payload = self.http.control(
-                    f"mixed_{action}",
-                    "POST",
-                    f"/sandboxes/{record.sandbox_id}/{action}",
-                    sandbox_id=record.sandbox_id,
-                    body={"connect": {"timeout_seconds": record.timeout_seconds}},
-                    allowed={200},
-                    timeout_seconds=self.args.request_timeout_seconds,
-                )
-                self._assert_response_identity(record, payload, f"mixed {action}")
-                _session_info(payload, f"mixed {action}")
-                return payload
-            _, payload = self.http.control(
-                f"mixed_{action}",
-                "POST",
-                f"/sandboxes/{record.sandbox_id}/{action}",
-                sandbox_id=record.sandbox_id,
-                body={},
-                allowed={202, 409, 422},
-                timeout_seconds=self.args.request_timeout_seconds,
-            )
-            self._assert_response_identity(record, payload, f"mixed {action}")
-            return None
-
-        payloads = self._parallel_calls(mixed_call, calls, "mixed lifecycle storm")
-        sessions = [payload for payload in payloads if payload]
-        if sessions:
-            record.session = _session_info(sessions[-1], "mixed lifecycle storm")
-            record.sandbox_payload = _require_dict(
-                sessions[-1].get("sandbox"), "mixed lifecycle storm"
-            )
-        self._connect(record, "connect")
-        self._assert_runtime_survived(record, heartbeat_before)
-
     def _parallel_calls(
         self, function: Any, items: Iterable[Any], context: str
     ) -> List[Any]:
@@ -971,42 +915,24 @@ class LifecycleShakedown:
                 timeout_seconds=self.args.sandbox_timeout_seconds,
             )
             self._prime_sandbox(record)
-            rng = random.Random(self.seed ^ record.ordinal)
-            operations = ["connect", "resume", "pause", "stop", "delete", "delete"]
+            barrier = threading.Barrier(self.args.storm_concurrency)
 
-            def destructive_call(action: str) -> None:
-                time.sleep(rng.uniform(0, self.args.storm_jitter_seconds))
-                if action in {"connect", "resume"}:
-                    self.http.control(
-                        f"destroy_race_{action}",
-                        "POST",
-                        f"/sandboxes/{record.sandbox_id}/{action}",
-                        sandbox_id=record.sandbox_id,
-                        body={"connect": {"timeout_seconds": record.timeout_seconds}},
-                        allowed={200, 404, 409, 422},
-                        timeout_seconds=self.args.request_timeout_seconds,
-                    )
-                elif action in {"pause", "stop"}:
-                    self.http.control(
-                        f"destroy_race_{action}",
-                        "POST",
-                        f"/sandboxes/{record.sandbox_id}/{action}",
-                        sandbox_id=record.sandbox_id,
-                        body={},
-                        allowed={202, 404, 409, 422},
-                        timeout_seconds=self.args.request_timeout_seconds,
-                    )
-                else:
-                    self.http.control(
-                        "destroy_race_delete",
-                        "DELETE",
-                        f"/sandboxes/{record.sandbox_id}",
-                        sandbox_id=record.sandbox_id,
-                        allowed={202, 404, 409, 422},
-                        timeout_seconds=self.args.request_timeout_seconds,
-                    )
+            def destructive_call(_index: int) -> None:
+                barrier.wait()
+                self.http.control(
+                    "destroy_race_delete",
+                    "DELETE",
+                    f"/sandboxes/{record.sandbox_id}",
+                    sandbox_id=record.sandbox_id,
+                    allowed={202},
+                    timeout_seconds=self.args.request_timeout_seconds,
+                )
 
-            self._parallel_calls(destructive_call, operations, "destroy race")
+            self._parallel_calls(
+                destructive_call,
+                range(self.args.storm_concurrency),
+                "duplicate destroy race",
+            )
             self._wait_until_deleted(record.sandbox_id, self.args.state_timeout_seconds)
         self.recorder.note("destroy_races_complete")
 
@@ -1087,7 +1013,7 @@ class LifecycleShakedown:
                 "GET",
                 f"/sandboxes/{sandbox_id}",
                 sandbox_id=sandbox_id,
-                allowed={200, 404},
+                allowed={200},
                 timeout_seconds=30,
             )
             if not payload or payload.get("error") or payload.get("errors"):
@@ -1127,7 +1053,7 @@ class LifecycleShakedown:
                     "DELETE",
                     f"/sandboxes/{sandbox_id}",
                     sandbox_id=sandbox_id,
-                    allowed={202, 404, 409, 422},
+                    allowed={202},
                     timeout_seconds=self.args.request_timeout_seconds,
                 )
             except BaseException as error:
