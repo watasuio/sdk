@@ -7,5 +7,7 @@ dist/
 
 ts/node_modules/
 ts/dist/
+ts-code-interpreter/node_modules/
+ts-code-interpreter/dist/
 
 rust/target/

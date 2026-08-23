@@ -1200,16 +1200,16 @@ fn host_only(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     use crate::config::{ConnectionConfig, ConnectionOptions};
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
 
     use super::{
-        CreateOptions, ListOptions, NetworkUpdateOptions, SandboxListQuery, SnapshotListOptions,
-        VolumeMount, create_payload, data_plane_from_session, metrics_list, network_payload,
+        create_payload, data_plane_from_session, metrics_list, network_payload,
         put_if_non_empty_volume_mounts, sandbox_info, sandbox_list_path, sandbox_network_path,
-        snapshot_info, snapshot_list_path,
+        snapshot_info, snapshot_list_path, CreateOptions, ListOptions, NetworkUpdateOptions,
+        SandboxListQuery, SnapshotListOptions, VolumeMount,
     };
 
     #[test]

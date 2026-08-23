@@ -114,7 +114,7 @@ pub struct CommandOptions {
 }
 
 /// Options for starting a typed sandbox process.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProcessStartOptions {
     /// Optional caller-supplied stable process id.
     pub id: Option<String>,
@@ -135,22 +135,6 @@ pub struct ProcessStartOptions {
     /// Return non-zero exits as `Error::CommandExit` when used with `run_process`
     /// or `CommandHandle::wait_process`.
     pub check: bool,
-}
-
-impl Default for ProcessStartOptions {
-    fn default() -> Self {
-        Self {
-            id: None,
-            cmd: String::new(),
-            args: Vec::new(),
-            cwd: None,
-            envs: Default::default(),
-            tag: None,
-            stdin: false,
-            timeout_ms: None,
-            check: false,
-        }
-    }
 }
 
 /// Options for reading available process output without blocking.
@@ -195,9 +179,10 @@ impl ProcessOutputReadMode {
 }
 
 /// Completed-process output capture policy.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ProcessOutputCapturePolicy {
     /// Retain all output bytes.
+    #[default]
     Full,
     /// Retain the first `max_bytes` bytes.
     Prefix {
@@ -216,12 +201,6 @@ pub enum ProcessOutputCapturePolicy {
         /// Bytes to retain from the end of output.
         tail_bytes: usize,
     },
-}
-
-impl Default for ProcessOutputCapturePolicy {
-    fn default() -> Self {
-        Self::Full
-    }
 }
 
 impl ProcessOutputCapturePolicy {
@@ -553,7 +532,13 @@ impl Commands {
         .await?;
         let first = next_started(&mut socket).await?;
         let actual_pid = frame_pid(&first).unwrap_or(pid);
-        Ok(CommandHandle::new(actual_pid, socket, self.clone(), false, None))
+        Ok(CommandHandle::new(
+            actual_pid,
+            socket,
+            self.clone(),
+            false,
+            None,
+        ))
     }
 
     /// Look up current process status without attaching to the stream.
@@ -654,7 +639,13 @@ impl Commands {
         let first = next_started(&mut socket).await?;
         let pid = frame_pid(&first)
             .ok_or_else(|| Error::Sandbox("process started frame did not include pid".into()))?;
-        Ok(CommandHandle::new(pid, socket, self.clone(), check, timeout_ms))
+        Ok(CommandHandle::new(
+            pid,
+            socket,
+            self.clone(),
+            check,
+            timeout_ms,
+        ))
     }
 }
 
@@ -1864,22 +1855,21 @@ mod tests {
 
     #[test]
     fn process_purged_not_found_rewrites_only_not_found_errors() {
-        let rewritten = process_purged_not_found(
-            crate::Error::NotFound("no rows".to_string()),
-            "proc-1",
-        );
+        let rewritten =
+            process_purged_not_found(crate::Error::NotFound("no rows".to_string()), "proc-1");
         match rewritten {
             crate::Error::NotFound(message) => {
-                assert!(message.contains("purged when the sandbox is destroyed"), "{message:?}");
+                assert!(
+                    message.contains("purged when the sandbox is destroyed"),
+                    "{message:?}"
+                );
                 assert!(message.contains("proc-1"), "{message:?}");
             }
             other => panic!("expected NotFound, got {other:?}"),
         }
 
-        let passthrough = process_purged_not_found(
-            crate::Error::Sandbox("boom".to_string()),
-            "proc-1",
-        );
+        let passthrough =
+            process_purged_not_found(crate::Error::Sandbox("boom".to_string()), "proc-1");
         assert!(matches!(passthrough, crate::Error::Sandbox(message) if message == "boom"));
     }
 
@@ -2051,10 +2041,7 @@ mod lagged_tests {
     }
 
     /// Serve one stream that lags after `before`, then one replay stream.
-    async fn lagged_scenario(
-        replay: Vec<serde_json::Value>,
-        check: bool,
-    ) -> Result<ProcessResult> {
+    async fn lagged_scenario(replay: Vec<serde_json::Value>, check: bool) -> Result<ProcessResult> {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let base_url = format!("http://{}", listener.local_addr().expect("local addr"));
 
