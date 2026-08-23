@@ -198,7 +198,7 @@ class Filesystem:
         user=None,
         request_timeout: Optional[float] = None,
     ) -> ApplyDiffReport:
-        """Apply a git-style unified diff or Codex apply_patch payload."""
+        """Apply a complete ApplyPatch document inside the sandbox."""
         body = {"diff": diff}
         if cwd:
             body["cwd"] = cwd

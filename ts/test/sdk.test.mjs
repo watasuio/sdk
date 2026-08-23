@@ -915,7 +915,8 @@ test('filesystem applyDiff uses runtime apply_diff route', async () => {
     },
   })
 
-  const report = await fs.applyDiff('diff --git a/a.txt b/a.txt', { cwd: '/workspace/app', requestTimeoutMs: 123 })
+  const diff = '*** Begin Patch\n*** Update File: a.txt\n-old\n+new\n*** End Patch'
+  const report = await fs.applyDiff(diff, { cwd: '/workspace/app', requestTimeoutMs: 123 })
 
   assert.equal(report.status, 'partial')
   assert.equal(report.parsedDiffBlocks, 1)
@@ -925,7 +926,7 @@ test('filesystem applyDiff uses runtime apply_diff route', async () => {
   assert.deepEqual(calls, [
     ['/runtime/v1/files/apply_diff', {
       requestTimeoutMs: 123,
-      json: { diff: 'diff --git a/a.txt b/a.txt', cwd: '/workspace/app' },
+      json: { diff, cwd: '/workspace/app' },
     }],
   ])
 })

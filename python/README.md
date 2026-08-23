@@ -184,11 +184,12 @@ with Sandbox.create() as sbx:
     )
     patch = sbx.files.apply_diff(
         """*** Begin Patch
-*** Update File: /workspace/project/a.txt
+*** Update File: a.txt
 @@
 -alpha
 +beta
-*** End Patch"""
+*** End Patch""",
+        cwd="/workspace/project",
     )
     print(patch.status)
 

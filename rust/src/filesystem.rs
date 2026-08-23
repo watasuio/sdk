@@ -564,7 +564,7 @@ impl Filesystem {
         Ok(entry_info(payload.get("file").unwrap_or(&payload)))
     }
 
-    /// Apply a git-style unified diff or Codex apply_patch payload inside the sandbox.
+    /// Apply a complete ApplyPatch document inside the sandbox.
     pub async fn apply_diff(&self, diff: &str, opts: ApplyDiffOptions) -> Result<ApplyDiffReport> {
         let payload = self
             .data_plane
@@ -933,15 +933,16 @@ mod tests {
 
     #[test]
     fn apply_diff_payload_uses_snake_case_route_body() {
+        let diff = "*** Begin Patch\n*** Update File: a.txt\n-old\n+new\n*** End Patch";
         assert_eq!(
             apply_diff_payload(
-                "diff --git a/a.txt b/a.txt",
+                diff,
                 &ApplyDiffOptions {
                     cwd: Some("/workspace/app".to_string()),
                 }
             ),
             json!({
-                "diff": "diff --git a/a.txt b/a.txt",
+                "diff": diff,
                 "cwd": "/workspace/app"
             })
         );

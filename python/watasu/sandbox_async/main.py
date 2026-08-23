@@ -445,7 +445,7 @@ class AsyncFilesystem:
         user: Optional[Username] = None,
         request_timeout: Optional[float] = None,
     ) -> ApplyDiffReport:
-        """Apply a git-style unified diff or Codex apply_patch payload."""
+        """Apply a complete ApplyPatch document inside the sandbox."""
         return await asyncio.to_thread(
             self._files.apply_diff,
             diff,

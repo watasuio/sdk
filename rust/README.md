@@ -426,8 +426,10 @@ sbx.files
 let patch = sbx
     .files
     .apply_diff(
-        "*** Begin Patch\n*** Update File: /workspace/project/a.txt\n@@\n-alpha\n+beta\n*** End Patch",
-        ApplyDiffOptions::default(),
+        "*** Begin Patch\n*** Update File: a.txt\n@@\n-alpha\n+beta\n*** End Patch",
+        ApplyDiffOptions {
+            cwd: Some("/workspace/project".to_string()),
+        },
     )
     .await?;
 println!("{}", patch.status);

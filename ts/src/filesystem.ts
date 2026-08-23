@@ -337,7 +337,7 @@ export class Filesystem {
     return entryInfo(payload.file ?? payload)
   }
 
-  /** Apply a git-style unified diff or Codex apply_patch payload inside the sandbox. */
+  /** Apply a complete ApplyPatch document inside the sandbox. */
   async applyDiff(diff: string, opts: ApplyDiffOpts = {}): Promise<ApplyDiffReport> {
     const payload = await this.dataPlane.postJson('/runtime/v1/files/apply_diff', {
       ...requestOpts(opts),
