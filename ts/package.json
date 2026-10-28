@@ -26,12 +26,12 @@
     "test": "npm run build && tsc -p tsconfig.test.json && node --test test/*.mjs"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.3",
-    "@types/ws": "^8.18.1",
-    "typescript": "^5.7.0"
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
   },
   "repository": {
     "type": "git",

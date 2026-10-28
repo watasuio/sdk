@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "declaration": true,
     "esModuleInterop": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
@@ -14,6 +13,7 @@
     "rootDir": "src",
     "strict": true,
     "target": "ES2022",
+    "types": ["node"],
     "typeRoots": ["./node_modules/@types", "../ts/node_modules/@types"]
   },
   "include": ["src/**/*.ts"]

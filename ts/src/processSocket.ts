@@ -257,7 +257,7 @@ export function base64DecodeText(value: unknown): string {
   }
 }
 
-export function base64DecodeBytes(value: unknown): Uint8Array {
+export function base64DecodeBytes(value: unknown): Uint8Array<ArrayBuffer> {
   if (typeof value !== 'string') return new TextEncoder().encode(String(value ?? ''))
   return new Uint8Array(Buffer.from(value, 'base64'))
 }

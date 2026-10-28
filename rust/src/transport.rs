@@ -9,6 +9,33 @@ use serde_json::Value;
 use crate::config::ConnectionConfig;
 use crate::error::{Error, Result};
 
+// Reqwest 0.13 moved Rustls to platform roots. Keep the SDK's existing
+// feature choices: Mozilla roots by default, native roots when selected,
+// and the native TLS backend when its feature is selected.
+fn http_client_builder() -> Result<ClientBuilder> {
+    let builder = Client::builder();
+
+    #[cfg(feature = "native-tls")]
+    return Ok(builder.tls_backend_native());
+
+    #[cfg(all(not(feature = "native-tls"), feature = "rustls-tls"))]
+    {
+        let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
+            .iter()
+            .map(|der| reqwest::Certificate::from_der(der.as_ref()))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        #[cfg(feature = "rustls-tls-native-roots")]
+        return Ok(builder.tls_certs_merge(roots));
+
+        #[cfg(not(feature = "rustls-tls-native-roots"))]
+        return Ok(builder.tls_certs_only(roots));
+    }
+
+    #[cfg(all(not(feature = "native-tls"), not(feature = "rustls-tls")))]
+    Ok(builder)
+}
+
 #[derive(Clone)]
 pub(crate) struct ControlClient {
     config: ConnectionConfig,
@@ -25,7 +52,7 @@ impl ControlClient {
     }
 
     fn build(config: ConnectionConfig, request_timeout: bool) -> Result<Self> {
-        let mut builder = Client::builder();
+        let mut builder = http_client_builder()?;
 
         if request_timeout {
             builder = builder.timeout(Duration::from_secs(config.request_timeout_secs));
@@ -148,7 +175,7 @@ pub(crate) struct DataPlaneClient {
 
 impl DataPlaneClient {
     pub(crate) fn new(base_url: String, token: String, config: &ConnectionConfig) -> Result<Self> {
-        let client = Client::builder()
+        let client = http_client_builder()?
             .timeout(Duration::from_secs(config.request_timeout_secs))
             .build()?;
         Ok(Self {

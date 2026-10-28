@@ -4,6 +4,8 @@ Python package for Watasu code interpreter sandboxes.
 
 ## Install
 
+Requires Python 3.10 or newer.
+
 ```bash
 pip install watasu-code-interpreter
 ```
