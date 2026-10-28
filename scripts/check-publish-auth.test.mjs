@@ -6,7 +6,7 @@ const env = {
   ACTIONS_ID_TOKEN_REQUEST_URL: 'https://token.actions.githubusercontent.com/token?api-version=2',
   ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'test-github-credential',
 }
-const pypiToken = 'pypi-' + Buffer.from('[2,["11111111-1111-1111-1111-111111111111","22222222-2222-2222-2222-222222222222"]]').toString('base64url')
+const pypiToken = 'pypi-' + Buffer.from('[2,["061d2873-692c-480f-82c3-82a3fa786d8d","720971cd-397a-44b4-aab1-5168b2302aaa"]]').toString('base64url')
 
 test('checks every registry through the expected OIDC audience without uploading', async () => {
   const exchanges = []
@@ -33,14 +33,14 @@ test('checks every registry through the expected OIDC audience without uploading
   ])
 })
 
-test('rejects PyPI authentication that covers only one project', async () => {
+test('rejects PyPI authentication that covers the wrong project pair', async () => {
   const result = await checkPublishAuth(env, async url => {
     const hostname = new URL(url).hostname
     if (hostname === 'token.actions.githubusercontent.com') {
       return { ok: true, json: async () => ({ value: 'test-oidc' }) }
     }
     const token = hostname === 'pypi.org'
-      ? 'pypi-' + Buffer.from('[2,["11111111-1111-1111-1111-111111111111"]]').toString('base64url')
+      ? 'pypi-' + Buffer.from('[2,["061d2873-692c-480f-82c3-82a3fa786d8d","22222222-2222-2222-2222-222222222222"]]').toString('base64url')
       : 'test-ephemeral-token'
     return { ok: true, json: async () => ({ token }) }
   })

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url'
 
+// PyPI's immutable project IDs for watasu and watasu-code-interpreter, verified
+// against the shared publisher and successful uploads of both projects.
+const pypiProjectIds = [
+  '061d2873-692c-480f-82c3-82a3fa786d8d',
+  '720971cd-397a-44b4-aab1-5168b2302aaa',
+]
+
 // Exchange short-lived identities only. Never upload a package or log a token.
 export async function checkPublishAuth(env = process.env, request = fetch) {
   const failures = []
@@ -38,8 +45,9 @@ export async function checkPublishAuth(env = process.env, request = fetch) {
       const scopes = decoded.match(/\[2,\["[0-9a-f-]{36}"(?:,"[0-9a-f-]{36}")*\]\]/g) ?? []
       if (scopes.length !== 1) throw new Error('PyPI project scope unavailable')
       const projects = JSON.parse(scopes[0])[1]
-      if (new Set(projects).size !== 2) throw new Error('Both PyPI project scopes are required')
-      console.log(`PyPI verified project scopes: ${projects.sort().join(', ')}`)
+      if (projects.length !== pypiProjectIds.length || projects.sort().some((id, index) => id !== pypiProjectIds[index])) {
+        throw new Error('Both SDK PyPI project scopes are required')
+      }
       return result
     }],
     ...['@watasu/sdk', '@watasu/code-interpreter'].map(name => [
