@@ -42,12 +42,15 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Refuse duplicate version tag
+      - name: Select new release or immutable retry
+        id: source
         run: |
           set -euo pipefail
           if git rev-parse -q --verify "refs/tags/$SDK_RELEASE_VERSION" >/dev/null; then
-            echo "Tag already exists: $SDK_RELEASE_VERSION" >&2
-            exit 1
+            git merge-base --is-ancestor "refs/tags/$SDK_RELEASE_VERSION" HEAD
+            echo 'resume=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'resume=false' >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -69,9 +72,27 @@ jobs:
       - name: Verify registry authentication before preparing a release
         run: |
           node --test scripts/check-publish-auth.test.mjs
+          python scripts/filter-published-python.test.py
           node scripts/check-publish-auth.mjs
+          cp scripts/filter-published-python.py "$RUNNER_TEMP/filter-published-python.py"
+
+      - name: Restore immutable tagged source for retry
+        if: steps.source.outputs.resume == 'true'
+        run: |
+          set -euo pipefail
+          git checkout --detach "refs/tags/$SDK_RELEASE_VERSION"
+          python - <<'PY'
+          import json, os, pathlib, tomllib
+          expected = os.environ['SDK_RELEASE_VERSION'][1:]
+          for name in ['pyproject.toml', 'python-code-interpreter/pyproject.toml', 'rust/Cargo.toml']:
+              data = tomllib.loads(pathlib.Path(name).read_text())
+              assert (data.get('project') or data['package'])['version'] == expected, name
+          for name in ['ts/package.json', 'ts-code-interpreter/package.json']:
+              assert json.loads(pathlib.Path(name).read_text())['version'] == expected, name
+          PY
 
       - name: Prepare version bump
+        if: steps.source.outputs.resume != 'true'
         run: node scripts/prepare-release.mjs "$SDK_RELEASE_VERSION"
 
       - name: Install Python build tools
@@ -108,6 +129,7 @@ jobs:
           cargo publish --dry-run --allow-dirty
 
       - name: Commit release bump and tag
+        if: steps.source.outputs.resume != 'true'
         run: |
           set -euo pipefail
           git config user.name 'watasu.io'
@@ -123,7 +145,12 @@ jobs:
           python -m build
           python -m build python-code-interpreter --outdir dist
 
+      - name: Verify and exclude Python files already published from this tag
+        id: python_assets
+        run: python "$RUNNER_TEMP/filter-published-python.py" "${SDK_RELEASE_VERSION#v}"
+
       - name: Publish Python package
+        if: steps.python_assets.outputs.remaining == 'true'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
       - name: Publish TypeScript package

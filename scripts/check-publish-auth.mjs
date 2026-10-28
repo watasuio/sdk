@@ -28,9 +28,20 @@ export async function checkPublishAuth(env = process.env, request = fetch) {
   }
 
   const checks = [
-    ['PyPI trusted publisher', async () => json('https://pypi.org/_/oidc/mint-token', {
-      method: 'POST', headers, body: JSON.stringify({ token: await identity('pypi') }),
-    })],
+    ['PyPI trusted publisher', async () => {
+      const result = await json('https://pypi.org/_/oidc/mint-token', {
+        method: 'POST', headers, body: JSON.stringify({ token: await identity('pypi') }),
+      })
+      // Warehouse serializes its ProjectID caveat as [2,[UUID,...]] inside
+      // the macaroon. No token bytes or other claims are written to logs.
+      const decoded = Buffer.from(result.token?.slice(5) ?? '', 'base64url').toString('utf8')
+      const scopes = decoded.match(/\[2,\["[0-9a-f-]{36}"(?:,"[0-9a-f-]{36}")*\]\]/g) ?? []
+      if (scopes.length !== 1) throw new Error('PyPI project scope unavailable')
+      const projects = JSON.parse(scopes[0])[1]
+      if (new Set(projects).size !== 2) throw new Error('Both PyPI project scopes are required')
+      console.log(`PyPI verified project scopes: ${projects.sort().join(', ')}`)
+      return result
+    }],
     ...['@watasu/sdk', '@watasu/code-interpreter'].map(name => [
       `npm ${name}`, async () => json(
         `https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(name)}`,
