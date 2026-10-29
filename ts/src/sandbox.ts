@@ -708,17 +708,31 @@ export class Sandbox {
 
   /** Return the public hostname for an exposed sandbox port. */
   getHost(port: number): string {
-    const routeToken =
-      this.sandbox.route_token ??
-      this.sandbox.routeToken ??
-      routeTokenFromDataPlaneUrl(this.dataPlane.baseUrl, this.connectionConfig.dataPlaneDomain)
-    if (typeof routeToken !== 'string') throw new SandboxError('port response did not include host or url')
-    return `p${port}-${routeToken}.sandbox.${this.connectionConfig.dataPlaneDomain}`
+    return this.publicPortUrl(port).host
   }
 
   /** Return the conventional MCP URL for this sandbox. */
   getMcpUrl(): string {
-    return `https://${this.getHost(this.mcpPort)}/mcp`
+    return new URL('/mcp', this.publicPortUrl(this.mcpPort)).toString()
+  }
+
+  private publicPortUrl(port: number): URL {
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new SandboxError('port must be an integer between 1 and 65535')
+    }
+    const template = this.sandbox.public_port_url_template
+    if (typeof template !== 'string' || !template.includes('{port}')) {
+      throw new SandboxError('sandbox response did not include a public port URL template')
+    }
+    try {
+      const url = new URL(template.replaceAll('{port}', String(port)))
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+        throw new Error('invalid public port URL')
+      }
+      return url
+    } catch {
+      throw new SandboxError('sandbox response included an invalid public port URL template')
+    }
   }
 
   /** Return the MCP gateway token when the sandbox contains one. */
@@ -1138,14 +1152,6 @@ function recordOfStrings(value: unknown): Record<string, string> {
 function hostOnly(value: string): string {
   if (value.includes('://')) return new URL(value).host
   return value.split('/')[0]
-}
-
-function routeTokenFromDataPlaneUrl(value: string, dataPlaneDomain: string): string | undefined {
-  const host = hostOnly(value)
-  const suffix = `.sandbox.${dataPlaneDomain}`
-  if (!host.endsWith(suffix)) return undefined
-  const token = host.slice(0, -suffix.length)
-  return token || undefined
 }
 
 async function sha256(data: string): Promise<string> {

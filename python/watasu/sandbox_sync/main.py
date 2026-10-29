@@ -680,15 +680,7 @@ class Sandbox(SandboxBase):
 
     def get_host(self, port: int) -> str:
         """Return the public hostname for an exposed sandbox port."""
-        payload = self._control.get(f"/sandboxes/{self.sandbox_id}/ports/{int(port)}")
-        port_info = payload.get("sandbox_port") or payload.get("port") or payload
-        host_or_url = port_info.get("host") or port_info.get("url")
-        if not host_or_url:
-            route_token = self._sandbox.get("route_token")
-            if not route_token:
-                raise SandboxException("port response did not include host or url")
-            return f"p{port}-{route_token}.sandbox.{self.connection_config.data_plane_domain}"
-        return _host_only(host_or_url)
+        return SandboxBase.get_host(self, port)
 
     def get_mcp_url(self) -> str:
         """Return the conventional MCP URL for this sandbox."""
@@ -1082,12 +1074,3 @@ def _network_rule(rule: Any) -> Dict[str, Any]:
             "headers": {str(key): str(value) for key, value in headers.items()}
         }
     }
-
-
-def _host_only(value: str) -> str:
-    value = str(value)
-    if "://" in value:
-        from urllib.parse import urlparse
-
-        return urlparse(value).netloc
-    return value.split("/", 1)[0]

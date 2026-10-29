@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional, TypedDict
+from urllib.parse import SplitResult, urlsplit
 
 from watasu.connection_config import ConnectionConfig
 from watasu.exceptions import SandboxException
@@ -87,13 +88,39 @@ class SandboxBase:
         return self._envd_version_value
 
     def get_host(self, port: int) -> str:
-        """Return the public host for ``port``.
-
-        Concrete sandbox classes override this method because Watasu resolves
-        exposed-port hosts through the control plane.
-        """
-        raise SandboxException("get_host is only available on a connected sandbox")
+        """Return the public hostname advertised by this installation."""
+        return self._public_port_url(port).netloc
 
     def get_mcp_url(self) -> str:
         """Return the conventional MCP URL for this sandbox."""
-        return f"https://{self.get_host(self.mcp_port)}/mcp"
+        return self._public_port_url(self.mcp_port)._replace(
+            path="/mcp", query="", fragment=""
+        ).geturl()
+
+    def _public_port_url(self, port: int) -> SplitResult:
+        if type(port) is not int or not 1 <= port <= 65_535:
+            raise SandboxException("port must be an integer between 1 and 65535")
+        template = getattr(self, "_sandbox", {}).get("public_port_url_template")
+        if not isinstance(template, str) or "{port}" not in template:
+            raise SandboxException(
+                "sandbox response did not include a public port URL template"
+            )
+        try:
+            url = urlsplit(template.replace("{port}", str(port)))
+            if (
+                url.scheme not in ("http", "https")
+                or not url.hostname
+                or url.username is not None
+                or url.password is not None
+            ):
+                raise ValueError("invalid public port URL")
+            host = url.hostname
+            if ":" in host:
+                host = f"[{host}]"
+            if url.port is not None and url.port != (443 if url.scheme == "https" else 80):
+                host = f"{host}:{url.port}"
+            return url._replace(netloc=host)
+        except ValueError:
+            raise SandboxException(
+                "sandbox response included an invalid public port URL template"
+            ) from None

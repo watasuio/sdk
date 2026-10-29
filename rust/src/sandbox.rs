@@ -678,38 +678,46 @@ impl Sandbox {
 
     /// Return the public hostname for an exposed sandbox port.
     pub async fn get_host(&self, port: u16) -> Result<String> {
-        let payload = self
-            .control
-            .get(&format!("/sandboxes/{}/ports/{port}", self.sandbox_id))
-            .await?;
-        let item = payload
-            .get("sandbox_port")
-            .or_else(|| payload.get("port"))
-            .unwrap_or(&payload);
-        if let Some(value) = item
-            .get("host")
-            .or_else(|| item.get("url"))
-            .and_then(Value::as_str)
-        {
-            return Ok(host_only(value));
-        }
-        let token = self
-            .sandbox
-            .get("route_token")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::Sandbox("port response did not include host or url".into()))?;
-        Ok(format!(
-            "p{port}-{token}.sandbox.{}",
-            self.config.data_plane_domain
-        ))
+        let url = self.public_port_url(port)?;
+        Ok(url[url::Position::BeforeHost..url::Position::AfterPort].to_string())
     }
 
     /// Return the conventional MCP URL for this sandbox.
     pub async fn get_mcp_url(&self) -> Result<String> {
-        Ok(format!(
-            "https://{}/mcp",
-            self.get_host(Self::MCP_PORT).await?
-        ))
+        let mut url = self.public_port_url(Self::MCP_PORT)?;
+        url.set_path("/mcp");
+        url.set_query(None);
+        url.set_fragment(None);
+        Ok(url.to_string())
+    }
+
+    fn public_port_url(&self, port: u16) -> Result<url::Url> {
+        if port == 0 {
+            return Err(Error::InvalidArgument(
+                "port must be an integer between 1 and 65535".into(),
+            ));
+        }
+        let template = self
+            .sandbox
+            .get("public_port_url_template")
+            .and_then(Value::as_str)
+            .filter(|value| value.contains("{port}"))
+            .ok_or_else(|| {
+                Error::Sandbox("sandbox response did not include a public port URL template".into())
+            })?;
+        let invalid = || {
+            Error::Sandbox("sandbox response included an invalid public port URL template".into())
+        };
+        let url = url::Url::parse(&template.replace("{port}", &port.to_string()))
+            .map_err(|_| invalid())?;
+        if !matches!(url.scheme(), "http" | "https")
+            || !url.has_host()
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(invalid());
+        }
+        Ok(url)
     }
 
     /// Return the MCP gateway token when the sandbox contains one.
@@ -1192,25 +1200,100 @@ fn merge_object(target: &mut serde_json::Map<String, Value>, value: Value) {
     }
 }
 
-fn host_only(value: &str) -> String {
-    url::Url::parse(value)
-        .map(|url| url.host_str().unwrap_or(value).to_string())
-        .unwrap_or_else(|_| value.split('/').next().unwrap_or(value).to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Value};
 
     use crate::config::{ConnectionConfig, ConnectionOptions};
     use crate::process_socket::{decode_runtime_data, encode_runtime_data};
+    use crate::transport::ControlClient;
 
     use super::{
         create_payload, data_plane_from_session, metrics_list, network_payload,
         put_if_non_empty_volume_mounts, sandbox_info, sandbox_list_path, sandbox_network_path,
         snapshot_info, snapshot_list_path, CreateOptions, ListOptions, NetworkUpdateOptions,
-        SandboxListQuery, SnapshotListOptions, VolumeMount,
+        Sandbox, SandboxListQuery, SnapshotListOptions, VolumeMount,
     };
+
+    fn sandbox_with_public_url(template: Option<&str>, sandbox_url: Option<&str>) -> Sandbox {
+        let config = ConnectionConfig::new(ConnectionOptions {
+            api_key: Some("key".into()),
+            sandbox_url: sandbox_url.map(str::to_string),
+            ..Default::default()
+        });
+        let control = ControlClient::new(config.clone()).expect("control client");
+        Sandbox::from_response(
+            config,
+            control,
+            json!({
+                "sandbox": {"id": "url-test", "public_port_url_template": template},
+                "session": {
+                    "data_plane_url": "https://token.sandbox.watasuhost.com",
+                    "token": "data"
+                }
+            }),
+            Default::default(),
+        )
+        .expect("connected sandbox")
+    }
+
+    #[tokio::test]
+    async fn public_port_helpers_use_advertised_installation_urls() {
+        for (template, host, mcp_url) in [
+            (
+                "https://p{port}-token.sandbox.watasuhost.com",
+                "p8000-token.sandbox.watasuhost.com",
+                "https://p50005-token.sandbox.watasuhost.com/mcp",
+            ),
+            (
+                "http://p{port}-token.preview.example.org:8080",
+                "p8000-token.preview.example.org:8080",
+                "http://p50005-token.preview.example.org:8080/mcp",
+            ),
+        ] {
+            let sandbox = sandbox_with_public_url(Some(template), None);
+            assert_eq!(sandbox.get_host(8000).await.expect("port host"), host);
+            assert_eq!(sandbox.get_mcp_url().await.expect("MCP URL"), mcp_url);
+        }
+    }
+
+    #[tokio::test]
+    async fn sandbox_url_override_preserves_advertised_public_urls() {
+        let sandbox = sandbox_with_public_url(
+            Some("http://p{port}-token.preview.example.org:8080"),
+            Some("http://localhost:49983"),
+        );
+        assert_eq!(
+            sandbox.get_host(8000).await.expect("port host"),
+            "p8000-token.preview.example.org:8080"
+        );
+        assert_eq!(
+            sandbox.get_mcp_url().await.expect("MCP URL"),
+            "http://p50005-token.preview.example.org:8080/mcp"
+        );
+    }
+
+    #[tokio::test]
+    async fn public_port_helpers_reject_unusable_advertised_urls() {
+        for template in [
+            None,
+            Some("https://preview.example.org"),
+            Some("ftp://p{port}.example.org"),
+            Some("https://user:secret@p{port}.example.org"),
+            Some("https://p{port}.example.org:70000"),
+        ] {
+            let sandbox = sandbox_with_public_url(template, None);
+            assert!(matches!(
+                sandbox.get_host(8000).await,
+                Err(crate::Error::Sandbox(message)) if message.contains("public port URL template")
+            ));
+        }
+        let sandbox = sandbox_with_public_url(Some("https://p{port}.example.org"), None);
+        assert!(matches!(
+            sandbox.get_host(0).await,
+            Err(crate::Error::InvalidArgument(_))
+        ));
+    }
 
     #[test]
     fn runtime_base64_helpers_match_protocol() {

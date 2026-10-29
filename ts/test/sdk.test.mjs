@@ -748,37 +748,39 @@ test('sandbox construction requires a session', () => {
   )
 })
 
-test('sandbox getHost is sync', () => {
+test('sandbox getHost synchronously uses the advertised hosted URL template', () => {
   const sbx = new Sandbox({
     sandboxId: '1',
     connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
     session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
-    sandbox: { route_token: 'route-token' },
+    sandbox: { public_port_url_template: 'https://p{port}-route-token.sandbox.watasuhost.com' },
   })
 
   assert.equal(sbx.getHost(3000), 'p3000-route-token.sandbox.watasuhost.com')
 })
 
-test('sandbox getHost accepts camel-case route token', () => {
+test('sandbox preview and MCP URLs use the on-prem scheme, domain and gateway port', () => {
   const sbx = new Sandbox({
     sandboxId: '1',
-    connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
-    session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
-    sandbox: { routeToken: 'camel-token' },
+    connectionConfig: new ConnectionConfig({ apiKey: 'key', apiUrl: 'http://control.example.org:8080' }),
+    session: { data_plane_url: 'http://control.example.org:8080', token: 'data' },
+    sandbox: { public_port_url_template: 'http://p{port}-local-route.preview.example.org:8080' },
   })
 
-  assert.equal(sbx.getHost(3000), 'p3000-camel-token.sandbox.watasuhost.com')
+  assert.equal(sbx.getHost(3000), 'p3000-local-route.preview.example.org:8080')
+  assert.equal(sbx.getMcpUrl(), 'http://p50005-local-route.preview.example.org:8080/mcp')
 })
 
-test('sandbox getHost derives route token from data-plane URL', () => {
+test('sandbox preview URLs validate the exposed port range', () => {
   const sbx = new Sandbox({
     sandboxId: '1',
     connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
     session: { data_plane_url: 'https://derived-token.sandbox.watasuhost.com', token: 'data' },
-    sandbox: {},
+    sandbox: { public_port_url_template: 'https://p{port}-route.preview.example.org' },
   })
 
-  assert.equal(sbx.getHost(3000), 'p3000-derived-token.sandbox.watasuhost.com')
+  for (const port of [0, 65_536, 3.5]) assert.throws(() => sbx.getHost(port), /port must be/)
+  assert.equal(sbx.getHost(443), 'p443-route.preview.example.org')
 })
 
 test('sandboxUrl overrides the data-plane URL without changing public hosts', () => {
@@ -789,10 +791,22 @@ test('sandboxUrl overrides the data-plane URL without changing public hosts', ()
       sandboxUrl: 'http://localhost:49983',
     }),
     session: { data_plane_url: 'https://remote-token.sandbox.watasuhost.com', token: 'data' },
-    sandbox: { route_token: 'remote-token' },
+    sandbox: { public_port_url_template: 'https://p{port}-remote-token.sandbox.watasuhost.com' },
   })
 
   assert.equal(sbx.getHost(3000), 'p3000-remote-token.sandbox.watasuhost.com')
+})
+
+test('sandbox preview URLs require an HTTP origin without embedded credentials', () => {
+  for (const template of ['ftp://p{port}.example.org', 'https://user:secret@p{port}.example.org']) {
+    const sbx = new Sandbox({
+      sandboxId: '1',
+      connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
+      session: { data_plane_url: 'https://control.example.org', token: 'data' },
+      sandbox: { public_port_url_template: template },
+    })
+    assert.throws(() => sbx.getHost(3000), /invalid public port URL template/)
+  }
 })
 
 test('sandbox exposes helper modules without destroying local state', () => {
@@ -800,7 +814,7 @@ test('sandbox exposes helper modules without destroying local state', () => {
     sandboxId: '1',
     connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
     session: { data_plane_url: 'https://derived-token.sandbox.watasuhost.com', token: 'data' },
-    sandbox: { route_token: 'derived-token' },
+    sandbox: { public_port_url_template: 'https://p{port}-derived-token.sandbox.watasuhost.com' },
   })
 
   assert.equal(sbx.id, '1')
@@ -1903,7 +1917,7 @@ test('sandbox pause and resume use lifecycle routes', async () => {
       sandboxId: 'existing',
       connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
       session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
-      sandbox: { route_token: 'route-token' },
+      sandbox: { route_token: 'route-token', public_port_url_template: 'https://p{port}-route-token.sandbox.watasuhost.com' },
     })
 
     assert.equal(await sbx.betaPause(), true)
@@ -1950,7 +1964,7 @@ test('sandbox isRunning reflects control-plane state', async () => {
       sandboxId: '1',
       connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
       session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
-      sandbox: { route_token: 'route-token' },
+      sandbox: { route_token: 'route-token', public_port_url_template: 'https://p{port}-route-token.sandbox.watasuhost.com' },
     })
 
     assert.equal(await sbx.isRunning(), true)
@@ -2018,6 +2032,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
               envd_version: '0.6.3',
               allow_internet_access: true,
               sandbox_domain: 'sandbox.watasuhost.com',
+              public_port_url_template: 'https://p{port}-route-token.sandbox.watasuhost.com',
               network: { allow_internet_access: true },
               started_at: '2026-01-01T00:00:00Z',
               end_at: '2026-01-01T00:05:00Z',
@@ -2052,7 +2067,7 @@ test('sandbox metrics and snapshots use supported control-plane routes', async (
       sandboxId: '1',
       connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
       session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
-      sandbox: { route_token: 'route-token' },
+      sandbox: { route_token: 'route-token', public_port_url_template: 'https://p{port}-route-token.sandbox.watasuhost.com' },
     })
 
     const metrics = await sbx.getMetrics({
@@ -2452,7 +2467,7 @@ test('git helper uses data-plane git routes', async () => {
       sandboxId: '1',
       connectionConfig: new ConnectionConfig({ apiKey: 'key' }),
       session: { data_plane_url: 'https://route.sandbox.watasuhost.com', token: 'data' },
-      sandbox: { route_token: 'route-token' },
+      sandbox: { route_token: 'route-token', public_port_url_template: 'https://p{port}-route-token.sandbox.watasuhost.com' },
     })
 
     const clone = await sbx.git.clone('https://git.example/repo.git', { path: '/workspace/repo', branch: 'main', depth: 1, envs: { GIT_TRACE: '1' }, user: 'sandbox', cwd: '/workspace', timeoutMs: 10_000 })

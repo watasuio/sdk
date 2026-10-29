@@ -1264,59 +1264,99 @@ def test_data_plane_client_uses_sandbox_headers():
     }
 
 
-def test_get_host_returns_host_only():
-    config = ConnectionConfig(api_key="key")
-    calls = []
-
-    class Control:
-        def get(self, path, **kwargs):
-            calls.append(path)
-            return {
-                "sandbox_port": {"url": "https://p8000-token.sandbox.watasuhost.com"}
-            }
-
-    sbx = Sandbox(
+@pytest.mark.parametrize("sandbox_class", [Sandbox, AsyncSandbox])
+@pytest.mark.parametrize(
+    "origin,template,expected_host,expected_mcp",
+    [
+        (
+            "https://token.sandbox.watasuhost.com",
+            "https://p{port}-token.sandbox.watasuhost.com",
+            "p8000-token.sandbox.watasuhost.com",
+            "https://p50005-token.sandbox.watasuhost.com/mcp",
+        ),
+        (
+            "http://control.example.org:8080",
+            "http://p{port}-token.preview.example.org:8080",
+            "p8000-token.preview.example.org:8080",
+            "http://p50005-token.preview.example.org:8080/mcp",
+        ),
+    ],
+)
+def test_public_port_helpers_use_advertised_installation_urls(
+    sandbox_class, origin, template, expected_host, expected_mcp
+):
+    sync_sandbox = Sandbox(
         "123",
-        connection_config=config,
-        control=Control(),
+        connection_config=ConnectionConfig(api_key="key"),
         session={
-            "data_plane_url": "https://token.sandbox.watasuhost.com",
+            "data_plane_url": origin,
             "token": "data",
         },
-        sandbox={},
+        sandbox={"public_port_url_template": template},
+    )
+    sbx = (
+        sync_sandbox
+        if sandbox_class is Sandbox
+        else AsyncSandbox(sync_sandbox=sync_sandbox)
     )
 
-    assert sbx.get_host(8000) == "p8000-token.sandbox.watasuhost.com"
-    assert calls == ["/sandboxes/123/ports/8000"]
+    assert sbx.get_host(8000) == expected_host
+    assert sbx.get_mcp_url() == expected_mcp
 
 
 def test_sandbox_url_override_replaces_data_plane_url_without_changing_public_hosts():
     config = ConnectionConfig(api_key="key", sandbox_url="http://localhost:49983")
-    calls = []
-
-    class Control:
-        def get(self, path, **kwargs):
-            calls.append(path)
-            return {
-                "sandbox_port": {"url": "https://p8000-token.sandbox.watasuhost.com"}
-            }
 
     sbx = Sandbox(
         "123",
         connection_config=config,
-        control=Control(),
         session={
             "data_plane_url": "https://token.sandbox.watasuhost.com",
             "token": "data",
         },
-        sandbox={},
+        sandbox={
+            "public_port_url_template": "http://p{port}-token.preview.example.org:8080"
+        },
     )
 
     assert sbx.envd_api_url == "http://localhost:49983"
     assert sbx.envd_direct_url == "http://localhost:49983"
     assert sbx._require_data_plane().base_url == "http://localhost:49983"
-    assert sbx.get_host(8000) == "p8000-token.sandbox.watasuhost.com"
-    assert calls == ["/sandboxes/123/ports/8000"]
+    assert sbx.get_host(8000) == "p8000-token.preview.example.org:8080"
+    assert sbx.get_mcp_url() == "http://p50005-token.preview.example.org:8080/mcp"
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        None,
+        "https://preview.example.org",
+        "ftp://p{port}.example.org",
+        "https://user:secret@p{port}.example.org",
+        "https://p{port}.example.org:70000",
+    ],
+)
+def test_public_port_helpers_reject_unusable_advertised_urls(template):
+    sbx = Sandbox(
+        "123",
+        connection_config=ConnectionConfig(api_key="key"),
+        session={"data_plane_url": "https://control.example.org", "token": "data"},
+        sandbox={"public_port_url_template": template},
+    )
+    with pytest.raises(SandboxException, match="public port URL template"):
+        sbx.get_host(8000)
+
+
+@pytest.mark.parametrize("port", [0, 65_536, 1.5, True])
+def test_public_port_helpers_validate_port_range(port):
+    sbx = Sandbox(
+        "123",
+        connection_config=ConnectionConfig(api_key="key"),
+        session={"data_plane_url": "https://control.example.org", "token": "data"},
+        sandbox={"public_port_url_template": "https://p{port}.preview.example.org"},
+    )
+    with pytest.raises(SandboxException, match="port must be an integer"):
+        sbx.get_host(port)
 
 
 def test_filesystem_maps_watasu_file_entries():
@@ -2690,18 +2730,7 @@ def test_sandbox_context_manager_kills_on_exit(monkeypatch):
     assert killed == [("123", {})]
 
 
-def test_sandbox_mcp_helpers_use_exposed_port_and_gateway_token():
-    calls = []
-
-    class FakeControl:
-        def get(self, path, **kwargs):
-            calls.append(("control", path, kwargs))
-            return {
-                "sandbox_port": {
-                    "url": "https://p50005-token.sandbox.watasuhost.com"
-                }
-            }
-
+def test_sandbox_mcp_helpers_use_advertised_port_and_gateway_token():
     class FakeFiles:
         def __init__(self):
             self.calls = []
@@ -2714,12 +2743,13 @@ def test_sandbox_mcp_helpers_use_exposed_port_and_gateway_token():
     sbx = Sandbox(
         "123",
         connection_config=ConnectionConfig(api_key="key"),
-        control=FakeControl(),
         session={
             "data_plane_url": "https://route.sandbox.watasuhost.com",
             "token": "data",
         },
-        sandbox={},
+        sandbox={
+            "public_port_url_template": "https://p{port}-token.sandbox.watasuhost.com"
+        },
     )
     sbx._filesystem = files
 
